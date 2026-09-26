@@ -740,6 +740,24 @@ def _run_one_platform(name: str, run_id: str, out_dir: Path, *, mode: str, max_c
             click.echo(f"run: {name}: {result.category} -- leaving PR/MR {pr.url} open for inspection", err=True)
 
         return result
+    except (SystemExit, KeyboardInterrupt):
+        # The in-process signal handler (_install_signal_handlers) can
+        # interrupt execution at any point inside this try block, attempt
+        # its own close()/delete_branch() against _opened_prs, and then
+        # call sys.exit() (raising SystemExit) -- that unwinds right
+        # through here. Without this except, the bare `finally` below
+        # would stamp "left_open" over that exit unconditionally, even
+        # when the handler's own cleanup attempt failed or didn't finish
+        # (its own close()/delete_branch() calls can themselves fail, and
+        # it only logs that, it doesn't distinguish success from failure
+        # to its caller). "left_open" tells e2e.yml's `if: cancelled()`
+        # cleanup fallback step to SKIP this entry -- exactly backwards
+        # for the one case that fallback step exists to catch: an
+        # in-process cleanup that didn't finish before the runner's cancel
+        # grace period expired. Leaving it genuinely unresolved here lets
+        # that fallback step actually retry it.
+        leave_genuinely_unresolved = True
+        raise
     finally:
         if not leave_genuinely_unresolved:
             _resolve_opened(out_dir, name, "left_open")
