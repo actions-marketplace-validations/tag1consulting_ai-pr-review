@@ -718,7 +718,14 @@ def _run_one_platform(name: str, run_id: str, out_dir: Path, *, mode: str, max_c
                 adapter.delete_branch(pr.branch)
                 click.echo(f"run: {name}: pass -- closed PR/MR {pr.url} and deleted branch {pr.branch}")
                 _resolve_opened(out_dir, name, "closed")
-            except AdapterError as exc:
+            except Exception as exc:  # noqa: BLE001 - any failure here must set
+                # leave_genuinely_unresolved, not just AdapterError (the only
+                # kind close()/delete_branch() are documented to raise): an
+                # unexpected exception type must not silently fall through
+                # to the enclosing `finally` and get mislabeled "left_open",
+                # which would tell `cleanup` to skip retrying a close/
+                # delete-branch failure it should still retry.
+                #
                 # A cleanup failure on the pass path is itself an infra
                 # failure per the exit-code contract. Left unresolved in
                 # opened.json (neither "closed" nor "left_open" cleanly
