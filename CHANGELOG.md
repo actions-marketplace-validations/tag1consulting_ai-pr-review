@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.16.0] - 2026-09-27
+
 ### Added
 
 - **`run_e2e.py` gains a `deep-preflight` subcommand** (issue #956), replacing the inline bash re-implementation of the harness's own auth logic that previously lived in `e2e.yml`'s weekly credential-check job. Calls directly into `_clone_auth_env`/`_github_reviewer_token`/`PLATFORMS` instead of duplicating them, so this check can no longer silently drift from what a real run actually does, and the logic is unit-tested alongside the rest of the module.

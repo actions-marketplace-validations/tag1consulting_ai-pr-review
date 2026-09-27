@@ -68,6 +68,12 @@ jobs:
 
 That's it — reviews start firing on the next PR.
 
+## What's new in v2.16.0
+
+**A `deep-preflight` subcommand replaces the weekly credential check's inline bash re-implementation of the e2e harness's own auth logic**, calling directly into the same `_clone_auth_env`/`_github_reviewer_token`/`PLATFORMS` a real run uses, so the check can never silently drift from actual behavior (issue #956). Also fixes three smaller e2e-harness gaps surfaced as follow-ups from v2.15.0's review: `opened.json` entries are now matched by `(platform, number)` instead of platform name alone, so a stale entry from a reused `--out-dir` can't be marked resolved by mistake (#958); orphan-branch cleanup failures are now recorded durably in a JSON-lines log, not just in the job log (#957); and the resolution control flow added in v2.15.0 now has direct unit test coverage (#959).
+
+See [Version History → v2.16.0](version-history/v2.16.0) for details.
+
 ## What's new in v2.15.0
 
 **A deterministic Python e2e test harness replaces the old LLM-orchestrated e2e script.** It opens throwaway PRs/MRs on the real GitHub/GitLab/Bitbucket test repos, runs the built review container against them, and verifies the posted output with plain code (telemetry JSON, fetched comments/annotations) instead of asking an LLM to eyeball shell output. Live-run end to end against all three platforms at least once each, including together in a single 3-platform `workflow_dispatch` run: GitLab and Bitbucket each passed cleanly; GitHub's runs correctly exercise every check but don't currently pass cleanly, since its seeder and reviewer identities are still the same personal token (a real, current gap, not a harness bug — see the version history for detail). The test suite's lint/type/test job is also now a required branch-protection check on `main`, alongside the existing AI review check — it already ran on every PR, but wasn't required, so a PR with failing tests could previously still merge.
@@ -79,12 +85,6 @@ See [Version History → v2.15.0](version-history/v2.15.0) for details.
 **Bitbucket no longer accumulates a duplicate reply comment on every pipeline run when a verdict-command reply keeps failing to save.** A permanently-failing feedback-store write (most commonly a token missing the `Repository:Write` scope) or a repeatedly-degraded permission check used to re-derive and re-post the identical "not saved"/"could not verify" reply forever. Every reply now carries a stable outcome key hashed into a hidden marker, so a later run skips one already present under the same comment and posts a fresh one automatically once the outcome changes, for example once the token scope is fixed. The feedback-store backend also stops attempting further writes for the rest of a run after its first 401/403, so a misconfigured token produces one warning per run instead of repeating the same doomed request for every pending comment (issue #941, the fast-follow left open from v2.14.0).
 
 See [Version History → v2.14.1](version-history/v2.14.1) for details.
-
-## What's new in v2.14.0
-
-**Bitbucket's learning-loop store is no longer a stub.** A `false-positive`/`wont-fix` verdict now persists a `FeedbackEntry` to the same `.ai-pr-review/learnings.jsonl` file GitHub already uses, feeding future review prompts the same way on both providers — opt-in via `AI_FEEDBACK_LOOP` + `AI_BITBUCKET_VERDICTS`, and requires a **Repository:Write** scope bump on the Bitbucket API token (issue #906). The underlying store was split into a provider-neutral core plus per-provider backends so GitHub and Bitbucket share the same retry/dedup/retention logic. Two follow-up passes — a post-merge retrospective review and a pre-tag release-gate review — found and fixed several real issues before this release shipped: a failed feedback-store write during verdict polling was silently acked instead of retried, a stale duplicate env-var parser was removed, a docstring was corrected to stop overclaiming untested retry behavior, and a missing integration test covering the full store-construction-to-persistence chain was added. A separate, unrelated bug surfaced live during this release's own e2e validation: Bitbucket Code Insights annotation posting could fail on a long finding because the annotation `summary` field's byte limit was set to 2000 instead of Bitbucket's real 450-character cap — now fixed.
-
-See [Version History → v2.14.0](version-history/v2.14.0) for details.
 
 ## Learn more
 
