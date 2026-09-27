@@ -16,9 +16,12 @@ needs no local git credentials or working tree.
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import re
 import time
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Protocol
 
 import httpx
@@ -32,6 +35,33 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+# A durable, cross-run record of orphan-branch cleanup failures -- see
+# _delete_branch_best_effort. Logging alone (the only record before this)
+# leaves no tooling-visible trace once the job log rotates out of easy
+# reach; this file is the structured artifact issue #957 asked for.
+# Gitignored (tests/e2e/.gitignore's tests/e2e/.runs/ entry already covers
+# it) since it's local run state, not source.
+_ORPHAN_LOG_PATH = Path(__file__).resolve().parent.parent / ".runs" / "orphan-branches.jsonl"
+
+
+def _record_orphan_branch(platform: str, branch: str, error: str) -> None:
+    """Append one JSON line recording a branch this run failed to clean up.
+    Best-effort: a failure to write this log must never mask the original
+    cleanup failure it's trying to record, so any error here is itself
+    only logged, never raised."""
+    try:
+        _ORPHAN_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "platform": platform,
+            "branch": branch,
+            "error": error,
+        }
+        with _ORPHAN_LOG_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry) + "\n")
+    except OSError as exc:
+        logger.warning("_record_orphan_branch: failed to write %s: %s", _ORPHAN_LOG_PATH, exc)
 
 _TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
 _MAX_RETRIES = 4
@@ -234,8 +264,10 @@ class _BaseAdapter:
         try:
             self.delete_branch(branch)
         except AdapterError as exc:
+            masked = mask(str(exc))
             logger.warning("%s: could not clean up orphan branch %s: %s",
-                            self.config.name, branch, mask(str(exc)))
+                            self.config.name, branch, masked)
+            _record_orphan_branch(self.config.name, branch, masked)
 
 
 class GitHubAdapter(_BaseAdapter):
