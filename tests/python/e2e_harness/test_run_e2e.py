@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 
+import httpx
 import pytest
 from click.testing import CliRunner
 
@@ -25,6 +26,7 @@ from tests.e2e.run_e2e import (
     _redact_known_values_in_file,
     _resolve_opened,
     cleanup,
+    deep_preflight,
 )
 
 # --- _atomic_write_json ----------------------------------------------------------
@@ -205,7 +207,7 @@ def test_record_opened_discards_corrupt_file_instead_of_crashing(tmp_path: Path)
 def test_resolve_opened_marks_matching_entry(tmp_path: Path):
     _record_opened(tmp_path, "github", _pr("github", 1))
     _record_opened(tmp_path, "gitlab", _pr("gitlab", 2))
-    _resolve_opened(tmp_path, "github", "closed")
+    _resolve_opened(tmp_path, "github", 1, "closed")
     entries = json.loads((tmp_path / "opened.json").read_text(encoding="utf-8"))
     by_platform = {e["platform"]: e for e in entries}
     assert by_platform["github"]["resolution"] == "closed"
@@ -214,15 +216,32 @@ def test_resolve_opened_marks_matching_entry(tmp_path: Path):
 
 def test_resolve_opened_never_overwrites_existing_resolution(tmp_path: Path):
     _record_opened(tmp_path, "github", _pr("github", 1))
-    _resolve_opened(tmp_path, "github", "left_open")
-    _resolve_opened(tmp_path, "github", "closed")  # must not clobber the first decision
+    _resolve_opened(tmp_path, "github", 1, "left_open")
+    _resolve_opened(tmp_path, "github", 1, "closed")  # must not clobber the first decision
     entries = json.loads((tmp_path / "opened.json").read_text(encoding="utf-8"))
     assert entries[0]["resolution"] == "left_open"
 
 
 def test_resolve_opened_missing_file_is_a_noop(tmp_path: Path):
-    _resolve_opened(tmp_path, "github", "closed")  # must not raise
+    _resolve_opened(tmp_path, "github", 1, "closed")  # must not raise
     assert not (tmp_path / "opened.json").exists()
+
+
+def test_resolve_opened_does_not_touch_stale_entry_for_same_platform_different_number(tmp_path: Path):
+    # Regression test (issue #958): opened.json's out_dir could in
+    # principle be reused across separate runs (e.g. a manually specified
+    # --out-dir), leaving a stale entry from a PRIOR run for the same
+    # platform. Matching by platform name alone would have marked that
+    # stale entry resolved too, telling `cleanup` to skip a PR that was
+    # never actually closed. Matching by (platform, number) must leave the
+    # stale entry (a different PR number) untouched.
+    _record_opened(tmp_path, "github", _pr("github", 99))  # stale, from a prior run
+    _record_opened(tmp_path, "github", _pr("github", 1))   # this run's own entry
+    _resolve_opened(tmp_path, "github", 1, "closed")
+    entries = json.loads((tmp_path / "opened.json").read_text(encoding="utf-8"))
+    by_number = {e["number"]: e for e in entries}
+    assert by_number[1]["resolution"] == "closed"
+    assert "resolution" not in by_number[99]
 
 
 # --- cleanup subcommand ----------------------------------------------------------
@@ -298,3 +317,114 @@ def test_cleanup_reports_failure_when_close_succeeds_but_delete_fails(tmp_path: 
     result = CliRunner().invoke(cleanup, ["--from-file", str(opened_file)])
     assert result.exit_code != 0
     assert stub.closed == [42]  # close DID succeed before delete_branch failed
+
+
+# --- deep-preflight subcommand -----------------------------------------------------
+
+def _set_deep_preflight_env(monkeypatch) -> None:
+    monkeypatch.setenv("E2E_GITHUB_TOKEN", "seeder-tok")
+    monkeypatch.setenv("E2E_GITHUB_REVIEWER_TOKEN", "reviewer-tok")
+    monkeypatch.setenv("E2E_GITLAB_TOKEN", "gitlab-tok")
+    monkeypatch.setenv("E2E_BITBUCKET_TOKEN", "bitbucket-tok")
+    monkeypatch.setenv("E2E_ANTHROPIC_API_KEY", "anthropic-tok")
+
+
+def _ok_httpx_get(url: str, **_kwargs: object) -> httpx.Response:
+    if url == "https://api.github.com/user":
+        return httpx.Response(200, json={})
+    if "repos/" in url:
+        return httpx.Response(200, json={"permissions": {"push": True}})
+    if url == "https://api.anthropic.com/v1/models":
+        return httpx.Response(200, json={})
+    raise AssertionError(f"unexpected URL: {url}")
+
+
+def test_deep_preflight_passes_when_everything_ok(monkeypatch):
+    _set_deep_preflight_env(monkeypatch)
+    monkeypatch.setattr("tests.e2e.run_e2e.httpx.get", _ok_httpx_get)
+    monkeypatch.setattr("tests.e2e.run_e2e._run_git", lambda argv, **kwargs: "")
+    result = CliRunner().invoke(deep_preflight, [])
+    assert result.exit_code == 0
+
+
+def test_deep_preflight_fails_when_reviewer_token_invalid(monkeypatch):
+    _set_deep_preflight_env(monkeypatch)
+
+    def fake_get(url: str, **kwargs: object) -> httpx.Response:
+        if url == "https://api.github.com/user":
+            return httpx.Response(401, json={})
+        return _ok_httpx_get(url, **kwargs)
+
+    monkeypatch.setattr("tests.e2e.run_e2e.httpx.get", fake_get)
+    monkeypatch.setattr("tests.e2e.run_e2e._run_git", lambda argv, **kwargs: "")
+    result = CliRunner().invoke(deep_preflight, [])
+    assert result.exit_code != 0
+    assert "E2E_GITHUB_REVIEWER_TOKEN" in result.output
+
+
+def test_deep_preflight_fails_when_seeder_lacks_push_permission(monkeypatch):
+    _set_deep_preflight_env(monkeypatch)
+
+    def fake_get(url: str, **kwargs: object) -> httpx.Response:
+        if "repos/" in url:
+            return httpx.Response(200, json={"permissions": {"push": False}})
+        return _ok_httpx_get(url, **kwargs)
+
+    monkeypatch.setattr("tests.e2e.run_e2e.httpx.get", fake_get)
+    monkeypatch.setattr("tests.e2e.run_e2e._run_git", lambda argv, **kwargs: "")
+    result = CliRunner().invoke(deep_preflight, [])
+    assert result.exit_code != 0
+    assert "push access" in result.output
+
+
+def test_deep_preflight_fails_when_clone_auth_fails(monkeypatch):
+    from tests.e2e.verify import InfraFailure
+
+    _set_deep_preflight_env(monkeypatch)
+    monkeypatch.setattr("tests.e2e.run_e2e.httpx.get", _ok_httpx_get)
+
+    def fake_run_git(argv: list[str], **kwargs: object) -> str:
+        if "gitlab.com" in argv[1]:
+            raise InfraFailure("git ls-remote failed: authentication failed")
+        return ""
+
+    monkeypatch.setattr("tests.e2e.run_e2e._run_git", fake_run_git)
+    result = CliRunner().invoke(deep_preflight, [])
+    assert result.exit_code != 0
+    assert "gitlab" in result.output
+
+
+def test_deep_preflight_fails_when_llm_key_invalid(monkeypatch):
+    _set_deep_preflight_env(monkeypatch)
+
+    def fake_get(url: str, **kwargs: object) -> httpx.Response:
+        if url == "https://api.anthropic.com/v1/models":
+            return httpx.Response(401, json={})
+        return _ok_httpx_get(url, **kwargs)
+
+    monkeypatch.setattr("tests.e2e.run_e2e.httpx.get", fake_get)
+    monkeypatch.setattr("tests.e2e.run_e2e._run_git", lambda argv, **kwargs: "")
+    result = CliRunner().invoke(deep_preflight, [])
+    assert result.exit_code != 0
+    assert "AI_REVIEW_API_KEY" in result.output
+
+
+def test_deep_preflight_reviewer_token_falls_back_to_seeder_when_unset(monkeypatch):
+    monkeypatch.setenv("E2E_GITHUB_TOKEN", "seeder-tok")
+    monkeypatch.delenv("E2E_GITHUB_REVIEWER_TOKEN", raising=False)
+    monkeypatch.setenv("E2E_GITLAB_TOKEN", "gitlab-tok")
+    monkeypatch.setenv("E2E_BITBUCKET_TOKEN", "bitbucket-tok")
+    monkeypatch.setenv("E2E_ANTHROPIC_API_KEY", "anthropic-tok")
+
+    seen_auth_headers = []
+
+    def fake_get(url: str, headers: dict[str, str] | None = None, **kwargs: object) -> httpx.Response:
+        if url == "https://api.github.com/user":
+            seen_auth_headers.append((headers or {}).get("Authorization"))
+        return _ok_httpx_get(url, headers=headers, **kwargs)
+
+    monkeypatch.setattr("tests.e2e.run_e2e.httpx.get", fake_get)
+    monkeypatch.setattr("tests.e2e.run_e2e._run_git", lambda argv, **kwargs: "")
+    result = CliRunner().invoke(deep_preflight, [])
+    assert result.exit_code == 0
+    assert seen_auth_headers == ["Bearer seeder-tok"]

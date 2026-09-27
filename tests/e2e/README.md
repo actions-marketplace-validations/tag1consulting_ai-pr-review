@@ -10,7 +10,9 @@ Deterministic Python replacement for the old ~815-line LLM-orchestrated e2e scri
 
 - `plan --platforms ... [--profile release]`: offline validation only, no network calls. `--profile release` requires exactly `{github, gitlab, bitbucket}`.
 - `preflight --platforms ...`: verifies token and repo access per platform. No LLM calls, no writes.
+- `deep-preflight`: checks that `preflight` doesn't cover -- a reviewer-token API call, the seeder token's push permission, git-over-HTTPS clone auth for all three platforms (via the same `_clone_auth_env` a real run uses), and a model-agnostic LLM-key probe. Used by `e2e.yml`'s weekly credential-check job.
 - `run --platforms ... [--mode full|quick] [--out-dir DIR] [--max-cost-usd N]`: the real thing. See below.
+- `cleanup --from-file <path>`: see "Cleanup policy" below.
 
 ## Exit codes
 
@@ -32,9 +34,11 @@ Deterministic Python replacement for the old ~815-line LLM-orchestrated e2e scri
 
 On pass, the harness closes the PR/MR and deletes its branch by API, confirming each step. On any failure (product or infra), everything is left open, deliberately: there is no janitor. This is so a failed run stays available for debugging; nothing else cleans it up. A cancelled run (SIGINT/SIGTERM) closes only the PR/MR it opened, since a cancelled run has nothing worth debugging.
 
-Every opened PR/MR is also recorded durably in `<out_dir>/opened.json` (one entry per platform: `platform`, `number`, `branch`, `url`, plus a `resolution` field -- `"closed"` or `"left_open"` -- once that platform's fate is decided). This is the record the in-process signal handler above can't fully rely on alone: its network calls can take longer to complete than a CI runner's cancel grace period, especially if a SIGINT is immediately followed by a SIGTERM. `e2e.yml`'s per-leg matrix job has an `if: cancelled()` fallback step that runs `python -m tests.e2e.run_e2e cleanup --from-file opened.json` against this same file to finish a stuck cleanup out-of-process.
+Every opened PR/MR is also recorded durably in `<out_dir>/opened.json` (one entry per platform: `platform`, `number`, `branch`, `url`, plus a `resolution` field -- `"closed"` or `"left_open"` -- once that platform's fate is decided). This is the record the in-process signal handler above can't fully rely on alone: its network calls can take longer to complete than a CI runner's cancel grace period, especially if a SIGINT is immediately followed by a SIGTERM. `e2e.yml`'s per-leg matrix job has an `if: cancelled()` fallback step that runs `python -m tests.e2e.run_e2e cleanup --from-file opened.json` against this same file to finish a stuck cleanup out-of-process. Entries are matched by `(platform, number)`, not platform name alone, so a stale entry left behind by a prior run reusing the same `--out-dir` can never be marked resolved by mistake.
 
 The `cleanup` subcommand (`cleanup --from-file <path>`) closes and deletes the branch for every entry in an `opened.json` file that does NOT already carry a `resolution` -- an entry already marked `"closed"` or `"left_open"` is skipped untouched, so this subcommand can never override a deliberate leave-open-on-failure decision (or double-close an already-closed PR) when invoked against a run's own file after that run already decided each platform's fate. It's also safe to run manually against any `opened.json` an operator wants to clean up by hand: close()/delete_branch() already tolerate an already-gone branch or PR/MR (404/422), so a repeat invocation is a harmless no-op. Exit code 0 on full success, 2 (`EXIT_INFRA_FAILURE`) if any entry's close or branch-delete call fails.
+
+A branch left orphaned when a run fails partway through (the branch was created but a later step, or that branch's own cleanup, then also fails) is logged, and also appended as one JSON line to `tests/e2e/.runs/orphan-branches.jsonl` (`{"timestamp", "platform", "branch", "error"}`), so accumulation is visible to tooling rather than only appearing in a job log an operator has to go looking for. Gitignored, like the rest of `tests/e2e/.runs/`.
 
 ## Cross-repo dependency: why the test repos' own CI doesn't double-review harness PRs
 

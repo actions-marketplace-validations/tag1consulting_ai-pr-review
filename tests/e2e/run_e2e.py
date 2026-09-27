@@ -26,6 +26,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 import click
+import httpx
 
 from .config import (
     CONTAINER_TIMEOUT_SECONDS,
@@ -132,6 +133,76 @@ def preflight(platforms_raw: tuple[str, ...]) -> None:
             click.echo(f"preflight: {name}: FAILED: {exc}", err=True)
             failures.append(name)
     sys.exit(EXIT_INFRA_FAILURE if failures else EXIT_PASS)
+
+
+@cli.command(name="deep-preflight")
+def deep_preflight() -> None:
+    """Deeper credential/auth checks `preflight` doesn't cover: a
+    reviewer-token API call, the seeder token's push permission, git-over-
+    HTTPS clone auth for all three platforms, and a model-agnostic LLM-key
+    probe. `preflight` above only does a read-only `GET /repo` with the
+    seeder token -- it does not catch a dead reviewer token, a seeder token
+    that lost write access, broken git-over-HTTPS clone auth, or a dead/
+    exhausted LLM key.
+
+    Used by e2e.yml's weekly credential-check job. Previously this logic
+    was re-implemented directly in that workflow's inline bash (issue
+    #956): the per-provider clone username scheme, the GIT_CONFIG_*
+    Basic-auth header injection, the reviewer-token fallback rule, and all
+    three repo URLs were all duplicated there with only a comment (not
+    enforcement) keeping them in sync with `_clone_auth_env`/
+    `_github_reviewer_token`/`PLATFORMS`. This subcommand calls those same
+    functions directly instead, so a change to any of them is
+    automatically reflected here with no separate bash edit needed, and
+    the logic is unit-testable alongside the rest of this module.
+    """
+    fail = False
+
+    reviewer_token = _github_reviewer_token()
+    resp = httpx.get(
+        "https://api.github.com/user",
+        headers={"Authorization": f"Bearer {reviewer_token}"}, timeout=30,
+    )
+    if resp.status_code != 200:
+        click.echo("::error::E2E_GITHUB_REVIEWER_TOKEN (or its E2E_GITHUB_TOKEN fallback) "
+                   "failed a basic authenticated GitHub API call.")
+        fail = True
+
+    seeder_token = os.environ.get("E2E_GITHUB_TOKEN", "")
+    resp = httpx.get(
+        f"https://api.github.com/repos/{PLATFORMS['github'].repo_slug}",
+        headers={"Authorization": f"Bearer {seeder_token}"}, timeout=30,
+    )
+    if resp.status_code != 200 or not resp.json().get("permissions", {}).get("push"):
+        click.echo("::error::E2E_GITHUB_TOKEN no longer has push access to the GitHub test repo.")
+        fail = True
+
+    # Git-over-HTTPS clone auth for each provider, via the harness's own
+    # _clone_auth_env -- the exact same GIT_CONFIG_*-based Basic-auth
+    # header injection and per-provider username scheme _clone_workspace
+    # uses for a real run, so this can never silently drift from it.
+    for platform in ("github", "gitlab", "bitbucket"):
+        url, extra_env = _clone_auth_env(platform)
+        try:
+            _run_git(["ls-remote", url, "HEAD"], extra_env=extra_env)
+        except InfraFailure as exc:
+            click.echo(f"::error::git clone auth failed for {platform}: {exc}")
+            fail = True
+
+    anthropic_key = os.environ.get("E2E_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+    # GET /v1/models is a free, model-agnostic auth check -- confirms the
+    # key is live/unexhausted without betting on one specific model id
+    # staying valid (a hardcoded probe model would false-fail this check
+    # the day that model is retired).
+    resp = httpx.get(
+        "https://api.anthropic.com/v1/models",
+        headers={"x-api-key": anthropic_key, "anthropic-version": "2023-06-01"}, timeout=30,
+    )
+    if resp.status_code != 200:
+        click.echo(f"::error::AI_REVIEW_API_KEY probe returned HTTP {resp.status_code} (expected 200).")
+        fail = True
+
+    sys.exit(EXIT_INFRA_FAILURE if fail else EXIT_PASS)
 
 
 @cli.command()
@@ -255,13 +326,21 @@ def _record_opened(out_dir: Path, platform: str, pr: PullRequest) -> None:
     _atomic_write_json(path, entries)
 
 
-def _resolve_opened(out_dir: Path, platform: str, resolution: str) -> None:
-    """Mark this run's opened.json entry for *platform* with its final
-    resolution ("closed" or "left_open"), so the `cleanup` subcommand (and
-    e2e.yml's cancel-on-signal fallback step, which invokes it against this
-    same file) knows this entry's fate is already decided and must not be
-    touched -- see `cleanup`'s own comment on why that matters for a
-    deliberately-left-open failure."""
+def _resolve_opened(out_dir: Path, platform: str, number: int, resolution: str) -> None:
+    """Mark this run's opened.json entry for *platform*/*number* with its
+    final resolution ("closed" or "left_open"), so the `cleanup` subcommand
+    (and e2e.yml's cancel-on-signal fallback step, which invokes it against
+    this same file) knows this entry's fate is already decided and must
+    not be touched -- see `cleanup`'s own comment on why that matters for a
+    deliberately-left-open failure.
+
+    Matched by (platform, number), not platform alone: opened.json's
+    out_dir is shared across every platform in one `run` invocation and
+    could in principle be reused across separate runs (e.g. a manually
+    specified --out-dir). Matching on platform alone would then mark EVERY
+    unresolved entry for that platform, including a stale one left behind
+    by a prior run in the same directory -- telling `cleanup` to skip a PR
+    that was never actually closed."""
     path = out_dir / "opened.json"
     if not path.exists():
         return
@@ -269,10 +348,10 @@ def _resolve_opened(out_dir: Path, platform: str, resolution: str) -> None:
         entries = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("_resolve_opened: %s is unreadable/corrupt (%s) -- cannot record "
-                        "%s's resolution", path, exc, platform)
+                        "%s #%d's resolution", path, exc, platform, number)
         return
     for entry in entries:
-        if entry.get("platform") == platform and "resolution" not in entry:
+        if entry.get("platform") == platform and entry.get("number") == number and "resolution" not in entry:
             entry["resolution"] = resolution
     _atomic_write_json(path, entries)
 
@@ -717,7 +796,7 @@ def _run_one_platform(name: str, run_id: str, out_dir: Path, *, mode: str, max_c
                 adapter.close(pr)
                 adapter.delete_branch(pr.branch)
                 click.echo(f"run: {name}: pass -- closed PR/MR {pr.url} and deleted branch {pr.branch}")
-                _resolve_opened(out_dir, name, "closed")
+                _resolve_opened(out_dir, name, pr.number, "closed")
             except Exception as exc:  # noqa: BLE001 - any failure here must set
                 # leave_genuinely_unresolved, not just AdapterError (the only
                 # kind close()/delete_branch() are documented to raise): an
@@ -760,7 +839,7 @@ def _run_one_platform(name: str, run_id: str, out_dir: Path, *, mode: str, max_c
         raise
     finally:
         if not leave_genuinely_unresolved:
-            _resolve_opened(out_dir, name, "left_open")
+            _resolve_opened(out_dir, name, pr.number, "left_open")
 
 
 @cli.command()

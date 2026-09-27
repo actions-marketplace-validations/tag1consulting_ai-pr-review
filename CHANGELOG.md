@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`run_e2e.py` gains a `deep-preflight` subcommand** (issue #956), replacing the inline bash re-implementation of the harness's own auth logic that previously lived in `e2e.yml`'s weekly credential-check job. Calls directly into `_clone_auth_env`/`_github_reviewer_token`/`PLATFORMS` instead of duplicating them, so this check can no longer silently drift from what a real run actually does, and the logic is unit-tested alongside the rest of the module.
+
+### Fixed
+
+- **`opened.json` entries are now matched by `(platform, number)`, not platform name alone** (issue #958). A stale entry left behind by a prior run reusing the same `--out-dir` could previously be marked resolved by mistake, telling `cleanup` to skip a PR that was never actually closed.
+- **Orphan-branch cleanup failures are now recorded durably**, not just logged (issue #957): each failure is appended as a JSON line to `tests/e2e/.runs/orphan-branches.jsonl`, so accumulation from a repeatedly-failing token or transient API issue is visible to tooling instead of only appearing in a job log.
+- **Added unit test coverage for `_run_one_platform`'s opened.json resolution control flow** (issue #959): the pass/verdict-failure/unexpected-exception/`SystemExit`/cleanup-failure-after-pass exit paths added across PR #954's F29/F33/F34 fixes previously had no direct test, only the standalone helper functions did.
+
 ## [2.15.0] - 2026-09-25
 
 ### Added
