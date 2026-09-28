@@ -369,8 +369,9 @@ jobs:
     # legitimate on-demand live-verification run on a non-release branch
     # (confirmed live, runs 36458317771/36459484206 both hard-failed the
     # matrix on "not allowed to deploy to e2e-live"). The real safety
-    # controls remain in place regardless: this job only ever runs via an
-    # explicit `workflow_dispatch` (never automatically on push/PR, see
+    # controls remain in place regardless: this job only runs for an eligible
+    # `release/*` PR (see the `eligibility` job) or an explicit
+    # `workflow_dispatch` (never automatically for any other PR or push, see
     # the `on:` trigger's own comment), and `max_cost_usd` caps spend per
     # run.
     strategy:

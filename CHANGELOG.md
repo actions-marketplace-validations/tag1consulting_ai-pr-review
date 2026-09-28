@@ -7,9 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.16.2] - 2026-09-28
+
 ### Changed
 
 - **`action.yml` is now ready for the GitHub Marketplace.** The action is renamed to `Tag1 Multi-Agent PR Review` (the Marketplace publish form rejected the previous name `AI PR Review` as not unique), the `description` is shortened to fewer than 125 characters (the explanatory note about the composite variant moved into YAML comments), a `branding` block is added with the `git-pull-request` icon on an orange background, and `author: Tag1 Consulting` is set. Inputs, outputs, and behavior are unchanged, and `uses: tag1consulting/ai-pr-review@...` references keep working because the repository name is unchanged.
+
+### Fixed
+
+- **A comment in `e2e.yml` no longer claims the live e2e job runs only via `workflow_dispatch`.** Since a push to a non-draft `release/*` PR started running it, that was stale. The comment now says the job runs for an eligible `release/*` PR or an explicit `workflow_dispatch`. Comment-only change, no behavior change.
+- **`docs/version-history.md` no longer says only the 10 most recent versions have their own page.** Every release from v2.8.0 onward has one, so the sentence now says that. The table also gains a row for v2.16.2.
 
 ## [2.16.1] - 2026-09-28
 
