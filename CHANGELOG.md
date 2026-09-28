@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The default Anthropic `standard` model is now `claude-sonnet-5-5`** (was `claude-sonnet-5`), at the same price ($2 / $10 per MTok, cache reads $0.20). `config/model-pricing.json` gets an explicit anchored `Sonnet 5.5` row, and the `Sonnet 5` pattern is anchored, so the token table labels the two correctly (before, `claude-sonnet-5-5` would have matched the unanchored `claude-sonnet-5` pattern and been labeled `Sonnet 5`). Temperature is still omitted and effort is still capped at `low` for it, carried over from Sonnet 5 through the shared `sonnet-5` check. The `bedrock-proxy` default is unchanged because the Bedrock model ID for Sonnet 5.5 is not verified. Anyone who wants the previous model can set `AI_MODEL_STANDARD=claude-sonnet-5`.
+
 ## [2.16.2] - 2026-09-28
 
 ### Changed

@@ -80,6 +80,10 @@ def resolve_temperature(raw: float, model_id: str) -> float | None:
         temperature=0.0     -> HTTP 400  "`temperature` is deprecated for this model."
         temperature=1.0     -> HTTP 200  (1.0 is the model's default, so a no-op)
 
+    claude-sonnet-5-5 is covered by the "sonnet-5" substring check below, on
+    Anthropic's own published model docs (non-default sampling values are a 400,
+    same as Sonnet 5), NOT yet live-verified against the real Messages API.
+
     claude-opus-5-5 is included below on Anthropic's own published model docs
     (sampling params removed, same as Opus 5/4.8/4.7), NOT yet live-verified
     against the real Messages API -- that verification is required before
@@ -133,6 +137,11 @@ def resolve_effort(model_id: str) -> str | None:
     timeout under real load. With effort="low": 67s wall time, 2,464 thinking
     tokens -- same mitigation as Sonnet 5, verified to actually work rather
     than assumed to carry over.
+
+    claude-sonnet-5-5 also matches the "sonnet-5" check below and so inherits the
+    "low" cap. Per Anthropic's docs its effort levels are recalibrated from Sonnet
+    5's (default still "high"), so "low" is a conservative carry-over that is NOT
+    yet live-verified as sufficient or as necessary for it.
 
     claude-opus-5-5 cannot disable thinking at all (per Anthropic's docs,
     unlike Opus 5 which could disable it below effort "xhigh"), and its

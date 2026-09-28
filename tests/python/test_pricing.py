@@ -591,3 +591,35 @@ def test_build_token_table_accordion_falls_back_to_roster_default() -> None:
     with _patch("ai_pr_review.pricing.load_pricing", return_value=_SAMPLE_PRICING):
         result = _reporting.build_token_table_accordion([ar], None, Path("."), effective_max_tokens=0)
     assert f"80 / {roster_cap}" in result
+
+
+def test_sonnet_5_5_priced_and_labeled_separately_from_sonnet_5() -> None:
+    """Regression lock: an unanchored "claude-sonnet-5" pattern also matches
+    claude-sonnet-5-5, so it would be labeled "Sonnet 5" in the token table (same
+    rates today, but any future price difference would be silently wrong)."""
+    pricing_data = load_pricing(str(_REAL_PRICING_FILE))
+    sonnet_5_5 = model_pricing("claude-sonnet-5-5", pricing_data)
+    sonnet_5 = model_pricing("claude-sonnet-5", pricing_data)
+    assert sonnet_5_5.display_name == "Sonnet 5.5"
+    assert sonnet_5_5.input_rate == 2000000
+    assert sonnet_5_5.output_rate == 10000000
+    assert sonnet_5_5.cache_read_rate == 200000
+    assert sonnet_5.display_name == "Sonnet 5"
+
+
+def test_sonnet_5_5_priced_separately_with_provider_prefix() -> None:
+    pricing_data = load_pricing(str(_REAL_PRICING_FILE))
+    assert model_pricing("us.anthropic.claude-sonnet-5-5", pricing_data).display_name == "Sonnet 5.5"
+    assert model_pricing("us.anthropic.claude-sonnet-5", pricing_data).display_name == "Sonnet 5"
+
+
+def test_sonnet_5_5_anchor_does_not_match_hypothetical_sibling() -> None:
+    """The Sonnet 5.5 patterns must be anchored like the Opus 5.5 ones, so a future
+    "claude-sonnet-5-50"-style id is not mis-priced as Sonnet 5.5."""
+    pricing_data = load_pricing(str(_REAL_PRICING_FILE))
+    assert model_pricing("claude-sonnet-5-50", pricing_data).display_name != "Sonnet 5.5"
+
+
+def test_sonnet_5_dated_snapshot_still_priced_as_sonnet_5() -> None:
+    pricing_data = load_pricing(str(_REAL_PRICING_FILE))
+    assert model_pricing("claude-sonnet-5-20260601", pricing_data).display_name == "Sonnet 5"
