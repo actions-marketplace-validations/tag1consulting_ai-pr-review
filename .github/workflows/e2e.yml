@@ -21,18 +21,17 @@ name: E2E Release Gate
 
 on:
   pull_request:
-    # `synchronize` IS included: e2e-gate is planned to become a required
-    # check (see CLAUDE.md's release process). A required check that never
+    # `synchronize` IS included: e2e-gate is a required check on main
+    # (see CLAUDE.md's release process). A required check that never
     # reports on a pushed SHA blocks merge forever ("Expected -- waiting for
-    # status"), for every PR in the repo, not just release ones. The
-    # eligibility/is_release logic below still refuses to run the expensive
-    # live legs (build+e2e) on a `synchronize` event even for a release/*
-    # branch -- only opened/reopened/ready_for_review and an explicit
-    # workflow_dispatch do that -- so a push still can't auto-fire a real,
-    # billed live run with no per-invocation confirmation. A push to a
-    # release/* PR gets a cheap, immediately-completing "skip" e2e-gate;
-    # re-running the live legs after a push still requires a deliberate
-    # workflow_dispatch.
+    # status"), for every PR in the repo, not just release ones. On a
+    # non-draft, same-repo release/* PR every event listed here (opened,
+    # synchronize, reopened, ready_for_review) runs the billed live legs on
+    # the PR's head SHA, so the required e2e-gate always reflects a live run
+    # of the SHA that would be merged. A newer push cancels the in-flight run
+    # (see `concurrency` below), so only the newest SHA finishes and bills.
+    # Any other PR, including a draft release/* PR, gets a cheap,
+    # immediately-completing pass.
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
@@ -61,28 +60,20 @@ on:
     - cron: '0 8 * * 1'
 
 concurrency:
-  # github.ref_name (bare branch/tag name), not github.ref (full ref path
-  # e.g. refs/heads/release/v2.15.0): a pull_request run's group key
-  # resolves via head_ref to "e2e-release/v2.15.0", but a workflow_dispatch
-  # on the identical branch previously resolved via github.ref to
-  # "e2e-refs/heads/release/v2.15.0" -- a different string, so the two
-  # never shared a group and could run (and bill) concurrently on the same
-  # SHA instead of one cancelling/queuing behind the other.
+  # One group per branch, split by trigger family. Pull request runs share
+  # `e2e-pr-<branch>`: a newer push cancels the in-flight run, so only the
+  # newest SHA finishes and bills. github.head_ref is the PR's source branch
+  # (bare name, e.g. release/v2.16.0).
   #
-  # A trailing "-sync"/"-live" suffix splits the group in two: a cheap,
-  # immediately-completing "skip" run (triggered by `synchronize`, which
-  # never runs the billed live legs -- see the trigger comment above) must
-  # never be able to cancel an in-flight expensive live run just because it
-  # shares the same branch. Without this split, a routine push made while a
-  # real workflow_dispatch/opened live run was still executing would cancel
-  # that live run via `cancel-in-progress`, silently discarding partial
-  # progress and its billed spend so far. Two "live" runs on the same
-  # branch (e.g. two workflow_dispatch runs back to back) still share one
-  # group and cancel each other, which is the desired, pre-existing
-  # resource-saving behavior for that case.
+  # workflow_dispatch and schedule runs use `e2e-manual-<ref>` instead, so a
+  # troubleshooting dispatch on a release branch can never cancel the
+  # in-flight pull request run that the required e2e-gate check depends on.
+  # The cost of that split is that a dispatch and a PR run can bill
+  # concurrently on the same SHA, which is acceptable for an occasional
+  # manual run. Two dispatches on the same ref still cancel each other.
   group: >-
-    e2e-${{ github.head_ref || github.ref_name }}-${{
-      (github.event_name == 'pull_request' && github.event.action == 'synchronize') && 'sync' || 'live'
+    e2e-${{ github.event_name == 'pull_request' && 'pr' || 'manual' }}-${{
+      github.head_ref || github.ref_name
     }}
   cancel-in-progress: true
 
@@ -125,7 +116,6 @@ jobs:
         id: check
         env:
           EVENT_NAME: ${{ github.event_name }}
-          EVENT_ACTION: ${{ github.event.action }}
           HEAD_REF: ${{ github.head_ref }}
           # github.head_ref is only populated for pull_request events; a
           # workflow_dispatch run has no PR context, so its "which branch is
@@ -148,16 +138,7 @@ jobs:
           fi
           echo "is_release_ref=${is_release_ref}" >> "$GITHUB_OUTPUT"
 
-          # A `synchronize` event (a push to an already-open PR) never sets
-          # is_release=true, even on a release/* branch -- see the `on:`
-          # block comment above for why. It still reaches this step and
-          # completes (with is_release=false, platforms_json=[]), which is
-          # what lets e2e-gate report a normal "skip" result on the new SHA
-          # instead of never running at all.
-          if [ "$EVENT_NAME" = "pull_request" ] && [ "$EVENT_ACTION" = "synchronize" ]; then
-            echo "is_release=false" >> "$GITHUB_OUTPUT"
-            echo "platforms_json=[]" >> "$GITHUB_OUTPUT"
-          elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             echo "is_release=true" >> "$GITHUB_OUTPUT"
             # Build the JSON array the `e2e` job's matrix consumes via
             # fromJSON(). Previously this input was declared but ignored --
@@ -189,11 +170,9 @@ jobs:
           IS_RELEASE_REF: ${{ steps.check.outputs.is_release_ref }}
         run: |
           # A workflow_dispatch targeting a release/* branch is held to the
-          # same full-triple requirement as the automatic PR trigger --
-          # otherwise, since `synchronize` no longer auto-reruns the gate,
-          # a single-platform manual dispatch would be the only way to
-          # refresh e2e-gate after a push, and it could green the gate
-          # having exercised only one of the three required platforms.
+          # same full-triple requirement as the automatic PR trigger, so a
+          # manual run on a release branch never validates fewer platforms
+          # than the required PR run does.
           # A dispatch NOT targeting a release/* branch (e.g. an ad hoc
           # single-platform smoke test on a feature branch) may request any
           # valid non-empty subset.
@@ -486,7 +465,12 @@ jobs:
           fi
 
   e2e-gate:
-    name: e2e-gate
+    # Only pull_request runs report the exact context name `e2e-gate`, which
+    # is the check branch protection requires on main. workflow_dispatch and
+    # schedule runs report `e2e-gate (manual)` so a manual run can never
+    # produce a second, same-named check run on a PR's head SHA, and a green
+    # manual run can never stand in for the automatic PR run.
+    name: ${{ github.event_name == 'pull_request' && 'e2e-gate' || 'e2e-gate (manual)' }}
     needs: [eligibility, build, e2e]
     if: always()
     runs-on: ubuntu-latest
@@ -506,26 +490,11 @@ jobs:
             exit 1
           fi
           if [ "${{ needs.eligibility.outputs.is_release }}" != "true" ]; then
-            # is_release is false either because this genuinely isn't a
-            # release/* PR at all, or because it IS one but this run was
-            # triggered by a `synchronize` push (which deliberately never
-            # runs the billed live legs -- see the `on:` trigger's own
-            # comment). Distinguish the two: reporting "Not a release/* PR"
-            # for a push that actually IS on a release/* branch is
-            # misleading, and once this check becomes required, a operator
-            # seeing that message would have no reason to suspect the final
-            # merged SHA never had a live run at all.
-            if [ "${{ needs.eligibility.outputs.is_release_ref }}" = "true" ]; then
-              # A ::warning:: annotation (not just a job-log echo) surfaces
-              # on the PR's checks/Files-changed UI, so this unvalidated-SHA
-              # state is visible without opening the job log -- the gap
-              # F23's review flagged: a job-log-only message is easy to
-              # miss on a check that otherwise just shows green.
-              echo "::warning::release/* branch, live e2e legs skipped for this push (synchronize) -- this SHA has NOT been live-validated. Trigger a workflow_dispatch run against this branch before merge."
-              echo "release/* branch, but this run was triggered by a push (synchronize) -- live e2e legs were deliberately skipped for this SHA. Passing so a required check doesn't block every push, but this does NOT mean the pushed commit has been live-validated. Trigger a workflow_dispatch run against this branch before merge to actually validate it."
-            else
-              echo "Not a release/* PR -- e2e legs not required."
-            fi
+            # Not a non-draft, same-repo release/* PR (or a manual/scheduled
+            # run that does not run the live legs): nothing to validate.
+            # Every non-draft release/* PR event, including a push, has
+            # is_release=true and takes the checks below instead.
+            echo "Not a non-draft release/* PR -- live e2e legs not required."
             exit 0
           fi
           if [ "${{ needs.build.result }}" != "success" ]; then
