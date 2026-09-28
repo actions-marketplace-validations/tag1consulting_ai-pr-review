@@ -180,14 +180,23 @@ def deep_preflight() -> None:
     # Git-over-HTTPS clone auth for each provider, via the harness's own
     # _clone_auth_env -- the exact same GIT_CONFIG_*-based Basic-auth
     # header injection and per-provider username scheme _clone_workspace
-    # uses for a real run, so this can never silently drift from it.
-    for platform in ("github", "gitlab", "bitbucket"):
-        url, extra_env = _clone_auth_env(platform)
-        try:
-            _run_git(["ls-remote", url, "HEAD"], extra_env=extra_env)
-        except InfraFailure as exc:
-            click.echo(f"::error::git clone auth failed for {platform}: {exc}")
-            fail = True
+    # uses for a real run, so this can never silently drift from it. Run
+    # from a scratch directory (issue #962), not the caller's cwd: this
+    # subcommand runs inside a `run:` step in the just-checked-out
+    # ai-pr-review working tree, whose `actions/checkout` already left a
+    # persisted `github.com` credential header there for the *current*
+    # repo's short-lived GITHUB_TOKEN. That token has no access to the
+    # (unrelated, private) test repos this loop targets, and its ambient
+    # header would otherwise ride along beside the one built here -- see
+    # `_run_git`'s docstring.
+    with tempfile.TemporaryDirectory(prefix="ai-pr-review-deep-preflight-") as scratch_dir:
+        for platform in ("github", "gitlab", "bitbucket"):
+            url, extra_env = _clone_auth_env(platform)
+            try:
+                _run_git(["ls-remote", url, "HEAD"], extra_env=extra_env, cwd=scratch_dir)
+            except InfraFailure as exc:
+                click.echo(f"::error::git clone auth failed for {platform}: {exc}")
+                fail = True
 
     anthropic_key = os.environ.get("E2E_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
     # GET /v1/models is a free, model-agnostic auth check -- confirms the
@@ -365,15 +374,41 @@ def _write_env_file(path: Path, env_vars: dict[str, str]) -> None:
             fh.write(f"{key}={value}\n")
 
 
-def _run_git(argv: list[str], *, timeout: int = 120, extra_env: dict[str, str] | None = None) -> str:
+def _run_git(
+    argv: list[str], *, timeout: int = 120, extra_env: dict[str, str] | None = None,
+    cwd: str | None = None,
+) -> str:
     """Run a git command via subprocess (argv list, never shell=True).
     Raises InfraFailure (with any embedded credential URL masked) on
     failure or timeout. `extra_env` (the GIT_CONFIG_* auth vars from
     _clone_auth_env, when this call needs them) is merged over the current
-    environment rather than replacing it, so PATH/HOME/etc. still resolve."""
+    environment rather than replacing it, so PATH/HOME/etc. still resolve.
+
+    `cwd` matters more than it looks for a command that does repo-config
+    discovery from the current directory -- `ls-remote` and a plain
+    `fetch`/`pull` without `-C`, confirmed empirically (issue #962; `git
+    clone` and any `-C <path>` call are NOT affected -- clone doesn't
+    discover a repo in cwd, and `-C <path>` reads that path's config, not
+    cwd's). A discovery-affected call left to inherit the caller's cwd
+    inside a checkout produced by `actions/checkout` (default
+    `persist-credentials: true`) picks up that checkout's own
+    `includeIf.gitdir`-triggered `http.<url>.extraHeader` for the SAME
+    host as any other call being made. `http.extraHeader` is a
+    multi-valued config key, so that ambient header doesn't get replaced
+    by `extra_env`'s -- both get sent, and GitHub authenticates as
+    whichever identity it honors first, which is the checkout's own
+    short-lived `GITHUB_TOKEN` (scoped only to the checked-out repo, so it
+    has zero access to any other one). A caller doing discovery-style git
+    calls with its own auth header for a host that might already have
+    ambient checkout credentials must pass a `cwd` outside of any git
+    working tree so this call is the only source of that host's header --
+    `deep_preflight`'s `ls-remote` loop is the one caller that needs this;
+    `_clone_workspace`'s `clone`/`-C <workspace>` calls don't, per the
+    above."""
     try:
         proc = subprocess.run(
             ["git", *argv], capture_output=True, text=True, timeout=timeout, check=True,
+            cwd=cwd,
             env={**os.environ, **extra_env} if extra_env else None,
         )
     except subprocess.CalledProcessError as exc:

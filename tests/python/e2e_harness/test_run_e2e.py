@@ -394,6 +394,30 @@ def test_deep_preflight_fails_when_clone_auth_fails(monkeypatch):
     assert "gitlab" in result.output
 
 
+def test_deep_preflight_runs_git_ls_remote_outside_caller_cwd(monkeypatch):
+    """Issue #962: the ls-remote checks must not inherit the caller's cwd,
+    or an ambient checkout credential for the same host rides along beside
+    the one this loop builds. Every call must pass a `cwd` that isn't None
+    and isn't the harness's own working directory."""
+    _set_deep_preflight_env(monkeypatch)
+    monkeypatch.setattr("tests.e2e.run_e2e.httpx.get", _ok_httpx_get)
+
+    seen_cwds: list[object] = []
+
+    def fake_run_git(argv: list[str], **kwargs: object) -> str:
+        seen_cwds.append(kwargs.get("cwd"))
+        return ""
+
+    monkeypatch.setattr("tests.e2e.run_e2e._run_git", fake_run_git)
+    result = CliRunner().invoke(deep_preflight, [])
+    assert result.exit_code == 0
+    assert len(seen_cwds) == 3  # github, gitlab, bitbucket
+    for cwd in seen_cwds:
+        assert cwd is not None
+        assert cwd != os.getcwd()
+    assert len(set(seen_cwds)) == 1  # same scratch dir reused across the loop
+
+
 def test_deep_preflight_fails_when_llm_key_invalid(monkeypatch):
     _set_deep_preflight_env(monkeypatch)
 
