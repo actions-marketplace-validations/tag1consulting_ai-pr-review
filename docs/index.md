@@ -68,6 +68,12 @@ jobs:
 
 That's it — reviews start firing on the next PR.
 
+## What's new in v2.16.2
+
+**The action is now ready for the GitHub Marketplace.** It is renamed `Tag1 Multi-Agent PR Review`, has a shorter description, an orange `git-pull-request` badge, and an author. Inputs, outputs, and behavior are unchanged, and `uses: tag1consulting/ai-pr-review@...` references keep working. Also fixes two stale statements in the docs and a workflow comment.
+
+See [Version History → v2.16.2](version-history/v2.16.2) for details.
+
 ## What's new in v2.16.1
 
 **Every third-party GitHub Action in this repo's workflows and example templates is now pinned to a full commit SHA**, closing the exposure where a compromised action publisher could repoint a mutable tag, most importantly in the workflow that publishes the container image (issue #955). Renovate keeps the pins current. This release also ships CI hardening for the e2e harness (`e2e-gate` is now a required check, and pushes to `release/*` PRs run the live legs) and three fixes (the `deep-preflight` credential check in #962, a false failure in the e2e verifier, and a required `Python (3.14)` check that could get stuck at "Expected" on PRs that touch no Python files). No changes to the review engine or to action inputs and outputs.
@@ -79,12 +85,6 @@ See [Version History → v2.16.1](version-history/v2.16.1) for details.
 **A `deep-preflight` subcommand replaces the weekly credential check's inline bash re-implementation of the e2e harness's own auth logic**, calling directly into the same `_clone_auth_env`/`_github_reviewer_token`/`PLATFORMS` a real run uses, so the check can never silently drift from actual behavior (issue #956). Also fixes three smaller e2e-harness gaps surfaced as follow-ups from v2.15.0's review: `opened.json` entries are now matched by `(platform, number)` instead of platform name alone, so a stale entry from a reused `--out-dir` can't be marked resolved by mistake (#958); orphan-branch cleanup failures are now recorded durably in a JSON-lines log, not just in the job log (#957); and the resolution control flow added in v2.15.0 now has direct unit test coverage (#959).
 
 See [Version History → v2.16.0](version-history/v2.16.0) for details.
-
-## What's new in v2.15.0
-
-**A deterministic Python e2e test harness replaces the old LLM-orchestrated e2e script.** It opens throwaway PRs/MRs on the real GitHub/GitLab/Bitbucket test repos, runs the built review container against them, and verifies the posted output with plain code (telemetry JSON, fetched comments/annotations) instead of asking an LLM to eyeball shell output. Live-run end to end against all three platforms at least once each, including together in a single 3-platform `workflow_dispatch` run: GitLab and Bitbucket each passed cleanly; GitHub's runs correctly exercise every check but don't currently pass cleanly, since its seeder and reviewer identities are still the same personal token (a real, current gap, not a harness bug — see the version history for detail). The test suite's lint/type/test job is also now a required branch-protection check on `main`, alongside the existing AI review check — it already ran on every PR, but wasn't required, so a PR with failing tests could previously still merge.
-
-See [Version History → v2.15.0](version-history/v2.15.0) for details.
 
 ## Learn more
 
