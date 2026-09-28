@@ -381,13 +381,19 @@ jobs:
     if: needs.eligibility.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    # Enforces a repo-level (not just in-workflow-logic) restriction that
-    # this job -- the one with all six live credentials -- can only run for
-    # a release/* branch. The `if:` above is workflow-file logic, which is
-    # itself editable on the very branch under test; this environment's
-    # deployment-branch-policy is a separate GitHub setting a PR diff cannot
-    # bypass on its own.
-    environment: e2e-live
+    # No environment/deployment-branch-policy gate here (removed, issue
+    # #962 follow-up): this repo has no fork/external contributors, every
+    # collaborator already has push access to create a branch named
+    # `release/anything` and dispatch this workflow against it directly,
+    # and the environment had zero secrets scoped to it -- so the gate
+    # didn't actually stop a malicious collaborator, it only blocked a
+    # legitimate on-demand live-verification run on a non-release branch
+    # (confirmed live, runs 36458317771/36459484206 both hard-failed the
+    # matrix on "not allowed to deploy to e2e-live"). The real safety
+    # controls remain in place regardless: this job only ever runs via an
+    # explicit `workflow_dispatch` (never automatically on push/PR, see
+    # the `on:` trigger's own comment), and `max_cost_usd` caps spend per
+    # run.
     strategy:
       fail-fast: false
       matrix:
