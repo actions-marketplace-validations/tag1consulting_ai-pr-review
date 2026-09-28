@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Pushing a release tag now creates a draft GitHub release.** The new `draft-release.yml` workflow builds the release notes from `docs/version-history/<tag>.md` with `scripts/release_notes.py` and creates a draft release, so a maintainer only has to open it, tick **Publish this release to the GitHub Marketplace**, choose the categories, and publish. Publishing to the Marketplace can only be done in the release web form (neither the REST API nor `gh` has an option for it), which is why the release is created as a draft and never published automatically. A release that already exists for the tag is left alone, and a missing version-history page falls back to generated notes.
+
+### Fixed
+
+- **`CLAUDE.md` no longer says the container image tags are `:vX.X.X`.** `publish-image.yml` publishes `:X.Y.Z`, `:X.Y`, `:X` and `:latest`, without a `v` prefix.
+
 ## [2.16.2] - 2026-09-28
 
 ### Changed
