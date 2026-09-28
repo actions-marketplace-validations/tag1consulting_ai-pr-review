@@ -140,18 +140,25 @@ def resolve_effort(model_id: str) -> str | None:
 
     claude-sonnet-5-5 also matches the "sonnet-5" check below and so inherits the
     "low" cap. Per Anthropic's docs its effort levels are recalibrated from Sonnet
-    5's (default still "high"), so "low" is a conservative carry-over that is NOT
-    yet live-verified as sufficient or as necessary for it.
+    5's (default still "high"). Live canary 2026-09-28 (run 36500424509 of the Live Model Canary workflow, on commit 97f9bdf): with this "low"
+    cap, code-reviewer and silent-failure-hunter both ended with
+    stop_reason=end_turn and 0 thinking tokens against
+    tests/canary/stress_diff.txt. That shows "low" is sufficient for that diff,
+    NOT that it is necessary (nothing was run uncapped) and NOT that it is the
+    best setting for review quality.
 
     claude-opus-5-5 cannot disable thinking at all (per Anthropic's docs,
     unlike Opus 5 which could disable it below effort "xhigh"), and its
     default effort is "medium" (one step below Opus 5's default "high") --
     Anthropic's own release notes describe it as thinking more per turn at a
     given effort level than Opus 5, so the 180s client timeout in
-    llm/anthropic.py is a real regression candidate here, NOT yet live-verified.
-    Do not treat "low" as confirmed sufficient for claude-opus-5-5 until
-    tests/canary/live_model_canary.py has actually been run against it (see
-    the model-change verification process in this repo's CLAUDE.md).
+    llm/anthropic.py is a real regression candidate here. The live canary has now
+    been run against it (2026-09-28, run 36500424509 of the Live Model Canary workflow, on commit 97f9bdf): with the "low" cap both
+    code-reviewer and silent-failure-hunter ended with stop_reason=end_turn
+    (830 and 591 thinking tokens) against tests/canary/stress_diff.txt, and the
+    whole canary step finished in about 55 seconds. That is one diff and two
+    agents, so treat it as "not a regression on the stress diff", not as a
+    general guarantee.
     """
     lower = model_id.lower()
     if "sonnet-5" in lower or _is_opus_5_family(lower):
