@@ -349,19 +349,45 @@ def verify_analyzer_findings(
     # the same whole-string substring test would let a path mentioned near
     # an unrelated category's finding satisfy the check by coincidence.
     #
-    # Only fall back to the whole summary body when THIS platform's own
-    # designated per-finding surface (per_finding_surface) is empty -- not
-    # merely whenever inline_bodies happens to be empty. An earlier version
-    # used the latter condition, which is wrong for any "annotations"
-    # platform (Bitbucket, today): its inline_bodies is always empty
-    # (verify_posting_surfaces already checks annotations for it, never
-    # inline), so every Bitbucket run silently fell back to the loose
-    # whole-body match unconditionally -- exactly the loophole this
-    # per-finding scoping was meant to close, just moved from "always" to
-    # "always, but only for one platform."
     use_annotations = per_finding_surface == "annotations"
     per_finding_haystacks = inline_bodies if (not use_annotations and inline_bodies) else []
-    fall_back_to_body = not per_finding_haystacks and not (use_annotations and evidence.annotations)
+    # A finding that overflows the inline-comment cap (`Config.max_inline`,
+    # 25 by default -- true on any fixture producing more findings than
+    # that) is rendered as its own Markdown bullet (`ai_pr_review/vcs/
+    # _body.py`'s finding-bullet renderer: `- [source] text *(at
+    # \`file:line\`)*`) under a literal "### Findings not attached to
+    # specific lines" heading -- GitHub (`vcs/github.py:2548`) and GitLab
+    # (`vcs/gitlab.py:616`) both use that exact heading text; Bitbucket
+    # never emits it at all (its own body bullets, when present, render
+    # EVERY finding, not just overflow ones, and always have a matching
+    # Code Insights annotation to check instead).
+    #
+    # Scoping to only the text between that heading and the next `#`
+    # heading or `<details>` block matters for two reasons, not just one:
+    # it preserves per-finding granularity (a bullet is one finding, so
+    # matching within a single bullet line can't let a path near an
+    # unrelated finding's category satisfy the check by coincidence --
+    # the loophole `test_verify_analyzer_findings_bitbucket_does_not_
+    # fall_back_to_whole_summary` guards against), AND it keeps Bitbucket's
+    # per-finding-complete body bullets from ever being scanned here at all
+    # (since that heading never appears in a Bitbucket body), so an
+    # annotations-platform finding still can't pass this check by matching
+    # a same-content-but-different-surface body bullet while its actual
+    # annotation is missing. Scoping to the heading also excludes any
+    # coincidentally bullet-shaped text an LLM agent (pr-summarizer,
+    # issue-linker) might write elsewhere in the concatenated summary body
+    # -- text outside this tool-rendered section was never meant to be
+    # treated as a structured, one-bullet-per-finding list.
+    _heading = "### Findings not attached to specific lines"
+    body_bullets: list[str] = []
+    _heading_at = body.find(_heading)
+    if _heading_at != -1:
+        _section = body[_heading_at + len(_heading):]
+        for _line in _section.splitlines():
+            if _line.startswith("#") or _line.startswith("<details>"):
+                break
+            if _line.startswith("- "):
+                body_bullets.append(_line)
 
     def _found(exp: ExpectedFinding) -> bool:
         if any(exp.path_substring in h and exp.category in h for h in per_finding_haystacks):
@@ -378,10 +404,13 @@ def verify_analyzer_findings(
             for a in evidence.annotations
         ):
             return True
-        # Only reached when this platform's own designated per-finding
-        # surface came back empty (see fall_back_to_body above) -- not
-        # whenever the OTHER platform's surface happens to be unpopulated.
-        return fall_back_to_body and exp.path_substring in body and exp.category in body
+        # Body-bullet fallback, tried for EVERY expected finding not already
+        # matched above -- not gated on whether this platform's per-finding
+        # surface came back empty overall. Gating on "surface is globally
+        # empty" made every overflow finding unverifiable the moment any
+        # OTHER finding populated a real inline comment/annotation, which is
+        # the common case on a fixture designed to produce many findings.
+        return any(exp.path_substring in b and exp.category in b for b in body_bullets)
 
     missing = [exp for exp in expected if not _found(exp)]
     per_finding_count = len(evidence.inline_comments) + len(evidence.annotations)

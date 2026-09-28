@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from ai_pr_review.findings.models import Finding
+from ai_pr_review.vcs._body import format_body_finding
 from ai_pr_review.vcs.marker import build_summary_marker
 from tests.e2e.config import ExpectedFinding
 from tests.e2e.models import RawEvidence
@@ -390,6 +392,74 @@ def test_verify_analyzer_findings_bitbucket_does_not_fall_back_to_whole_summary(
     verdict = verify_analyzer_findings(evidence, expected, findings_floor=1, per_finding_surface="annotations")
     assert not verdict.ok
     assert "not found" in verdict.reason
+
+
+def _body_finding_bullet(*, source: str, category: str, file: str, line: int) -> str:
+    """Build a real finding bullet via the actual production renderer, so
+    these tests break loudly (rather than silently passing against a
+    hand-typed approximation) if the body-bullet format ever changes."""
+    finding = Finding(
+        severity="Medium", confidence=80, finding="Test finding", source=source,
+        category=category, file=file, line=line,
+    )
+    return format_body_finding(finding)
+
+
+def test_verify_analyzer_findings_body_overflow_finding_found_despite_other_inline_comments():
+    # Regression test for issue confirmed live 2026-09-28 (PR #963 e2e run):
+    # a fixture producing more findings than Config.max_inline (25) pushes
+    # the overflow into the body's own per-finding bullets, but OTHER,
+    # unrelated findings still filled every real inline comment slot. The
+    # old code only fell back to the body when the platform's per-finding
+    # surface was entirely empty, so this overflow finding was permanently
+    # unverifiable once any other finding populated a real inline comment --
+    # reported as a false "product_failure" despite the review actually
+    # posting it correctly.
+    bullet = _body_finding_bullet(
+        source="docs-ref-check", category="docs", file="docs/test-notes.md", line=6,
+    )
+    evidence = RawEvidence(
+        summary_body=f"### Findings not attached to specific lines\n{bullet}\n",
+        inline_comments=[{"body": f"unrelated finding #{i}"} for i in range(25)],
+    )
+    expected = [ExpectedFinding(path_substring="docs/test-notes.md", category="docs-ref-check")]
+    verdict = verify_analyzer_findings(evidence, expected, findings_floor=1)
+    assert verdict.ok
+
+
+def test_verify_analyzer_findings_body_bullets_scoped_per_line_not_whole_body():
+    # A path in one bullet and a category in a DIFFERENT, unrelated bullet
+    # must not satisfy the check together -- the whole-body false-positive
+    # loophole the per-finding scoping (both here and for inline_bodies/
+    # annotations) exists to close. Only a single bullet line containing
+    # both counts as a match.
+    bullet1 = _body_finding_bullet(source="lint", category="other", file="docs/test-notes.md", line=1)
+    bullet2 = _body_finding_bullet(source="docs-ref-check", category="docs", file="other/file.md", line=9)
+    evidence = RawEvidence(
+        summary_body=f"### Findings not attached to specific lines\n{bullet1}\n{bullet2}\n",
+        inline_comments=[{"body": f"unrelated finding #{i}"} for i in range(25)],
+    )
+    expected = [ExpectedFinding(path_substring="docs/test-notes.md", category="docs-ref-check")]
+    verdict = verify_analyzer_findings(evidence, expected, findings_floor=1)
+    assert not verdict.ok
+
+
+def test_verify_analyzer_findings_bitbucket_body_bullet_does_not_bypass_missing_annotation():
+    # Bitbucket renders EVERY finding as a body bullet (not just overflow
+    # ones), with no "### Findings not attached to specific lines" heading
+    # at all -- so an expected finding whose real per-finding surface
+    # (Code Insights annotations) is missing it must not pass just because
+    # some body bullet happens to mention the same path+category. Since
+    # Bitbucket's body never contains that heading, body_bullets stays
+    # empty for it regardless of what the body text contains.
+    bullet = _body_finding_bullet(source="docs-ref-check", category="docs", file="docs/test-notes.md", line=6)
+    evidence = RawEvidence(
+        summary_body=bullet,  # no "### Findings not attached to specific lines" heading
+        annotations=[{"path": "web/auth.js", "summary": "High: hardcoded credentials"}],
+    )
+    expected = [ExpectedFinding(path_substring="docs/test-notes.md", category="docs-ref-check")]
+    verdict = verify_analyzer_findings(evidence, expected, findings_floor=1, per_finding_surface="annotations")
+    assert not verdict.ok
 
 
 def test_verify_analyzer_findings_truncated_evidence_notes_incomplete_result():
