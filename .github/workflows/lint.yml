@@ -4,8 +4,11 @@ on:
   push:
     branches: [main]
     paths: ['**.py', 'tests/**', 'pyproject.toml', 'ai_pr_review/**']
+  # No `paths:` filter on pull_request: `Python (3.14)` is a required check on
+  # main, and a required check whose workflow is skipped by a path filter
+  # never reports, leaving docs-only and workflow-only PRs stuck at
+  # "Expected -- waiting for status".
   pull_request:
-    paths: ['**.py', 'tests/**', 'pyproject.toml', 'ai_pr_review/**']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
