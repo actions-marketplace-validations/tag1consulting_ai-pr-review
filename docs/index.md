@@ -70,7 +70,7 @@ That's it — reviews start firing on the next PR.
 
 ## What's new in v2.16.1
 
-**Every third-party GitHub Action in this repo's workflows and example templates is now pinned to a full commit SHA**, closing the exposure where a compromised action publisher could repoint a mutable tag, most importantly in the workflow that publishes the container image (issue #955). Renovate keeps the pins current. This release also ships CI hardening for the e2e harness (`e2e-gate` is now a required check, and pushes to `release/*` PRs run the live legs) and two e2e fixes (#962 and a false-failure in the verifier). No changes to the review engine or to action inputs and outputs.
+**Every third-party GitHub Action in this repo's workflows and example templates is now pinned to a full commit SHA**, closing the exposure where a compromised action publisher could repoint a mutable tag, most importantly in the workflow that publishes the container image (issue #955). Renovate keeps the pins current. This release also ships CI hardening for the e2e harness (`e2e-gate` is now a required check, and pushes to `release/*` PRs run the live legs) and three fixes (the `deep-preflight` credential check in #962, a false failure in the e2e verifier, and a required `Python (3.14)` check that could get stuck at "Expected" on PRs that touch no Python files). No changes to the review engine or to action inputs and outputs.
 
 See [Version History → v2.16.1](version-history/v2.16.1) for details.
 
