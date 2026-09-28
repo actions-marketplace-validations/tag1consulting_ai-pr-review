@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.16.1] - 2026-09-28
+
 ### Changed
 
 - **Every third-party GitHub Action in this repo's workflows and in `examples/workflows/` is now pinned to a full commit SHA** with a `# vX.Y.Z` comment (issue #955). A tag can be repointed by a compromised action publisher, and `publish-image.yml` pushes the container image with a write token, so the mutable `@vN` tags were the real exposure. `renovate.json` now extends `helpers:pinGitHubActionDigests` and also covers `examples/workflows/`, so Renovate keeps the SHAs and comments current. The `tag1consulting/ai-pr-review/...@main` self-references are unchanged. Snippets in `docs/` still show `@vN` tags because Renovate cannot maintain them.

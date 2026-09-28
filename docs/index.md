@@ -68,6 +68,12 @@ jobs:
 
 That's it — reviews start firing on the next PR.
 
+## What's new in v2.16.1
+
+**Every third-party GitHub Action in this repo's workflows and example templates is now pinned to a full commit SHA**, closing the exposure where a compromised action publisher could repoint a mutable tag, most importantly in the workflow that publishes the container image (issue #955). Renovate keeps the pins current. This release also ships CI hardening for the e2e harness (`e2e-gate` is now a required check, and pushes to `release/*` PRs run the live legs) and three fixes (the `deep-preflight` credential check in #962, a false failure in the e2e verifier, and a required `Python (3.14)` check that could get stuck at "Expected" on PRs that touch no Python files). No changes to the review engine or to action inputs and outputs.
+
+See [Version History → v2.16.1](version-history/v2.16.1) for details.
+
 ## What's new in v2.16.0
 
 **A `deep-preflight` subcommand replaces the weekly credential check's inline bash re-implementation of the e2e harness's own auth logic**, calling directly into the same `_clone_auth_env`/`_github_reviewer_token`/`PLATFORMS` a real run uses, so the check can never silently drift from actual behavior (issue #956). Also fixes three smaller e2e-harness gaps surfaced as follow-ups from v2.15.0's review: `opened.json` entries are now matched by `(platform, number)` instead of platform name alone, so a stale entry from a reused `--out-dir` can't be marked resolved by mistake (#958); orphan-branch cleanup failures are now recorded durably in a JSON-lines log, not just in the job log (#957); and the resolution control flow added in v2.15.0 now has direct unit test coverage (#959).
@@ -79,12 +85,6 @@ See [Version History → v2.16.0](version-history/v2.16.0) for details.
 **A deterministic Python e2e test harness replaces the old LLM-orchestrated e2e script.** It opens throwaway PRs/MRs on the real GitHub/GitLab/Bitbucket test repos, runs the built review container against them, and verifies the posted output with plain code (telemetry JSON, fetched comments/annotations) instead of asking an LLM to eyeball shell output. Live-run end to end against all three platforms at least once each, including together in a single 3-platform `workflow_dispatch` run: GitLab and Bitbucket each passed cleanly; GitHub's runs correctly exercise every check but don't currently pass cleanly, since its seeder and reviewer identities are still the same personal token (a real, current gap, not a harness bug — see the version history for detail). The test suite's lint/type/test job is also now a required branch-protection check on `main`, alongside the existing AI review check — it already ran on every PR, but wasn't required, so a PR with failing tests could previously still merge.
 
 See [Version History → v2.15.0](version-history/v2.15.0) for details.
-
-## What's new in v2.14.1
-
-**Bitbucket no longer accumulates a duplicate reply comment on every pipeline run when a verdict-command reply keeps failing to save.** A permanently-failing feedback-store write (most commonly a token missing the `Repository:Write` scope) or a repeatedly-degraded permission check used to re-derive and re-post the identical "not saved"/"could not verify" reply forever. Every reply now carries a stable outcome key hashed into a hidden marker, so a later run skips one already present under the same comment and posts a fresh one automatically once the outcome changes, for example once the token scope is fixed. The feedback-store backend also stops attempting further writes for the rest of a run after its first 401/403, so a misconfigured token produces one warning per run instead of repeating the same doomed request for every pending comment (issue #941, the fast-follow left open from v2.14.0).
-
-See [Version History → v2.14.1](version-history/v2.14.1) for details.
 
 ## Learn more
 

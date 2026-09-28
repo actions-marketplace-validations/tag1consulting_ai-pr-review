@@ -12,6 +12,9 @@ What changed in each release, newest first. The 10 most recent versions each hav
 
 | Version | Highlights |
 |---------|-----------|
+| [v2.16.1](version-history/v2.16.1) | Every third-party GitHub Action pinned to a commit SHA (#955), `e2e-gate` now required and runs the live legs on `release/*` pushes, `deep-preflight` credential isolation (#962) and a verifier false-failure fixed |
+| [v2.16.0](version-history/v2.16.0) | `deep-preflight` subcommand replaces the weekly credential check's inline bash (#956), plus e2e harness follow-ups (#957, #958, #959) |
+| [v2.15.0](version-history/v2.15.0) | Deterministic Python e2e harness replaces the LLM-orchestrated e2e script |
 | [v2.14.1](version-history/v2.14.1) | Bitbucket duplicate verdict-reply spam on a permanently-failing feedback-store write or degraded permission check fixed (#941) |
 | [v2.14.0](version-history/v2.14.0) | Bitbucket learning-loop store (#906): `false-positive`/`wont-fix` verdicts now persist and feed future reviews; found and fixed several follow-up issues before and after tagging |
 | [v2.13.2](version-history/v2.13.2) | Compute-phase skip crash fixed (#927); Bitbucket brand-new-summary-comment race fixed (#930) |
