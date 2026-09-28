@@ -1,14 +1,22 @@
-name: AI PR Review
-description: >
-  AI-powered pull request review using multiple LLM agents.
-  Posts a summary comment and inline review findings on the PR.
+name: Tag1 Multi-Agent PR Review
+author: Tag1 Consulting
+# The description is shown on the GitHub Marketplace listing, which requires
+# fewer than 125 characters, so keep it short and put detail in the comments.
+#
+# NOTE: This composite action installs shellcheck on the runner but does not
+# install semgrep, trufflehog, ruff, or golangci-lint. New consumers should
+# use the container-action variant instead:
+#   uses: tag1consulting/ai-pr-review/container-action@main
+# The container action pulls a pre-built image with all analyzer binaries
+# pinned at verified versions. See container-action/action.yml.
+description: AI code review for pull requests. Posts a summary and inline findings from multiple LLM agents and static analyzers.
 
-  NOTE: This composite action installs shellcheck on the runner but does not
-  install semgrep, trufflehog, ruff, or golangci-lint. New consumers should
-  use the container-action variant instead:
-    uses: tag1consulting/ai-pr-review/container-action@main
-  The container action pulls a pre-built image with all analyzer binaries
-  pinned at verified versions. See container-action/action.yml.
+# Marketplace badge. `icon` must be a Feather v4.28.0 icon name (not a custom
+# image) and `color` one of white, black, yellow, blue, green, orange, red,
+# purple, gray-dark.
+branding:
+  icon: git-pull-request
+  color: orange
 
 inputs:
   # --- Provider ---
