@@ -273,7 +273,15 @@ jobs:
     # but a `needs:` dependency would have silently skipped this whole job
     # (including the failure-alerting issue-file step) whenever eligibility
     # failed on `main`, with nobody told either check had a problem.
-    if: github.event_name == 'schedule'
+    #
+    # Also allowed on workflow_dispatch (issue #962): this job makes no LLM
+    # calls and opens no PRs -- it's just auth/access checks -- so letting
+    # someone manually verify a credential fix against a branch (rather
+    # than waiting up to a week for the next scheduled run) costs nothing
+    # extra. A workflow_dispatch run still also fires the full live e2e-gate
+    # matrix per its own trigger logic above; this only adds this one cheap
+    # job to that same run, it doesn't gate anything.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
