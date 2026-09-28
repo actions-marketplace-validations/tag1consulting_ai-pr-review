@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`action.yml` is now ready for the GitHub Marketplace.** The action is renamed to `Tag1 Multi-Agent PR Review` (the Marketplace publish form rejected the previous name `AI PR Review` as not unique), the `description` is shortened to fewer than 125 characters (the explanatory note about the composite variant moved into YAML comments), a `branding` block is added with the `git-pull-request` icon on an orange background, and `author: Tag1 Consulting` is set. Inputs, outputs, and behavior are unchanged, and `uses: tag1consulting/ai-pr-review@...` references keep working because the repository name is unchanged.
+
 ## [2.16.1] - 2026-09-28
 
 ### Changed
