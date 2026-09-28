@@ -109,6 +109,8 @@ jobs:
             || true
 ```
 
+The snippet above uses the `@v4` tag for readability. To pin third-party actions to commit SHAs (recommended), copy [`examples/workflows/pr-review.yml`](https://github.com/tag1consulting/ai-pr-review/blob/main/examples/workflows/pr-review.yml), which is kept pinned and updated by Renovate.
+
 Pin to a specific version by replacing `@main` with a tag or commit SHA
 (e.g. `@v2.4.5` or `@cb9d7ee`).
 

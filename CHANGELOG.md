@@ -9,12 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Every third-party GitHub Action in this repo's workflows and in `examples/workflows/` is now pinned to a full commit SHA** with a `# vX.Y.Z` comment (issue #955). A tag can be repointed by a compromised action publisher, and `publish-image.yml` pushes the container image with a write token, so the mutable `@vN` tags were the real exposure. `renovate.json` now extends `helpers:pinGitHubActionDigests` and also covers `examples/workflows/`, so Renovate keeps the SHAs and comments current. The `tag1consulting/ai-pr-review/...@main` self-references are unchanged. Snippets in `docs/` still show `@vN` tags because Renovate cannot maintain them.
+- **The `e2e-live` deployment environment gate is removed from the live e2e matrix job.** The environment had no secrets scoped to it and its `release/*` branch policy did not protect against anyone with push access, so it only blocked legitimate on-demand verification of a fix on a non-release branch. The job still runs only through an explicit `workflow_dispatch`, and `max_cost_usd` still caps spend per run.
+- **The weekly credential check can now also be started with `workflow_dispatch`.**
 - **The `e2e-gate` check is now a required branch-protection status check on `main`**, alongside the existing AI review and test/lint checks. It was made required after two consecutive green `workflow_dispatch` runs on `main` with verified cleanup.
 - **A push to a non-draft `release/*` PR now runs the live e2e legs on that SHA.** Previously a push (`synchronize`) reported a passing `e2e-gate` without running them, so the merged SHA could be unvalidated. A newer push cancels the in-flight run, so only the newest SHA finishes and bills. Draft release PRs and all other PRs still get an immediate pass.
 - **`workflow_dispatch` and scheduled runs now report `e2e-gate (manual)`**, so only the automatic PR run reports the required `e2e-gate` context and a manual run can no longer satisfy it. Manual runs use their own concurrency group and cannot cancel a PR run.
 
 ### Fixed
 
+- **The `deep-preflight` git clone-auth check no longer fails with "Repository not found" in CI** (issue #962). `git ls-remote` inherited the checked-out repo's working directory, so `actions/checkout`'s local `http.extraheader` for the job's own `GITHUB_TOKEN` was sent alongside the reviewer token's header and GitHub authenticated as the wrong identity. The check now runs isolated from ambient checkout credentials.
+- **The e2e verifier no longer reports a false `product_failure` for a finding that overflowed into the review body.** The body-fallback check only ran when a platform's own per-finding surface was empty, so a finding pushed past the inline-comment cap became unverifiable as soon as any other finding filled an inline comment. The fallback is now scoped to individual bullets in the body's "Findings not attached to specific lines" section.
 - **`Python (3.14)` no longer gets stuck at "Expected" on PRs that touch no Python files.** `lint.yml` had a `paths:` filter on its `pull_request` trigger, so docs-only and workflow-only PRs never started the workflow and the required check never reported. The filter is removed from the `pull_request` trigger.
 
 ## [2.16.0] - 2026-09-27
