@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The `e2e-gate` check is now a required branch-protection status check on `main`**, alongside the existing AI review and test/lint checks. It was made required after two consecutive green `workflow_dispatch` runs on `main` with verified cleanup. On non-release PRs it completes immediately. On a `release/*` PR, a push (`synchronize`) still reports a passing `e2e-gate` without running the live legs, so run `workflow_dispatch` against the final release SHA before merging.
+
 ## [2.16.0] - 2026-09-27
 
 ### Added

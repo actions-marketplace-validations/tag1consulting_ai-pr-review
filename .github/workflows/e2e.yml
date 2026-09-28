@@ -21,8 +21,8 @@ name: E2E Release Gate
 
 on:
   pull_request:
-    # `synchronize` IS included: e2e-gate is planned to become a required
-    # check (see CLAUDE.md's release process). A required check that never
+    # `synchronize` IS included: e2e-gate is a required check on main
+    # (see CLAUDE.md's release process). A required check that never
     # reports on a pushed SHA blocks merge forever ("Expected -- waiting for
     # status"), for every PR in the repo, not just release ones. The
     # eligibility/is_release logic below still refuses to run the expensive
@@ -512,7 +512,7 @@ jobs:
             # runs the billed live legs -- see the `on:` trigger's own
             # comment). Distinguish the two: reporting "Not a release/* PR"
             # for a push that actually IS on a release/* branch is
-            # misleading, and once this check becomes required, a operator
+            # misleading, and since this check is required, an operator
             # seeing that message would have no reason to suspect the final
             # merged SHA never had a live run at all.
             if [ "${{ needs.eligibility.outputs.is_release_ref }}" = "true" ]; then
