@@ -1,0 +1,82 @@
+name: Draft GitHub release
+
+# When a release tag is pushed, create a DRAFT GitHub release whose notes come
+# from docs/version-history/<tag>.md.
+#
+# It is a draft on purpose. Publishing a release to the GitHub Marketplace is a
+# checkbox in the release web form only: neither the REST API nor `gh` has an
+# option for it. A maintainer opens the draft, ticks "Publish this release to
+# the GitHub Marketplace", picks the categories, and publishes. That way the
+# release is never public without the Marketplace choice having been made.
+#
+# This is a separate workflow from publish-image.yml so that a problem here
+# can never affect the container image publish.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write  # create the draft release
+
+concurrency:
+  group: draft-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  draft-release:
+    name: Create draft release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Passed through the environment, never interpolated into the script,
+          # because a tag name is chosen by whoever pushes it.
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag '$TAG' is not a release tag (expected vX.Y.Z or vX.Y.Z-suffix)."
+            exit 1
+          fi
+
+          # A release may already exist, for example one created by hand. Leave
+          # it alone rather than fail or overwrite it.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "A release for $TAG already exists, leaving it alone."
+            exit 0
+          fi
+
+          notes_file="$RUNNER_TEMP/release-notes.md"
+          if python3 scripts/release_notes.py "docs/version-history/${TAG}.md" > "$notes_file"; then
+            notes_args=(--notes-file "$notes_file")
+          else
+            echo "::warning::No usable docs/version-history/${TAG}.md, falling back to generated notes."
+            notes_args=(--generate-notes)
+          fi
+
+          extra_args=()
+          if [[ "$TAG" == *-* ]]; then
+            extra_args+=(--prerelease)
+          fi
+
+          gh release create "$TAG" --draft --verify-tag --title "$TAG" \
+            "${notes_args[@]}" "${extra_args[@]}"
+
+          {
+            echo "### Draft release created for \`$TAG\`"
+            echo
+            echo "It is not public yet. To publish it to the GitHub Marketplace:"
+            echo
+            echo "1. Open the draft under the repository's Releases page and click **Edit**."
+            echo "2. Tick **Publish this release to the GitHub Marketplace** and choose the categories."
+            echo "3. Click **Publish release**."
+          } >> "$GITHUB_STEP_SUMMARY"
