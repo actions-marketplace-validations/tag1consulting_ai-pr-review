@@ -1,12 +1,15 @@
 name: Model watch
 
-# Weekly, read-only check for Anthropic models that are newer than this repo's pinned
-# default models. It opens ONE issue per newer model and never changes a default:
-# bumping a default needs a pricing row, per-model effort and temperature handling,
-# and a live canary run (see CLAUDE.md), so a person does it.
+# Weekly, read-only check for Anthropic, OpenAI and Google models that are newer than
+# this repo's pinned default models. It opens ONE issue per newer model and never changes
+# a default: bumping a default needs a pricing row, per-model effort, thinking and
+# temperature handling, and a live canary run (see CLAUDE.md), so a person does it.
 #
-# The Models API call makes no model calls, so it costs no tokens. It does use the same
-# API key secret as the live model canary.
+# Listing models makes no model calls, so it costs no tokens. Anthropic uses the same API
+# key secret as the live model canary. OpenAI and Google use the OPENAI_API_KEY and
+# GOOGLE_API_KEY secrets, and a provider whose secret is not set is skipped. A key that
+# can only list models (an OpenAI restricted key with "Models: read", a Google key
+# limited to the Generative Language API) is enough.
 on:
   schedule:
     # Monday 10:00 UTC, an hour after the weekly live model canary.
@@ -28,7 +31,7 @@ concurrency:
 
 jobs:
   watch:
-    name: Check for newer Anthropic models
+    name: Check for newer default models
     # Forks have neither the API key secret nor any use for this issue.
     if: github.repository == 'tag1consulting/ai-pr-review'
     runs-on: ubuntu-latest
@@ -53,6 +56,8 @@ jobs:
       - name: Look for newer models
         env:
           ANTHROPIC_API_KEY: ${{ secrets.AI_REVIEW_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GH_TOKEN: ${{ github.token }}
           DRY_RUN: ${{ inputs.dry-run }}
         run: |

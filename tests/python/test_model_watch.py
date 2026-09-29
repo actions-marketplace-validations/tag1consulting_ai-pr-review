@@ -115,6 +115,9 @@ def test_ids_with_unsafe_characters_are_ignored() -> None:
 def test_unparseable_pinned_default_is_an_error() -> None:
     with pytest.raises(mw.WatchError):
         mw.newer_models("gpt-5.4", ["claude-sonnet-6"])
+    # A pinned OpenAI default outside the watched luna/terra tiers is also unreadable.
+    with pytest.raises(mw.WatchError):
+        mw.newer_models("gpt-5.4-mini", ["gpt-5.6-luna"], mw.OPENAI)
 
 
 def test_list_model_ids_follows_pagination() -> None:
@@ -370,3 +373,272 @@ def test_network_and_decoding_failures_retry_then_fail_cleanly(
         mw.list_model_ids("secret-key-123")
     assert len(calls) == mw.HTTP_ATTEMPTS
     assert "secret-key-123" not in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# OpenAI and Google
+# ---------------------------------------------------------------------------
+
+# Real ids from the OpenAI and Gemini models listings on 2026-09-29, trimmed. The
+# variants around the watched families are the point: none of them may be reported.
+_REAL_OPENAI = [
+    "gpt-5", "gpt-5-mini", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-mini-2026-03-17",
+    "gpt-5.4-pro", "gpt-5.5", "gpt-5.5-pro", "gpt-5.6-luna", "gpt-5.6-sol",
+    "gpt-5.6-terra", "gpt-5.3-codex", "gpt-5.2-chat-latest",
+    "gpt-6-astra", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol",
+]
+_REAL_GOOGLE = [
+    "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite", "gemini-3.1-flash-lite-preview", "gemini-3.1-pro-preview",
+    "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.7-flash",
+    "gemini-3.8-flash", "gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts", "gemini-3.8-live",
+    "gemini-flash-latest", "gemini-flash-lite-latest",
+]
+_ALL_DEFAULTS = {
+    "anthropic": _DEFAULTS,
+    "openai": ("gpt-6-luna", "gpt-6.1-sol"),
+    "google": ("gemini-3.5-flash-lite", "gemini-3.8-flash"),
+}
+_ALL_ENV = {**_ENV, "OPENAI_API_KEY": "openai-key-not-real", "GOOGLE_API_KEY": "google-key-not-real"}
+
+
+def _multi_fetch(
+    *, anthropic: Sequence[str] = (), openai: Sequence[str] = (), google: Sequence[str] = (),
+    fail: str = "",
+) -> Any:
+    """A fake fetch that answers each provider's endpoint in that provider's shape."""
+
+    def fetch(url: str, key: str) -> Mapping[str, Any]:
+        if url.startswith(mw.OPENAI_API_URL):
+            if fail == "openai":
+                raise mw.WatchError("Models API request failed: HTTP 401")
+            return {"object": "list", "data": [{"id": i} for i in openai]}
+        if url.startswith(mw.GOOGLE_API_URL):
+            if fail == "google":
+                raise mw.WatchError("Models API request failed: HTTP 403")
+            return {"models": [{"name": f"models/{i}"} for i in google]}
+        if fail == "anthropic":
+            raise mw.WatchError("Models API request failed: HTTP 401")
+        return {"data": [{"id": i} for i in anthropic], "has_more": False}
+
+    return fetch
+
+
+@pytest.mark.parametrize(
+    ("model_id", "expected"),
+    [
+        ("gpt-5.6-luna", ("luna", (5, 6))),
+        ("gpt-5.6-terra", ("terra", (5, 6))),
+        ("gpt-6-astra", ("astra", (6, 0))),
+        ("gpt-6.1-sol", ("sol", (6, 1))),
+        ("gpt-5.7-luna-2026-11-02", ("luna", (5, 7))),
+    ],
+)
+def test_parse_openai_model(model_id: str, expected: tuple[str, tuple[int, int]]) -> None:
+    parsed = mw.parse_openai_model(model_id)
+    assert (parsed.family, parsed.version) == expected
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    ["gpt-5.4-mini", "gpt-5.5-pro", "gpt-5.6-luna-mini", "gpt-5", "gpt-5.3-codex",
+     "gpt-5.2-chat-latest", "gpt-5-search-api", "gpt-5.4-nano-2026-03-17", ""],
+)
+def test_parse_openai_model_ignores_other_products(model_id: str) -> None:
+    assert mw.parse_openai_model(model_id) is None
+
+
+@pytest.mark.parametrize(
+    ("model_id", "expected"),
+    [
+        ("gemini-3.8-flash", ("flash", (3, 8))),
+        ("gemini-3.5-flash-lite", ("flash-lite", (3, 5))),
+        ("gemini-4-flash", ("flash", (4, 0))),
+    ],
+)
+def test_parse_google_model(model_id: str, expected: tuple[str, tuple[int, int]]) -> None:
+    parsed = mw.parse_google_model(model_id)
+    assert (parsed.family, parsed.version) == expected
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    ["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts", "gemini-3.1-flash-lite-preview",
+     "gemini-3-flash-preview", "gemini-3.1-pro-preview", "gemini-3.8-live", "gemini-flash-latest",
+     "models/gemini-3.8-flash"],
+)
+def test_parse_google_model_ignores_previews_and_variants(model_id: str) -> None:
+    assert mw.parse_google_model(model_id) is None
+
+
+def test_real_listings_report_nothing_newer_than_the_new_defaults() -> None:
+    assert mw.newer_models("gpt-6-luna", _REAL_OPENAI, mw.OPENAI) == []
+    assert mw.newer_models("gpt-6.1-sol", _REAL_OPENAI, mw.OPENAI) == []
+    assert mw.other_tier_models(("gpt-6-luna", "gpt-6.1-sol"), _REAL_OPENAI, mw.OPENAI) == []
+    assert mw.alternate_models("gemini-3.8-flash", "pro", _REAL_GOOGLE, mw.GOOGLE) == []
+    assert mw.newer_models("gemini-3.5-flash-lite", _REAL_GOOGLE, mw.GOOGLE) == []
+    assert mw.newer_models("gemini-3.8-flash", _REAL_GOOGLE, mw.GOOGLE) == []
+
+
+def test_real_listings_against_the_old_defaults_report_the_stable_successors() -> None:
+    """The families stay separate: flash-lite never reports a flash model or a variant."""
+    assert mw.newer_models("gemini-2.5-flash-lite", _REAL_GOOGLE, mw.GOOGLE) == [
+        "gemini-3.5-flash-lite", "gemini-3.1-flash-lite",
+    ]
+    assert mw.newer_models("gemini-2.5-flash", _REAL_GOOGLE, mw.GOOGLE) == [
+        "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash",
+    ]
+
+
+def test_list_google_model_ids_strips_prefix_and_follows_pagination() -> None:
+    seen: list[str] = []
+
+    def fetch(url: str, key: str) -> Mapping[str, Any]:
+        seen.append(url)
+        if "pageToken=t2" in url:
+            return {"models": [{"name": "models/gemini-3.8-flash"}]}
+        return {"models": [{"name": "models/gemini-3.5-flash-lite"}], "nextPageToken": "t2"}
+
+    assert mw.list_google_model_ids("k", fetch) == ["gemini-3.5-flash-lite", "gemini-3.8-flash"]
+    assert "pageToken=t2" in seen[1]
+
+
+def test_list_google_and_openai_reject_broken_or_partial_responses() -> None:
+    for broken in ({}, {"models": None}, {"error": {"code": 403}}):
+        with pytest.raises(mw.WatchError):
+            mw.list_google_model_ids("k", lambda url, key, page=broken: page)
+    for broken in ({}, {"data": None}, {"data": [], "has_more": True}):
+        with pytest.raises(mw.WatchError):
+            mw.list_openai_model_ids("k", lambda url, key, page=broken: page)
+
+    def endless(url: str, key: str) -> Mapping[str, Any]:
+        return {"models": [], "nextPageToken": "again"}
+
+    with pytest.raises(mw.WatchError):
+        mw.list_google_model_ids("k", endless)
+
+
+def test_each_provider_opens_its_own_titled_issue() -> None:
+    gh = _Gh()
+    fetch = _multi_fetch(
+        anthropic=list(_DEFAULTS),
+        openai=["gpt-6-luna", "gpt-6.1-sol", "gpt-6.2-sol"],
+        google=["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.9-flash-lite"],
+    )
+    assert mw.main([], fetch=fetch, run=gh, env=_ALL_ENV, defaults=_ALL_DEFAULTS) == 0
+    titles = [c[c.index("--title") + 1] for c in gh.created()]
+    assert titles == [
+        "New OpenAI premium model available: gpt-6.2-sol",
+        "New Google standard model available: gemini-3.9-flash-lite",
+    ]
+
+
+def test_one_provider_failing_does_not_hide_the_others(capsys: pytest.CaptureFixture[str]) -> None:
+    gh = _Gh()
+    fetch = _multi_fetch(
+        anthropic=list(_DEFAULTS) + ["claude-sonnet-5-6"],
+        google=["gemini-3.5-flash-lite", "gemini-3.8-flash"],
+        fail="openai",
+    )
+    assert mw.main([], fetch=fetch, run=gh, env=_ALL_ENV, defaults=_ALL_DEFAULTS) == 1
+    assert len(gh.created()) == 1
+    err = capsys.readouterr().err
+    assert "model watch failed for OpenAI" in err
+    assert "openai-key-not-real" not in err
+
+
+def test_providers_without_a_key_are_skipped_not_failed(capsys: pytest.CaptureFixture[str]) -> None:
+    gh = _Gh()
+    env = {"GOOGLE_API_KEY": "google-key-not-real"}
+    fetch = _multi_fetch(google=["gemini-3.5-flash-lite", "gemini-3.8-flash"])
+    assert mw.main([], fetch=fetch, run=gh, env=env, defaults=_ALL_DEFAULTS) == 0
+    err = capsys.readouterr().err
+    assert "ANTHROPIC_API_KEY is not set, skipping Anthropic" in err
+    assert "OPENAI_API_KEY is not set, skipping OpenAI" in err
+
+
+def test_a_google_listing_missing_a_pinned_default_fails_loudly(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    env = {"GOOGLE_API_KEY": "google-key-not-real"}
+    fetch = _multi_fetch(google=["gemini-3.8-flash"])
+    assert mw.main([], fetch=fetch, run=_Gh(), env=env, defaults=_ALL_DEFAULTS) == 1
+    assert "gemini-3.5-flash-lite not in the Google Models API listing" in capsys.readouterr().err
+
+
+def test_non_anthropic_issue_bodies_point_to_the_local_canary_and_skip_bedrock() -> None:
+    for provider, pinned, new in (
+        (mw.OPENAI, "gpt-6.1-sol", "gpt-6.2-sol"),
+        (mw.GOOGLE, "gemini-3.8-flash", "gemini-3.9-flash"),
+    ):
+        body = mw.issue_body("premium", pinned, new, "", provider)
+        assert f"The {provider.label} Models API now lists `{new}`" in body
+        assert "Bedrock" not in body
+        assert provider.env_var in body
+        assert "CANARY_OUTPUT_DIR" in body
+        assert chr(0x2014) not in body
+    assert "resolve_gemini_thinking_level" in mw.issue_body("premium", "a", "b", "", mw.GOOGLE)
+    assert "Bedrock" in mw.issue_body("premium", "claude-opus-5-5", "claude-opus-6", "")
+
+
+@pytest.mark.parametrize(
+    ("provider", "header", "value"),
+    [
+        ("OPENAI", "authorization", "Bearer secret-key-123"),
+        ("GOOGLE", "x-goog-api-key", "secret-key-123"),
+    ],
+)
+def test_http_get_sends_each_providers_own_auth_header(
+    monkeypatch: pytest.MonkeyPatch, provider: str, header: str, value: str
+) -> None:
+    server = _Server([(200, json.dumps({"data": [], "models": []}))])
+    try:
+        mw._http_get(server.url, "secret-key-123", getattr(mw, provider).headers)
+    finally:
+        server.close()
+    assert server.headers[0][header] == value
+    assert "x-api-key" not in server.headers[0]
+
+
+@pytest.mark.parametrize("provider", ["OPENAI", "GOOGLE"])
+def test_the_repos_real_openai_and_google_defaults_are_readable(provider: str) -> None:
+    p = getattr(mw, provider)
+    standard, premium = mw.pinned_defaults(p)
+    assert p.parse(standard).family == p.watched[0][1]
+    assert p.parse(premium).family == p.watched[1][1]
+
+
+def test_the_gpt_5_6_to_6_tier_rename_is_caught() -> None:
+    """GPT-6 has no terra. Pinned on GPT-5.6, the old tier-name watch never fired again
+    for premium. The version-based check reports every GPT-6 tier nobody pinned."""
+    pinned = ("gpt-5.6-luna", "gpt-5.6-terra")
+    assert mw.newer_models("gpt-5.6-terra", _REAL_OPENAI, mw.OPENAI) == []
+    assert mw.newer_models("gpt-5.6-luna", _REAL_OPENAI, mw.OPENAI) == ["gpt-6-luna"]
+    assert mw.other_tier_models(pinned, _REAL_OPENAI, mw.OPENAI) == [
+        "gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra",
+    ]
+
+
+def test_new_tier_issue_is_titled_and_worded_for_a_person_to_map() -> None:
+    gh = _Gh()
+    env = {"OPENAI_API_KEY": "openai-key-not-real"}
+    fetch = _multi_fetch(openai=["gpt-6-luna", "gpt-6.1-sol", "gpt-7-nova"])
+    assert mw.main([], fetch=fetch, run=gh, env=env, defaults=_ALL_DEFAULTS) == 0
+    assert [c[c.index("--title") + 1] for c in gh.created()] == [
+        "New OpenAI model tier available: gpt-7-nova",
+    ]
+    body = mw.issue_body(mw.NEW_TIER, "`gpt-6-luna`, `gpt-6.1-sol`", "gpt-7-nova", "", mw.OPENAI)
+    assert "tier neither default uses" in body
+    assert "AI_MODEL_STANDARD` or `AI_MODEL_PREMIUM" in body
+
+
+def test_a_stable_gemini_pro_is_reported_for_premium_but_a_preview_is_not() -> None:
+    listed = _REAL_GOOGLE + ["gemini-3.8-pro", "gemini-3.9-pro-preview", "gemini-3.5-pro"]
+    assert mw.alternate_models("gemini-3.8-flash", "pro", listed, mw.GOOGLE) == ["gemini-3.8-pro"]
+    gh = _Gh()
+    env = {"GOOGLE_API_KEY": "google-key-not-real"}
+    fetch = _multi_fetch(google=["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.8-pro"])
+    assert mw.main([], fetch=fetch, run=gh, env=env, defaults=_ALL_DEFAULTS) == 0
+    assert [c[c.index("--title") + 1] for c in gh.created()] == [
+        "New Google premium model available: gemini-3.8-pro",
+    ]

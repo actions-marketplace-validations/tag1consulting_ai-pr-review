@@ -466,6 +466,25 @@ def test_bedrock_proxy_standard_default_is_sonnet_5(monkeypatch: pytest.MonkeyPa
     assert cfg.model_standard == "us.anthropic.claude-sonnet-5"
 
 
+@pytest.mark.parametrize(
+    ("provider", "standard", "premium"),
+    [
+        ("openai", "gpt-6-luna", "gpt-6.1-sol"),
+        ("google", "gemini-3.5-flash-lite", "gemini-3.8-flash"),
+    ],
+)
+def test_openai_and_google_defaults(
+    monkeypatch: pytest.MonkeyPatch, provider: str, standard: str, premium: str
+) -> None:
+    """Google's 2.5 models are served only to projects that used them before, so
+    new adopters need a 3.x default. OpenAI moved to the GPT-6 family."""
+    monkeypatch.delenv("AI_MODEL_PREMIUM", raising=False)
+    monkeypatch.delenv("AI_MODEL_STANDARD", raising=False)
+    cfg = ReviewConfig(provider=provider).resolve_models()
+    assert cfg.model_standard == standard
+    assert cfg.model_premium == premium
+
+
 def test_context_enrichment_default_true(monkeypatch: pytest.MonkeyPatch) -> None:
     """Container image ships tree-sitter + ripgrep; enrichment should default on."""
     monkeypatch.delenv("AI_CONTEXT_ENRICHMENT", raising=False)

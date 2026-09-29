@@ -26,8 +26,10 @@ failure. Intended for a scheduled GitHub Actions workflow
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,6 +39,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from ai_pr_review.agents.dispatch import DispatchContext, run_tier  # noqa: E402
 from ai_pr_review.agents.roster import AGENTS  # noqa: E402
+from ai_pr_review.findings.extract import _FENCE_RE, extract_findings  # noqa: E402
 from ai_pr_review.llm.base import LLMRequest, LLMResponse  # noqa: E402
 from ai_pr_review.llm.client import call_llm  # noqa: E402
 
@@ -50,13 +53,32 @@ STRESS_DIFF_PATH = Path(__file__).resolve().parent / "stress_diff.txt"
 TARGET_AGENT_NAMES = ("code-reviewer", "silent-failure-hunter")
 
 # provider -> (env var holding the API key, standard model, premium model).
-# Scoped to providers this repo can actually authenticate against in CI
-# (secrets.AI_REVIEW_API_KEY is Anthropic-only as of this writing -- see
-# .github/workflows/ai-review.yml). Extend this dict only alongside adding
-# a real, live-tested key for the new provider; an entry with no working
-# key is a false claim of coverage, not a canary.
+# CI (secrets.AI_REVIEW_API_KEY, see .github/workflows/ai-review.yml) can
+# authenticate only against Anthropic as of this writing, so the scheduled
+# workflow SKIPs the other providers. They are here so a model-default change
+# for them can be verified locally with a real key, as this repo's CLAUDE.md
+# requires. A SKIP line is not coverage: only an OK line is.
 PROVIDER_MODELS: dict[str, tuple[str, str, str]] = {
     "anthropic": ("ANTHROPIC_API_KEY", "claude-sonnet-5-5", "claude-opus-5-5"),
+    "openai": ("OPENAI_API_KEY", "gpt-6-luna", "gpt-6.1-sol"),
+    "google": ("GOOGLE_API_KEY", "gemini-3.5-flash-lite", "gemini-3.8-flash"),
+    # Also needs BEDROCK_API_URL (see ai_pr_review/llm/bedrock.py).
+    "bedrock-proxy": (
+        "BEDROCK_API_KEY",
+        "us.anthropic.claude-sonnet-5",
+        "global.anthropic.claude-opus-4-7",
+    ),
+}
+
+# The raw stop reason each provider module reports for a response that
+# finished on its own. The provider modules pass the provider's own value
+# through unchanged (OpenAI finish_reason, Gemini finishReason), so the
+# canary compares against the provider's own "finished cleanly" value.
+_CLEAN_STOP_REASONS: dict[str, str] = {
+    "anthropic": "end_turn",
+    "bedrock-proxy": "end_turn",
+    "openai": "stop",
+    "google": "STOP",
 }
 
 
@@ -109,6 +131,7 @@ async def _run_one(provider: str, model_id: str, agent_name: str) -> CanaryResul
         ],
     )
 
+    started = time.monotonic()
     try:
         successes, failures = await run_tier(agents, llm_call, context, semaphore_size=1)
     except Exception as exc:  # noqa: BLE001 - canary must report, not crash
@@ -121,25 +144,76 @@ async def _run_one(provider: str, model_id: str, agent_name: str) -> CanaryResul
             f"agent failed (exit_code={f.exit_code}): {f.reason[:300]}",
         )
 
+    elapsed = time.monotonic() - started
     result = successes[0]
+    _save_output(provider, model_id, agent_name, result.output)
     stop_reason = result.stop_reason
     thinking_tokens = result.token_log.thinking_tokens if result.token_log else 0
-    if stop_reason != "end_turn":
+    expected = _CLEAN_STOP_REASONS.get(provider, "end_turn")
+    if stop_reason != expected:
         # Stricter than "text is non-empty": a response that hit max_tokens
         # but still produced *some* text is a silently truncated, degraded
         # review, not a crash -- it would pass a looser check while still
         # being a real quality problem. See the #592 test plan, Tier 2.
         return CanaryResult(
             provider, model_id, agent_name, False,
-            f"stop_reason={stop_reason!r} (expected end_turn), "
+            f"stop_reason={stop_reason!r} (expected {expected}), "
             f"thinking_tokens={thinking_tokens}, output_tokens="
             f"{result.token_log.output if result.token_log else 'n/a'}",
         )
 
+    output_tokens = result.token_log.output if result.token_log else 0
+    block_error = _findings_block_error(result.output)
+    if block_error:
+        # A clean stop with a missing or unparseable json-findings block is
+        # still a lost review: extract_findings() would return [] with only a
+        # stderr warning, which reads as "no findings", not as a failure.
+        return CanaryResult(
+            provider, model_id, agent_name, False,
+            f"stop_reason={stop_reason} but {block_error}, "
+            f"output_tokens={output_tokens}",
+        )
+    findings = extract_findings(result.output, agent_name)
     return CanaryResult(
         provider, model_id, agent_name, True,
-        f"stop_reason=end_turn, thinking_tokens={thinking_tokens}",
+        f"stop_reason={stop_reason}, findings={len(findings)}, "
+        f"thinking_tokens={thinking_tokens}, output_tokens={output_tokens}, "
+        f"elapsed={elapsed:.0f}s",
     )
+
+
+def _findings_block_error(output: str) -> str:
+    """Return why the output's json-findings block is unusable, or "" if it is fine.
+
+    Uses the same fence regex as findings/extract.py, then checks that the
+    block is a JSON array, so the canary fails on exactly the outputs the
+    findings pipeline would silently drop.
+    """
+    match = _FENCE_RE.search(output)
+    if not match:
+        return "no json-findings block"
+    try:
+        parsed = json.loads(match.group(1).strip())
+    except json.JSONDecodeError as exc:
+        return f"json-findings block is not valid JSON ({exc.msg})"
+    if not isinstance(parsed, list):
+        return "json-findings block is not a JSON array"
+    return ""
+
+
+def _save_output(provider: str, model_id: str, agent_name: str, text: str) -> None:
+    """Write the raw review text to $CANARY_OUTPUT_DIR, when set, so a person
+    can judge review content and not only the stop reason. A write error is
+    reported and ignored: it must not hide the canary result itself."""
+    out_dir = os.environ.get("CANARY_OUTPUT_DIR")
+    if not out_dir:
+        return
+    path = Path(out_dir) / f"{provider}__{model_id}__{agent_name}.md".replace("/", "_")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    except OSError as exc:
+        print(f"WARNING: could not save canary output to {path}: {exc}", file=sys.stderr)
 
 
 async def main() -> int:
