@@ -450,12 +450,12 @@ def test_anthropic_premium_default_is_opus_5_5(monkeypatch: pytest.MonkeyPatch) 
     assert cfg.model_premium == "claude-opus-5-5"
 
 
-def test_anthropic_standard_default_is_sonnet_5(monkeypatch: pytest.MonkeyPatch) -> None:
-    """resolve_models() should fill the Anthropic standard slot with claude-sonnet-5."""
+def test_anthropic_standard_default_is_sonnet_5_5(monkeypatch: pytest.MonkeyPatch) -> None:
+    """resolve_models() should fill the Anthropic standard slot with claude-sonnet-5-5."""
     monkeypatch.delenv("AI_MODEL_PREMIUM", raising=False)
     monkeypatch.delenv("AI_MODEL_STANDARD", raising=False)
     cfg = ReviewConfig(provider="anthropic").resolve_models()
-    assert cfg.model_standard == "claude-sonnet-5"
+    assert cfg.model_standard == "claude-sonnet-5-5"
 
 
 def test_bedrock_proxy_standard_default_is_sonnet_5(monkeypatch: pytest.MonkeyPatch) -> None:

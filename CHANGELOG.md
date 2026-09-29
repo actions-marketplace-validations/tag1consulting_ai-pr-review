@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Pushing a release tag now creates a draft GitHub release.** The new `draft-release.yml` workflow builds the release notes from `docs/version-history/<tag>.md` with `scripts/release_notes.py` and creates a draft release, so a maintainer only has to open it, tick **Publish this release to the GitHub Marketplace**, choose the categories, and publish. Publishing to the Marketplace can only be done in the release web form (neither the REST API nor `gh` has an option for it), which is why the release is created as a draft and never published automatically. A release that already exists for the tag is left alone, and a missing version-history page falls back to generated notes.
 
+### Changed
+
+- **The default Anthropic `standard` model is now `claude-sonnet-5-5`** (was `claude-sonnet-5`), at the same price ($2 / $10 per MTok, cache reads $0.20). `config/model-pricing.json` gets an explicit anchored `Sonnet 5.5` row, and the `Sonnet 5` pattern is anchored, so the token table labels the two correctly (before, `claude-sonnet-5-5` would have matched the unanchored `claude-sonnet-5` pattern and been labeled `Sonnet 5`). Temperature is still omitted and effort is still capped at `low` for it, carried over from Sonnet 5 through the shared `sonnet-5` check. The `bedrock-proxy` default is unchanged because the Bedrock model ID for Sonnet 5.5 is not verified. Anyone who wants the previous model can set `AI_MODEL_STANDARD=claude-sonnet-5`. Verified with the live model canary (4 of 4 calls ended with `end_turn` on the 1200-line stress diff for `claude-sonnet-5-5` and `claude-opus-5-5`, with the `low` effort cap). Not verified: whether `low` is necessary or optimal for Sonnet 5.5, and the non-default temperature behavior.
+
 ### Fixed
 
 - **`CLAUDE.md` no longer says the container image tags are `:vX.X.X`.** `publish-image.yml` publishes `:X.Y.Z`, `:X.Y`, `:X` and `:latest`, without a `v` prefix.

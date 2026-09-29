@@ -46,7 +46,7 @@ The action uses the Python engine in `ai_pr_review/`.
 
 | Provider | Standard model | Premium model |
 |----------|---------------|---------------|
-| `anthropic` | `claude-sonnet-5` | `claude-opus-5-5` |
+| `anthropic` | `claude-sonnet-5-5` | `claude-opus-5-5` |
 | `openai` | `gpt-5.4-mini` | `gpt-5.4` |
 | `openai-compatible` | (user-specified) | same as standard |
 | `google` | `gemini-2.5-flash` | `gemini-2.5-pro` |
@@ -59,6 +59,8 @@ Any PR that changes a default model (this table) or adds a new supported model *
 The process caught the same failure class again on the Opus 5 bump (2026-09-03): live-verified against `stress_diff.txt` with no effort cap, Opus 5 took 206s and spent 11,433 thinking tokens (vs. Opus 4.8's 44s/0 thinking tokens on the identical prompt) — comfortably exceeding `llm/anthropic.py`'s 180s client timeout under real load. Unlike Opus 4.7/4.8 (thinking off by default, explicit opt-in required), Opus 5 has adaptive thinking **on** by default. `resolve_effort()` now caps it at `"low"` the same way it already did for Sonnet 5, live-verified to bring the same prompt down to 67s/2,464 thinking tokens.
 
 A third failure class surfaced by the same process (issue #810, 2026-09-12): `claude-opus-5` returns a hard `stop_reason=refusal` on some diffs that `claude-sonnet-5` handles cleanly, confirmed on 2 of the E9.S2 corpus's 14 fixtures (`tests/canary/corpus/`) — one where an actual XSS/SQL-injection pattern is present at all (regardless of file size or dilution), one where a specific multi-element combination of synthetic anti-patterns triggers it (an exact combination this repo could not reliably route around; a 2-3 run spot check of one fix candidate passed, then failed 5/5 on full re-verification — see the corpus README's "Opus 5 refusal" section for why only a full-scale re-test should be trusted here). `agents/dispatch.py`'s `_run_single_agent` now retries once on `standard_model` when a `use_premium` call is blocked this way (exit code 3), so an isolated refusal degrades one agent's model tier for one call rather than dropping its coverage from the review entirely. This is a production-facing mitigation, not a fix for the underlying classifier behavior — it does not eliminate the risk that a real customer PR containing similar content sees the same refusal on its first (premium) attempt.
+
+Sonnet 5.5 (2026-09-28) was verified the same way: `claude-sonnet-5-5` became the Anthropic standard default after `tests/canary/live_model_canary.py` (run via the `Live Model Canary` workflow, run 36500424509, commit 97f9bdf) passed 4 of 4 on `stress_diff.txt`. Every call ended with `stop_reason=end_turn`. Sonnet 5.5 used 0 thinking tokens under the inherited `low` effort cap, and Opus 5.5 used 830 and 591. This confirmed `low` is sufficient on that diff, not that it is necessary or optimal, and `temperature_verify.py` was not run for either model, so the "non-default temperature is a 400" behavior is still taken from Anthropic's docs. The `bedrock-proxy` default was left on Sonnet 5 because the Bedrock ID for Sonnet 5.5 is unverified.
 
 Before merging a model-default or new-model-support PR:
 

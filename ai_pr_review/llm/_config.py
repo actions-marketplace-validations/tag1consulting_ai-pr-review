@@ -80,6 +80,10 @@ def resolve_temperature(raw: float, model_id: str) -> float | None:
         temperature=0.0     -> HTTP 400  "`temperature` is deprecated for this model."
         temperature=1.0     -> HTTP 200  (1.0 is the model's default, so a no-op)
 
+    claude-sonnet-5-5 is covered by the "sonnet-5" substring check below, on
+    Anthropic's own published model docs (non-default sampling values are a 400,
+    same as Sonnet 5), NOT yet live-verified against the real Messages API.
+
     claude-opus-5-5 is included below on Anthropic's own published model docs
     (sampling params removed, same as Opus 5/4.8/4.7), NOT yet live-verified
     against the real Messages API -- that verification is required before
@@ -134,15 +138,27 @@ def resolve_effort(model_id: str) -> str | None:
     tokens -- same mitigation as Sonnet 5, verified to actually work rather
     than assumed to carry over.
 
+    claude-sonnet-5-5 also matches the "sonnet-5" check below and so inherits the
+    "low" cap. Per Anthropic's docs its effort levels are recalibrated from Sonnet
+    5's (default still "high"). Live canary 2026-09-28 (run 36500424509 of the Live Model Canary workflow, on commit 97f9bdf): with this "low"
+    cap, code-reviewer and silent-failure-hunter both ended with
+    stop_reason=end_turn and 0 thinking tokens against
+    tests/canary/stress_diff.txt. That shows "low" is sufficient for that diff,
+    NOT that it is necessary (nothing was run uncapped) and NOT that it is the
+    best setting for review quality.
+
     claude-opus-5-5 cannot disable thinking at all (per Anthropic's docs,
     unlike Opus 5 which could disable it below effort "xhigh"), and its
     default effort is "medium" (one step below Opus 5's default "high") --
     Anthropic's own release notes describe it as thinking more per turn at a
     given effort level than Opus 5, so the 180s client timeout in
-    llm/anthropic.py is a real regression candidate here, NOT yet live-verified.
-    Do not treat "low" as confirmed sufficient for claude-opus-5-5 until
-    tests/canary/live_model_canary.py has actually been run against it (see
-    the model-change verification process in this repo's CLAUDE.md).
+    llm/anthropic.py is a real regression candidate here. The live canary has now
+    been run against it (2026-09-28, run 36500424509 of the Live Model Canary workflow, on commit 97f9bdf): with the "low" cap both
+    code-reviewer and silent-failure-hunter ended with stop_reason=end_turn
+    (830 and 591 thinking tokens) against tests/canary/stress_diff.txt, and the
+    whole canary step finished in about 55 seconds. That is one diff and two
+    agents, so treat it as "not a regression on the stress diff", not as a
+    general guarantee.
     """
     lower = model_id.lower()
     if "sonnet-5" in lower or _is_opus_5_family(lower):

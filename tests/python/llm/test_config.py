@@ -141,3 +141,18 @@ def test_resolve_effort_low_for_dated_opus_5_snapshot() -> None:
     """Regression lock: a dated Opus 5 snapshot id must still get the effort
     cap -- same reasoning as test_resolve_temperature_rejected_for_dated_opus_5_snapshot."""
     assert resolve_effort("claude-opus-5-20260915") == "low"
+
+
+def test_sonnet_5_5_temperature_is_omitted() -> None:
+    """claude-sonnet-5-5 rejects non-default sampling values (per Anthropic's docs, not
+    yet live-verified), so it must get the same omission as Sonnet 5."""
+    assert resolve_temperature(0.3, "claude-sonnet-5-5") is None
+    assert resolve_temperature(0.3, "us.anthropic.claude-sonnet-5-5") is None
+
+
+def test_sonnet_5_5_effort_is_capped_at_low() -> None:
+    """claude-sonnet-5-5 inherits Sonnet 5's "low" effort cap through the shared
+    "sonnet-5" check. Pinned so a refactor of that check cannot silently drop the
+    cap for 5.5 and let adaptive thinking exhaust max_tokens (issue #592)."""
+    assert resolve_effort("claude-sonnet-5-5") == "low"
+    assert resolve_effort("us.anthropic.claude-sonnet-5-5") == "low"
