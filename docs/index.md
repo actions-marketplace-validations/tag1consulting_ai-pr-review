@@ -70,13 +70,13 @@ That's it — reviews start firing on the next PR.
 
 ## What's new in v2.18.0
 
-**Behavior change: new default OpenAI and Google models.** OpenAI now uses `gpt-6-luna` / `gpt-6.1-sol` and Google uses `gemini-3.5-flash-lite` / `gemini-3.8-flash`. Both pairs are cheaper than before and were verified with the live model canary. Google stopped offering the old Gemini 2.5 defaults to new projects. To keep the previous models, set `AI_MODEL_STANDARD` and `AI_MODEL_PREMIUM`. The weekly model watcher now also watches OpenAI and Google.
+**Behavior change: new default OpenAI and Google models.** OpenAI now uses `gpt-6-luna` / `gpt-6.1-sol`, which are cheaper than the previous pair. Google now uses `gemini-3.5-flash-lite` / `gemini-3.8-flash`, because Google stopped offering the old Gemini 2.5 defaults to new projects. The Google standard model costs the same as before, and the premium model has a higher input price and a lower output price than `gemini-2.5-pro` (its introductory rate is lower through 2026-12-31, then doubles). Both pairs were verified with the live model canary. To keep the previous models, set the `model-standard` and `model-premium` action inputs. A new weekly model watcher opens an issue when Anthropic, OpenAI or Google lists a newer model than the defaults.
 
 See [Version History → v2.18.0](version-history/v2.18.0) for details.
 
 ## What's new in v2.17.0
 
-**Behavior change: the default Anthropic `standard` model is now `claude-sonnet-5-5`**, at the same price, verified with the live model canary. To keep the previous model, set `AI_MODEL_STANDARD=claude-sonnet-5`. Pushing a release tag now also creates a draft GitHub release with the notes filled in, so publishing to the GitHub Marketplace is a single checkbox in the web form. The token table also labels Sonnet 5.5 correctly.
+**Behavior change: the default Anthropic `standard` model is now `claude-sonnet-5-5`**, at the same price, verified with the live model canary. To keep the previous model, set the `model-standard: claude-sonnet-5` action input (or the `AI_REVIEW_MODEL_STANDARD` repository variable in the example workflow). `AI_MODEL_STANDARD` works only when running the container directly, because the action sets it from its inputs. Pushing a release tag now also creates a draft GitHub release with the notes filled in, so publishing to the GitHub Marketplace is a single checkbox in the web form. The token table also labels Sonnet 5.5 correctly.
 
 See [Version History → v2.17.0](version-history/v2.17.0) for details.
 

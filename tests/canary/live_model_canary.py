@@ -18,8 +18,8 @@ excluded from the default `pytest tests/python` run. Invoke directly:
 
     python tests/canary/live_model_canary.py
 
-Exit code 0 on success (all models produced end_turn/text), 1 on any
-failure. Intended for a scheduled GitHub Actions workflow
+Exit code 0 on success (every call ended with its provider's clean stop
+reason and a valid json-findings array), 1 on any failure. Intended for a scheduled GitHub Actions workflow
 (.github/workflows/model-canary.yml), not per-PR CI.
 """
 
