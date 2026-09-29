@@ -52,6 +52,28 @@ def test_parse_reports_reasoning_tokens_without_double_counting():
     assert resp.output_tokens == 900
 
 
+@pytest.mark.parametrize(
+    "usage_extra",
+    [{}, {"completion_tokens_details": None}, {"completion_tokens_details": {"reasoning_tokens": None}},
+     {"completion_tokens_details": "odd"}, {"completion_tokens_details": {"reasoning_tokens": "n/a"}}],
+)
+def test_parse_reasoning_tokens_missing_or_malformed_is_zero(usage_extra):
+    """A display-only field must never discard an otherwise complete response."""
+    import json
+
+    usage = {"prompt_tokens": 10, "completion_tokens": 5, **usage_extra}
+    body = json.dumps({"choices": [{"finish_reason": "stop", "message": {"content": "R."}}], "usage": usage})
+    resp = _parse_response(body, {})
+    assert resp.thinking_tokens == 0
+    assert resp.output_tokens == 5
+
+
+def test_body_temperature_omitted_for_gpt_5_6():
+    """The judge sends temperature=0.0; GPT-5.6 must never receive it."""
+    body = _build_body(make_request(model_id="gpt-5.6-luna", temperature=0.0), provider="openai")
+    assert "temperature" not in body
+
+
 def test_parse_content_filter_raises():
     import json
 

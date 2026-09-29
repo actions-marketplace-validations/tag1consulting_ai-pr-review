@@ -26,6 +26,7 @@ failure. Intended for a scheduled GitHub Actions workflow
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import time
@@ -145,6 +146,7 @@ async def _run_one(provider: str, model_id: str, agent_name: str) -> CanaryResul
 
     elapsed = time.monotonic() - started
     result = successes[0]
+    _save_output(provider, model_id, agent_name, result.output)
     stop_reason = result.stop_reason
     thinking_tokens = result.token_log.thinking_tokens if result.token_log else 0
     expected = _CLEAN_STOP_REASONS.get(provider, "end_turn")
@@ -161,13 +163,14 @@ async def _run_one(provider: str, model_id: str, agent_name: str) -> CanaryResul
         )
 
     output_tokens = result.token_log.output if result.token_log else 0
-    _save_output(provider, model_id, agent_name, result.output)
-    if not _FENCE_RE.search(result.output):
-        # A clean stop with no json-findings block is still a lost review:
-        # the findings pipeline would skip this agent entirely.
+    block_error = _findings_block_error(result.output)
+    if block_error:
+        # A clean stop with a missing or unparseable json-findings block is
+        # still a lost review: extract_findings() would return [] with only a
+        # stderr warning, which reads as "no findings", not as a failure.
         return CanaryResult(
             provider, model_id, agent_name, False,
-            f"stop_reason={stop_reason} but no json-findings block, "
+            f"stop_reason={stop_reason} but {block_error}, "
             f"output_tokens={output_tokens}",
         )
     findings = extract_findings(result.output, agent_name)
@@ -179,15 +182,38 @@ async def _run_one(provider: str, model_id: str, agent_name: str) -> CanaryResul
     )
 
 
+def _findings_block_error(output: str) -> str:
+    """Return why the output's json-findings block is unusable, or "" if it is fine.
+
+    Uses the same fence regex as findings/extract.py, then checks that the
+    block is a JSON array, so the canary fails on exactly the outputs the
+    findings pipeline would silently drop.
+    """
+    match = _FENCE_RE.search(output)
+    if not match:
+        return "no json-findings block"
+    try:
+        parsed = json.loads(match.group(1).strip())
+    except json.JSONDecodeError as exc:
+        return f"json-findings block is not valid JSON ({exc.msg})"
+    if not isinstance(parsed, list):
+        return "json-findings block is not a JSON array"
+    return ""
+
+
 def _save_output(provider: str, model_id: str, agent_name: str, text: str) -> None:
     """Write the raw review text to $CANARY_OUTPUT_DIR, when set, so a person
-    can judge review content and not only the stop reason."""
+    can judge review content and not only the stop reason. A write error is
+    reported and ignored: it must not hide the canary result itself."""
     out_dir = os.environ.get("CANARY_OUTPUT_DIR")
     if not out_dir:
         return
     path = Path(out_dir) / f"{provider}__{model_id}__{agent_name}.md".replace("/", "_")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    except OSError as exc:
+        print(f"WARNING: could not save canary output to {path}: {exc}", file=sys.stderr)
 
 
 async def main() -> int:

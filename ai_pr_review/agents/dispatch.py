@@ -31,7 +31,7 @@ class TokenUsage:
     model: str
     thinking_tokens: int = 0
     """Portion of `output` spent on extended/adaptive thinking, when the
-    provider reports it (currently Anthropic and Google). Zero for
+    provider reports it (currently Anthropic, Google, and OpenAI). Zero for
     providers/responses that don't report it. See #592: a response can
     exhaust `output`/`max_tokens` entirely on thinking, producing no text."""
 

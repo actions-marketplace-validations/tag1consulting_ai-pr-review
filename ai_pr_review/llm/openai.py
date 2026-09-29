@@ -145,9 +145,13 @@ def _parse_response(response_text: str, request_body: dict[str, Any]) -> LLMResp
     )
     # Reasoning tokens are already included in completion_tokens (and billed
     # as output), so this is reported for visibility only, not added again.
-    reasoning_tokens = int(
-        (usage.get("completion_tokens_details") or {}).get("reasoning_tokens", 0) or 0
-    )
+    details = usage.get("completion_tokens_details")
+    try:
+        reasoning_tokens = int((details or {}).get("reasoning_tokens") or 0)
+    except (AttributeError, TypeError, ValueError):
+        # Display-only field: an odd shape from an openai-compatible server
+        # must not discard an otherwise complete, billed response.
+        reasoning_tokens = 0
 
     # OpenAI prompt_tokens includes cached_tokens; subtract to match Anthropic convention.
     uncached_input = max(prompt_tokens - cached_tokens, 0)
