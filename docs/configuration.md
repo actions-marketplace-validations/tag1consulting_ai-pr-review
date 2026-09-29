@@ -28,7 +28,7 @@ This table documents the root `action.yml` (direct-action) inputs. The container
 | `policy-source` | No | `base-ref` | Where `.github/ai-pr-review/policy.yml` is read from: `base-ref` (via `git show`, never the PR head) or `workspace` (the checked-out tree directly). See [Policies: Security](policy#security-loaded-from-the-base-ref-never-the-pr-head--but-only-when-your-trigger-needs-it) before setting `workspace`. |
 | `github-token` | **Yes** | — | GitHub token with `pull-requests: write` |
 | `parallel` | No | `true` | Run agents in parallel (tiered fan-out). Set to `false` to revert to sequential if you hit provider rate limits |
-| `temperature` | No | `0.3` | Sampling temperature for LLM calls (float in [0, 2]). Lower values produce more deterministic output. |
+| `temperature` | No | `0.3` | Sampling temperature for LLM calls (float in [0, 2]). Lower values produce more deterministic output. Not sent to models that reject or discourage a non-default value (Claude Opus 4.7 and later, Sonnet 5 and later, OpenAI o-series, the GPT-5 and GPT-6 families, and Gemini 3), where the provider's default applies. |
 | `max-inline` | No | `25` | Maximum inline review comments per run; excess routed to the review body |
 | `max-tokens-per-agent` | No | `32768` | Max output tokens per LLM agent call (clamped to [256, 65536]). Lowered from 32768 to 16384 in v1.3.0, raised back for #642. |
 | `analyzer-concurrency` | No | `4` | Maximum simultaneous native static-analyzer subprocesses. Forced to 1 when `parallel: false`. Requires the Python engine. |
@@ -122,7 +122,7 @@ your workflow `env:` block or pass them via `docker run -e`.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AI_TEMPERATURE` | `0.3` | Sampling temperature for LLM calls (clamped to [0, 2]) |
+| `AI_TEMPERATURE` | `0.3` | Sampling temperature for LLM calls (clamped to [0, 2]). Not sent to models that reject or discourage a non-default value (Claude Opus 4.7 and later, Sonnet 5 and later, OpenAI o-series, the GPT-5 and GPT-6 families, and Gemini 3), where the provider's default applies. |
 | `LLM_PROMPT_CACHING` | `auto` | Enable Anthropic/Bedrock prompt caching. `auto` enables for anthropic and bedrock-proxy; `true` force-enables; `false` force-disables. |
 | `AI_CACHE_PRIMING` | `false` | Deprecated, ignored (#824 audit of #807): the cache-priming serialization mechanism (`cache_priming_effective()`) was deleted as dead code with zero production callers. Accepted as a no-op with a deprecation warning; will be rejected starting in v3.0.0. |
 | `VCS_PROVIDER` | `github` | Selects the post-review script. Valid: `github`, `bitbucket`, `gitlab`. |

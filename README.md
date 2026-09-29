@@ -249,7 +249,7 @@ Slash commands are built into the canonical [examples/workflows/pr-review.yml](e
 | `policy-source` | No | `base-ref` | Where `.ai-pr-review/policy.yml` (or its `.github/ai-pr-review/policy.yml` fallback) is read from (`base-ref` or `workspace`). See [Configuration: Action inputs](docs/configuration.md#action-inputs) and [Policies: Security](docs/policy.md) before setting `workspace`. |
 | `github-token` | **Yes** | — | GitHub token with `pull-requests: write` |
 | `parallel` | No | `true` | Run agents in parallel (tiered fan-out). Set to `false` to revert to sequential if you hit provider rate limits |
-| `temperature` | No | `0.3` | Sampling temperature for LLM calls (float in [0, 2]). |
+| `temperature` | No | `0.3` | Sampling temperature for LLM calls (float in [0, 2]). Not sent to models that reject or discourage a non-default value (Claude Opus 4.7 and later, Sonnet 5 and later, OpenAI o-series, the GPT-5 and GPT-6 families, and Gemini 3), where the provider's default applies. |
 | `max-inline` | No | `25` | Maximum inline review comments per run; excess routed to the review body |
 | `max-tokens-per-agent` | No | `32768` | Max output tokens per LLM agent call (clamped to [256, 65536]). Lowered from 32768 to 16384 in v1.3.0, raised back for #642. Overridable per agent via `AI_MAX_TOKENS_<AGENT_NAME>` (e.g. `AI_MAX_TOKENS_CODE_REVIEWER`), higher-precedence than this global value; see [Configuration: Per-agent max-tokens overrides](docs/configuration.md#per-agent-max-tokens-overrides-env-var-only). |
 | `analyzer-concurrency` | No | `4` | Maximum simultaneous native static-analyzer subprocesses. Forced to 1 when `parallel: false`. |

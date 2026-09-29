@@ -62,7 +62,7 @@ the full reasoning behind that choice.
 - Incremental-diff SHA watermark (a hidden reference-link marker — Bitbucket's
   renderer shows an HTML comment as literal text instead of hiding it, unlike
   GitHub/GitLab, so Bitbucket uses a different marker form; see [Version
-  History → v2.6.1](version-history/v2.6.1))
+  History → v2.6.1](version-history/archive#v261))
 - All existing AI agents and static analyzers (same container image, same
   review logic)
 - Provider-auto retry on transient Bitbucket API errors (408/429/500-504)

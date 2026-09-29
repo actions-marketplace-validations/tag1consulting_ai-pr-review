@@ -68,6 +68,12 @@ jobs:
 
 That's it — reviews start firing on the next PR.
 
+## What's new in v2.18.0
+
+**Behavior change: new default OpenAI and Google models.** OpenAI now uses `gpt-6-luna` / `gpt-6.1-sol` and Google uses `gemini-3.5-flash-lite` / `gemini-3.8-flash`. Both pairs are cheaper than before and were verified with the live model canary. Google stopped offering the old Gemini 2.5 defaults to new projects. To keep the previous models, set `AI_MODEL_STANDARD` and `AI_MODEL_PREMIUM`. The weekly model watcher now also watches OpenAI and Google.
+
+See [Version History → v2.18.0](version-history/v2.18.0) for details.
+
 ## What's new in v2.17.0
 
 **Behavior change: the default Anthropic `standard` model is now `claude-sonnet-5-5`**, at the same price, verified with the live model canary. To keep the previous model, set `AI_MODEL_STANDARD=claude-sonnet-5`. Pushing a release tag now also creates a draft GitHub release with the notes filled in, so publishing to the GitHub Marketplace is a single checkbox in the web form. The token table also labels Sonnet 5.5 correctly.
@@ -79,12 +85,6 @@ See [Version History → v2.17.0](version-history/v2.17.0) for details.
 **The action is now ready for the GitHub Marketplace.** It is renamed `Tag1 Multi-Agent PR Review`, has a shorter description, an orange `git-pull-request` badge, and an author. Inputs, outputs, and behavior are unchanged, and `uses: tag1consulting/ai-pr-review@...` references keep working. Also fixes two stale statements in the docs and a workflow comment.
 
 See [Version History → v2.16.2](version-history/v2.16.2) for details.
-
-## What's new in v2.16.1
-
-**Every third-party GitHub Action in this repo's workflows and example templates is now pinned to a full commit SHA**, closing the exposure where a compromised action publisher could repoint a mutable tag, most importantly in the workflow that publishes the container image (issue #955). Renovate keeps the pins current. This release also ships CI hardening for the e2e harness (`e2e-gate` is now a required check, and pushes to `release/*` PRs run the live legs) and three fixes (the `deep-preflight` credential check in #962, a false failure in the e2e verifier, and a required `Python (3.14)` check that could get stuck at "Expected" on PRs that touch no Python files). No changes to the review engine or to action inputs and outputs.
-
-See [Version History → v2.16.1](version-history/v2.16.1) for details.
 
 ## Learn more
 

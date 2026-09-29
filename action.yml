@@ -153,7 +153,10 @@ inputs:
     description: >
       Sampling temperature for LLM calls. Controls output randomness; lower values
       produce more deterministic responses. Must be a float in [0, 2]. The default
-      (0.3) is tuned for code review. Sets AI_TEMPERATURE.
+      (0.3) is tuned for code review. It is not sent to models that reject or
+      discourage a non-default value (Claude Opus 4.7 and later, Sonnet 5 and later,
+      OpenAI o-series, the GPT-5 and GPT-6 families, and Gemini 3), where the
+      provider's default applies. Sets AI_TEMPERATURE.
     required: false
     default: '0.3'
 
