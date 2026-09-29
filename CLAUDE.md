@@ -70,6 +70,8 @@ Before merging a model-default or new-model-support PR:
 
 See `tests/canary/live_model_canary.py`'s module docstring and the #592 test-plan writeup for the full reasoning; this is one required step from that plan (the "process" tier), not the whole plan.
 
+A bump usually starts from the weekly `model-watch.yml` workflow, which opens a "New Anthropic standard/premium model available" issue when the Models API lists a newer Sonnet or Opus than the pinned default (see `scripts/model_watch.py`). It only reports and never changes a default, and it does not select a model at runtime on purpose: an unknown model prices at zero rates with no warning, and effort and temperature handling are matched per model name.
+
 ### CHECKPOINT: live-model harness runs require explicit human approval first
 
 `tests/canary/live_model_canary.py` and `tests/canary/consistency_eval.py` (and the `Live Model Canary` GitHub workflow's `workflow_dispatch` trigger) make **real, billed Anthropic API calls** against a full corpus (`tests/canary/corpus/`, 14 fixtures as of E9.S2) — not a single request. They are known to have exhausted the shared `ANTHROPIC_API_KEY` used by both this repo's CI and local harness testing (workspace-level quota, blocked until 2026-10-01): Anthropic's own usage export shows ~$142 of a ~$149 six-day total for that key landed on 2026-09-12/09-13, correlating exactly with Epic 9's harness/corpus work (#800, #809, #811, #834, #835), against a same-window CI-workflow total of only ~$7.32 measured directly from GitHub Actions job logs — confirming the harness runs, not the CI review workflow, were the overwhelming majority of the spend.

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A weekly model watcher opens an issue when Anthropic lists a newer Sonnet or Opus than the pinned defaults.** The new `model-watch.yml` workflow (Mondays 10:00 UTC, or on demand with an optional dry run) lists the models the Models API offers with `scripts/model_watch.py` and compares the newest Sonnet and Opus with the pinned Anthropic `standard` and `premium` defaults. It opens one issue per newer model with the checklist from the model-change verification process, and never changes a default. It does not choose a model at runtime: pricing, temperature and effort handling here are per-model, so a bump needs a pricing row and a live canary run first. A model whose issue was closed is not reported again. The Models API call makes no model calls, so it uses no tokens, but it uses the same API key secret as the live model canary.
+
 ## [2.17.0] - 2026-09-28
 
 ### Added

@@ -36,12 +36,13 @@ ai-pr-review/
 │   ├── model-pricing.json  # Per-model token pricing for cost estimation
 │   └── suppressions.json   # Declarative false-positive suppression rules
 ├── language-profiles/      # Per-language review context (markdown, injected into prompts)
-├── scripts/                # Release tooling (release_notes.py builds GitHub release notes)
+├── scripts/                # Release and model tooling (release_notes.py, model_watch.py)
 ├── tests/python/           # pytest suite — see deep reference
 └── .github/workflows/
     ├── ai-review.yml       # Self-test: runs the action on its own PRs
     ├── draft-release.yml   # Creates a draft GitHub release when a release tag is pushed
     ├── lint.yml            # pytest + mypy + ruff
+    ├── model-watch.yml     # Weekly check for Sonnet/Opus models newer than the pinned defaults
     ├── pages.yml           # GitHub Pages documentation site build
     └── publish-image.yml   # Container image build, push, and signing
 ```
