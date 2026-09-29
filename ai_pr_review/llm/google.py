@@ -14,7 +14,12 @@ from typing import Any
 
 import httpx
 
-from ._config import get_retry_base_delay, get_retry_count, resolve_temperature
+from ._config import (
+    get_retry_base_delay,
+    get_retry_count,
+    resolve_gemini_thinking_level,
+    resolve_temperature,
+)
 from ._http import LLMContentError, LLMError, retry_post
 from .base import LLMRequest, LLMResponse
 
@@ -26,6 +31,9 @@ def _build_body(req: LLMRequest) -> dict[str, Any]:
     gen_config: dict[str, Any] = {"maxOutputTokens": req.max_tokens}
     if temperature is not None:
         gen_config["temperature"] = temperature
+    thinking_level = resolve_gemini_thinking_level(req.model_id)
+    if thinking_level is not None:
+        gen_config["thinkingConfig"] = {"thinkingLevel": thinking_level}
     # Google has no multi-breakpoint caching support here, so system_prefix
     # (feedback addendum, language profiles) is prepended to system_prompt in
     # the same order Anthropic's single-breakpoint layout uses. Without this,

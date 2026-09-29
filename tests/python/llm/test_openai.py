@@ -34,6 +34,24 @@ def test_parse_with_cache():
     assert resp.cache_read_tokens == 768
 
 
+def test_parse_reports_reasoning_tokens_without_double_counting():
+    """GPT-5-family reasoning tokens are reported as thinking_tokens, but they
+    are already inside completion_tokens, so output_tokens must not grow."""
+    import json
+
+    body = json.dumps({
+        "choices": [{"finish_reason": "stop", "message": {"content": "Review."}}],
+        "usage": {
+            "prompt_tokens": 1000,
+            "completion_tokens": 900,
+            "completion_tokens_details": {"reasoning_tokens": 700},
+        },
+    })
+    resp = _parse_response(body, {})
+    assert resp.thinking_tokens == 700
+    assert resp.output_tokens == 900
+
+
 def test_parse_content_filter_raises():
     import json
 

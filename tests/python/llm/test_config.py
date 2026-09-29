@@ -8,7 +8,13 @@ a locked-in regression case here.
 
 from __future__ import annotations
 
-from ai_pr_review.llm._config import resolve_effort, resolve_temperature
+import pytest
+
+from ai_pr_review.llm._config import (
+    resolve_effort,
+    resolve_gemini_thinking_level,
+    resolve_temperature,
+)
 
 
 def test_resolve_temperature_rejected_for_sonnet_5() -> None:
@@ -71,6 +77,30 @@ def test_resolve_temperature_rejected_for_dated_opus_5_snapshot() -> None:
 def test_resolve_temperature_accepted_for_sonnet_4_6() -> None:
     """Regression lock: Sonnet 4.6 still accepts a non-default temperature."""
     assert resolve_temperature(0.3, "claude-sonnet-4-6") == 0.3
+
+
+@pytest.mark.parametrize("model_id", ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"])
+def test_resolve_temperature_rejected_for_gpt_5_6(model_id: str) -> None:
+    """GPT-5-series reasoning models accept only the default temperature."""
+    assert resolve_temperature(0.0, model_id) is None
+
+
+@pytest.mark.parametrize("model_id", ["gemini-3.8-flash", "gemini-3.5-flash-lite"])
+def test_resolve_temperature_omitted_for_gemini_3(model_id: str) -> None:
+    """Google advises keeping Gemini 3 at its default 1.0 (lower can loop), so the
+    judge's 0.0 must not be sent."""
+    assert resolve_temperature(0.0, model_id) is None
+
+
+def test_resolve_temperature_accepted_for_gemini_2_5_and_gpt_5_4() -> None:
+    """Regression lock: the new branches must not catch the older models."""
+    assert resolve_temperature(0.3, "gemini-2.5-flash") == 0.3
+    assert resolve_temperature(0.3, "gpt-5.4-mini") == 0.3
+
+
+def test_resolve_effort_low_for_global_bedrock_sonnet_5_5() -> None:
+    """The new bedrock-proxy default keeps the Sonnet 5 family's low effort cap."""
+    assert resolve_effort("global.anthropic.claude-sonnet-5-5") == "low"
 
 
 def test_resolve_temperature_clamps_to_max() -> None:
@@ -156,3 +186,18 @@ def test_sonnet_5_5_effort_is_capped_at_low() -> None:
     cap for 5.5 and let adaptive thinking exhaust max_tokens (issue #592)."""
     assert resolve_effort("claude-sonnet-5-5") == "low"
     assert resolve_effort("us.anthropic.claude-sonnet-5-5") == "low"
+
+
+@pytest.mark.parametrize(
+    ("model_id", "expected"),
+    [
+        ("gemini-3.8-flash", "low"),
+        ("gemini-3.1-pro-preview", "low"),
+        ("gemini-3.5-flash-lite", None),
+        ("gemini-2.5-flash", None),
+        ("gemini-2.5-pro", None),
+        ("gpt-5.6-terra", None),
+    ],
+)
+def test_resolve_gemini_thinking_level(model_id: str, expected: str | None) -> None:
+    assert resolve_gemini_thinking_level(model_id) == expected
