@@ -68,9 +68,10 @@ def test_parse_reasoning_tokens_missing_or_malformed_is_zero(usage_extra):
     assert resp.output_tokens == 5
 
 
-def test_body_temperature_omitted_for_gpt_5_6():
-    """The judge sends temperature=0.0; GPT-5.6 must never receive it."""
-    body = _build_body(make_request(model_id="gpt-5.6-luna", temperature=0.0), provider="openai")
+@pytest.mark.parametrize("model_id", ["gpt-5.6-luna", "gpt-6-luna", "gpt-6.1-sol"])
+def test_body_temperature_omitted_for_gpt_5_6_and_6(model_id):
+    """The judge sends temperature=0.0; these models must never receive it."""
+    body = _build_body(make_request(model_id=model_id, temperature=0.0), provider="openai")
     assert "temperature" not in body
 
 

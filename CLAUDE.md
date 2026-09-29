@@ -47,7 +47,7 @@ The action uses the Python engine in `ai_pr_review/`.
 | Provider | Standard model | Premium model |
 |----------|---------------|---------------|
 | `anthropic` | `claude-sonnet-5-5` | `claude-opus-5-5` |
-| `openai` | `gpt-5.6-luna` | `gpt-5.6-terra` |
+| `openai` | `gpt-6-luna` | `gpt-6.1-sol` |
 | `openai-compatible` | (user-specified) | same as standard |
 | `google` | `gemini-3.5-flash-lite` | `gemini-3.8-flash` |
 | `bedrock-proxy` | `us.anthropic.claude-sonnet-5` | `global.anthropic.claude-opus-4-7` |

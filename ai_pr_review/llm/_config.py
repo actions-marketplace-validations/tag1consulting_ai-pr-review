@@ -90,9 +90,10 @@ def resolve_temperature(raw: float, model_id: str) -> float | None:
     claude-opus-5-5 becomes the default (see the model-change verification
     process in this repo's CLAUDE.md).
 
-    gpt-5.6-* (luna/terra/sol) is included for the same reason as gpt-5.5:
-    GPT-5-series reasoning models accept only the default temperature of 1,
-    per third-party reports, NOT yet live-verified for 5.6.
+    gpt-5.6-* (luna/terra/sol) and gpt-6* (luna/sol/astra, gpt-6.1-sol) are
+    included for the same reason as gpt-5.5: these reasoning models accept only
+    the default temperature of 1, per third-party reports, NOT live-verified
+    (the canary never sends a temperature to them).
 
     gemini-3* is included for a different reason: the API accepts a
     temperature, but Google's Gemini 3 developer guide "strongly recommend[s]
@@ -123,6 +124,7 @@ def resolve_temperature(raw: float, model_id: str) -> float | None:
         or lower.startswith("o4")
         or lower.startswith("gpt-5.5")
         or lower.startswith("gpt-5.6")
+        or lower.startswith("gpt-6")
         or lower.startswith("gemini-3")
         or lower.startswith("gpt-5-")
         or lower == "gpt-5"

@@ -79,9 +79,13 @@ def test_resolve_temperature_accepted_for_sonnet_4_6() -> None:
     assert resolve_temperature(0.3, "claude-sonnet-4-6") == 0.3
 
 
-@pytest.mark.parametrize("model_id", ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"])
-def test_resolve_temperature_rejected_for_gpt_5_6(model_id: str) -> None:
-    """GPT-5-series reasoning models accept only the default temperature."""
+@pytest.mark.parametrize(
+    "model_id",
+    ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol",
+     "gpt-6-astra"],
+)
+def test_resolve_temperature_rejected_for_gpt_5_6_and_6(model_id: str) -> None:
+    """GPT-5.6 and GPT-6 reasoning models accept only the default temperature."""
     assert resolve_temperature(0.0, model_id) is None
 
 

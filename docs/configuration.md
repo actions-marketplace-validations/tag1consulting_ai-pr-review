@@ -110,7 +110,7 @@ See [Bitbucket setup](bitbucket-setup), [GitLab setup](gitlab-setup), or the [Ge
 | Provider | provider value | Required secret | Default models (standard / premium) |
 |----------|-----------------|-----------------|--------------------------------------|
 | Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-5-5` / `claude-opus-5-5` |
-| OpenAI | `openai` | `OPENAI_API_KEY` | `gpt-5.6-luna` / `gpt-5.6-terra` |
+| OpenAI | `openai` | `OPENAI_API_KEY` | `gpt-6-luna` / `gpt-6.1-sol` |
 | OpenAI-compatible | `openai-compatible` | `OPENAI_API_KEY` + `base-url` | Set via `model-standard` / `model-premium` inputs |
 | Google | `google` | `GOOGLE_API_KEY` | `gemini-3.5-flash-lite` / `gemini-3.8-flash` |
 | Bedrock proxy | `bedrock-proxy` | `BEDROCK_API_KEY` + `base-url` | `us.anthropic.claude-sonnet-5` / `global.anthropic.claude-opus-4-7` |

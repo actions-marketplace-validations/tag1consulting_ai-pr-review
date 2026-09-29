@@ -470,6 +470,10 @@ def test_other_provider_defaults_have_pricing_entries(provider: str) -> None:
 @pytest.mark.parametrize(
     ("model_id", "display_name", "input_rate", "output_rate"),
     [
+        ("gpt-6-luna", "GPT-6 Luna", 100000, 500000),
+        ("gpt-6-sol", "GPT-6 Sol", 2000000, 10000000),
+        ("gpt-6.1-sol", "GPT-6.1 Sol", 2000000, 10000000),
+        ("gpt-6-astra", "GPT-6 Astra", 10000000, 50000000),
         ("gpt-5.6-luna", "GPT-5.6 Luna", 200000, 1200000),
         ("gpt-5.6-terra", "GPT-5.6 Terra", 2000000, 12000000),
         ("gpt-5.6-sol", "GPT-5.6 Sol", 4000000, 20000000),

@@ -60,7 +60,7 @@ TARGET_AGENT_NAMES = ("code-reviewer", "silent-failure-hunter")
 # requires. A SKIP line is not coverage: only an OK line is.
 PROVIDER_MODELS: dict[str, tuple[str, str, str]] = {
     "anthropic": ("ANTHROPIC_API_KEY", "claude-sonnet-5-5", "claude-opus-5-5"),
-    "openai": ("OPENAI_API_KEY", "gpt-5.6-luna", "gpt-5.6-terra"),
+    "openai": ("OPENAI_API_KEY", "gpt-6-luna", "gpt-6.1-sol"),
     "google": ("GOOGLE_API_KEY", "gemini-3.5-flash-lite", "gemini-3.8-flash"),
     # Also needs BEDROCK_API_URL (see ai_pr_review/llm/bedrock.py).
     "bedrock-proxy": (
