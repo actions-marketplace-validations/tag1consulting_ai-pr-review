@@ -60,13 +60,24 @@ def test_run_scripts_never_interpolate_expressions() -> None:
         assert "${{" not in script
 
 
-def test_the_api_key_reaches_only_the_watcher_step() -> None:
-    holders = [
-        step for step in _steps() if "ANTHROPIC_API_KEY" in (step.get("env") or {})
-    ]
-    assert len(holders) == 1
-    assert "model_watch.py" in holders[0]["run"]
-    assert holders[0]["env"]["ANTHROPIC_API_KEY"] == "${{ secrets.AI_REVIEW_API_KEY }}"
+_KEY_SECRETS = {
+    "ANTHROPIC_API_KEY": "${{ secrets.AI_REVIEW_API_KEY }}",
+    "OPENAI_API_KEY": "${{ secrets.OPENAI_API_KEY }}",
+    "GOOGLE_API_KEY": "${{ secrets.GOOGLE_API_KEY }}",
+}
+
+
+def test_each_api_key_reaches_only_the_watcher_step() -> None:
+    for env_var, secret in _KEY_SECRETS.items():
+        holders = [step for step in _steps() if env_var in (step.get("env") or {})]
+        assert len(holders) == 1, env_var
+        assert "model_watch.py" in holders[0]["run"]
+        assert holders[0]["env"][env_var] == secret
+
+
+def test_no_job_level_env_exposes_a_key_to_every_step() -> None:
+    assert "env" not in _load()
+    assert "env" not in _load()["jobs"]["watch"]
 
 
 def test_dry_run_input_is_passed_through_env_not_the_script() -> None:

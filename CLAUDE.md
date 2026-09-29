@@ -70,7 +70,7 @@ Before merging a model-default or new-model-support PR:
 
 See `tests/canary/live_model_canary.py`'s module docstring and the #592 test-plan writeup for the full reasoning; this is one required step from that plan (the "process" tier), not the whole plan.
 
-A bump usually starts from the weekly `model-watch.yml` workflow, which opens a "New Anthropic standard/premium model available" issue when the Models API lists a newer Sonnet or Opus than the pinned default (see `scripts/model_watch.py`). It only reports and never changes a default, and it does not select a model at runtime on purpose: an unknown model prices at zero rates with no warning, and effort and temperature handling are matched per model name.
+A bump usually starts from the weekly `model-watch.yml` workflow, which opens a "New <Anthropic|OpenAI|Google> standard/premium model available" issue when that provider's models API lists a newer model in a watched family than the pinned default: Sonnet/Opus, the pinned GPT tiers plus any tier in a newer GPT version (OpenAI renames tiers between versions, so those open a "New OpenAI model tier available" issue), and Gemini `flash-lite`/`flash` plus a stable Gemini Pro for premium (see `scripts/model_watch.py`). A provider whose API key secret is not set is skipped. For OpenAI and Google the verification canary runs locally, because the scheduled canary workflow has only an Anthropic key. It only reports and never changes a default, and it does not select a model at runtime on purpose: an unknown model prices at zero rates with no warning, and effort and temperature handling are matched per model name.
 
 ### CHECKPOINT: live-model harness runs require explicit human approval first
 
