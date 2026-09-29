@@ -12,6 +12,7 @@ What changed in each release, newest first. Every release from v2.8.0 onward has
 
 | Version | Highlights |
 |---------|-----------|
+| [v2.17.0](version-history/v2.17.0) | Default Anthropic standard model is now `claude-sonnet-5-5` (behavior change, live-canary verified), draft GitHub release created on tag push, token table labels Sonnet 5.5 correctly |
 | [v2.16.2](version-history/v2.16.2) | GitHub Marketplace metadata in `action.yml` (new name `Tag1 Multi-Agent PR Review`, short description, orange `git-pull-request` badge, author), plus two stale-statement fixes |
 | [v2.16.1](version-history/v2.16.1) | Every third-party GitHub Action pinned to a commit SHA (#955), `e2e-gate` now required and runs the live legs on `release/*` pushes, `deep-preflight` credential isolation (#962) and a verifier false-failure fixed |
 | [v2.16.0](version-history/v2.16.0) | `deep-preflight` subcommand replaces the weekly credential check's inline bash (#956), plus e2e harness follow-ups (#957, #958, #959) |
