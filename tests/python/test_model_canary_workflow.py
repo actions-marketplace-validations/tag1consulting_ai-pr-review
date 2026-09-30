@@ -63,3 +63,10 @@ def test_issue_step_also_runs_when_the_job_is_cancelled() -> None:
     assert "failure()" in condition
     assert "cancelled()" in condition
     assert "schedule" in condition
+
+
+def test_empty_detail_explanation_does_not_guess_a_single_cause() -> None:
+    step = next(s for s in _steps() if s.get("name") == "File an issue on failure")
+    script = step["run"]
+    assert "cause is not known from this issue alone" in script
+    assert "no provider key was set" in script

@@ -2320,10 +2320,15 @@ class GitHubProvider:
             )
         except Exception as exc:  # noqa: BLE001 -- the client raises on transport errors and exhausted 429/5xx retries
             self._errors.append(f"post_check_run: {type(exc).__name__}: {exc}")
+            _log.warning("policy-gate: posting check run %r raised %s: %s", name, type(exc).__name__, exc)
             return False
         if resp.status_code >= 400:
             self._errors.append(
                 f"post_check_run: HTTP {resp.status_code}: {resp.text[:200]}"
+            )
+            _log.warning(
+                "policy-gate: posting check run %r failed with HTTP %d: %s",
+                name, resp.status_code, resp.text[:200],
             )
             return False
         return True

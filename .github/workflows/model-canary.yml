@@ -77,7 +77,7 @@ jobs:
           # triaged it chasing the wrong root cause. Word it from what actually
           # happened instead.
           if [ -z "$FAILURE_DETAIL" ]; then
-            EXPLANATION="The canary did not report any per-call result. It most likely ran past the job's timeout-minutes limit and was cancelled, or crashed before writing its output (for example an import error or a dependency install failure). Check the end of the run log for the last call it finished."
+            EXPLANATION="The canary did not report any per-call result, so the cause is not known from this issue alone. Possible causes: it ran past the job's timeout-minutes limit and was cancelled, it crashed before writing its output (for example an import error or a dependency install failure), or no provider key was set so no call was made. Check the run log, starting with the last call it finished."
           elif [ "$ALL_QUOTA_EXHAUSTED" = "true" ]; then
             EXPLANATION="Every failing model/agent combination hit a provider API quota, rate-limit or billing error (see the provider on each line below). This looks like a key's usage limit, not a model-behavior regression or code bug. Re-run manually (workflow_dispatch) once the limit resets to confirm. No investigation is needed unless it recurs after that."
           else

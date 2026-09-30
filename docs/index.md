@@ -70,7 +70,7 @@ That's it — reviews start firing on the next PR.
 
 ## What's new in v2.18.1
 
-**The cost ceiling now tells you when it cannot bound a model.** A model with no pricing row used to be estimated at $0, so `max-cost-usd` could not stop it and nothing in the PR said so. The new `cost-ceiling-unpriced` input defaults to `warn`: the review runs and a "Cost ceiling not enforced" notice names the model. Set it to `block` to skip the review instead. Nothing changes unless `max-cost-usd` is above 0 and a model has no pricing row.
+**The cost ceiling now tells you when it cannot bound a model.** A model with no pricing row used to be estimated at $0, so `max-cost-usd` could not stop it and nothing in the PR said so. The new `cost-ceiling-unpriced` input defaults to `warn`: the review runs and a "Cost ceiling not enforced" notice names the model. Set it to `block` to skip the review instead. Nothing changes unless `max-cost-usd` is above 0 and a model has no pricing row (an invalid `cost-ceiling-unpriced` value is always an error).
 
 **The `ai-pr-review/policy-gate` check no longer flips back to `action_required` after `/ai-pr-review review-full` satisfied it.** A slower automatic review on the same commit could finish last and overwrite the `success`. It now keeps the gate satisfied for that commit.
 

@@ -250,3 +250,21 @@ def test_list_check_run_conclusions_warns_when_every_run_is_from_another_app(cap
     with caplog.at_level(logging.WARNING):
         assert provider.list_check_run_conclusions("abc1234", "n") == []
     assert "posted by another app" in caplog.text
+
+
+def test_post_check_run_failures_are_logged_not_only_recorded(caplog) -> None:
+    import logging
+
+    def boom(req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    provider, _ = _make_provider(boom)
+    with caplog.at_level(logging.WARNING):
+        assert provider.post_check_run("abc1234", "n", "success", "t", "s") is False
+    assert "policy-gate: posting check run" in caplog.text
+
+    caplog.clear()
+    provider, _ = _make_provider(lambda req: httpx.Response(403, text="forbidden"))
+    with caplog.at_level(logging.WARNING):
+        assert provider.post_check_run("abc1234", "n", "success", "t", "s") is False
+    assert "HTTP 403" in caplog.text
