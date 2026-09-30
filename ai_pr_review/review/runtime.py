@@ -107,6 +107,15 @@ class ReviewRuntime:
     # known. None when the estimate itself failed (fail-soft) or no model
     # in the roster had pricing data.
     pre_flight_cost_estimate_units: int | None = None
+    # #977: set only when AI_MAX_COST_USD > 0 and the run was not skipped.
+    # Model ids with no pricing entry, which the ceiling could not bound
+    # (their cost is estimated at $0), and whether the pricing file itself
+    # failed to load. cli.py turns these into a visible notice.
+    cost_ceiling_unenforced_models: tuple[str, ...] = ()
+    cost_ceiling_pricing_missing: bool = False
+    # True when the pre-flight cost check itself raised (fail-soft) with a
+    # ceiling set, so the run went ahead with no ceiling check at all.
+    cost_ceiling_check_failed: bool = False
 
 
 def _merge_allowlist(
@@ -603,6 +612,9 @@ async def build_review_runtime(
     # is fail-soft: log a warning and proceed with no ceiling check for this
     # run rather than abort a review over a diagnostic feature.
     pre_flight_cost_estimate_units: int | None = None
+    cost_ceiling_unenforced_models: tuple[str, ...] = ()
+    cost_ceiling_pricing_missing = False
+    cost_ceiling_check_failed = False
     try:
         from ai_pr_review.pricing import load_pricing
         from ai_pr_review.review.cost_ceiling import (
@@ -612,6 +624,7 @@ async def build_review_runtime(
             estimate_review_cost,
             log_cost_estimate,
             merge_cost_estimates,
+            unpriced_models,
         )
         from ai_pr_review.review.preflight import (
             preflight_agent_max_tokens,
@@ -675,7 +688,17 @@ async def build_review_runtime(
 
         log_cost_estimate(cost_estimate, ceiling_usd=config.max_cost_usd)
         pre_flight_cost_estimate_units = cost_estimate.total_cost_units
-        enforce_cost_ceiling(cost_estimate, ceiling_usd=config.max_cost_usd)
+        enforce_cost_ceiling(
+            cost_estimate,
+            ceiling_usd=config.max_cost_usd,
+            unpriced_mode=config.cost_ceiling_unpriced,
+            pricing_loaded=bool(pricing_data),
+        )
+        if config.max_cost_usd > 0:
+            # Reaching here means the run proceeds (warn mode, or block mode
+            # with nothing unpriced / no pricing file to judge by).
+            cost_ceiling_unenforced_models = unpriced_models(cost_estimate)
+            cost_ceiling_pricing_missing = not pricing_data
     except CostCeilingExceeded as exc:
         # #896: carry the analyzer/SARIF findings (already suppression-rule-
         # filtered above), the diff, and enough config that orchestrate.py's
@@ -698,6 +721,9 @@ async def build_review_runtime(
             "proceeding without a cost ceiling check for this run): %s",
             exc, exc_info=True,
         )
+        # A ceiling the user set is not being applied. Say so in the posted
+        # review as well, not only in this job-log line (#977).
+        cost_ceiling_check_failed = config.max_cost_usd > 0
 
     # 13. Build orchestrator config.
     _judge_prompt_path = script_dir / "prompts" / "finding-judge.md"
@@ -742,4 +768,7 @@ async def build_review_runtime(
         policy_gate_required=policy_gate_required,
         policy_gate_satisfied=policy_gate_satisfied,
         pre_flight_cost_estimate_units=pre_flight_cost_estimate_units,
+        cost_ceiling_unenforced_models=cost_ceiling_unenforced_models,
+        cost_ceiling_pricing_missing=cost_ceiling_pricing_missing,
+        cost_ceiling_check_failed=cost_ceiling_check_failed,
     )

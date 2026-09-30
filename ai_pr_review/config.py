@@ -91,6 +91,7 @@ _KNOWN_AI_VARS: frozenset[str] = frozenset(
         # --- Pre-flight cost ceiling (#24) ---
         "AI_MAX_COST_USD",
         "AI_FAIL_ON_COST_CEILING",
+        "AI_COST_CEILING_UNPRICED",
         # --- Structured logging ---
         "AI_LOG_FORMAT",
         "AI_LOG_LEVEL",
@@ -576,6 +577,13 @@ class ReviewConfig(BaseModel):
     # code 2 instead, the same code fail_on_findings uses for its own
     # opt-in "treat this as blocking" gate.
     fail_on_cost_ceiling: bool = False
+    # What to do when AI_MAX_COST_USD is set but a model in this run has no
+    # row in config/model-pricing.json (#977). Such a model is estimated at
+    # $0, so the ceiling cannot bound it. "warn" (default) runs the review
+    # and puts a visible notice in the summary comment and step summary.
+    # "block" skips the review before any LLM call, through the same skip
+    # path as an exceeded ceiling. No effect when max_cost_usd is 0.
+    cost_ceiling_unpriced: str = "warn"
 
     # --- Slash commands + feedback loop ---
     enable_feedback_loop: bool = False
@@ -733,6 +741,17 @@ class ReviewConfig(BaseModel):
             return normalize_approval_ceiling(v)
         except ValueError as exc:
             raise ValueError(str(exc)) from exc
+
+    @field_validator("cost_ceiling_unpriced")
+    @classmethod
+    def _validate_cost_ceiling_unpriced(cls, v: str) -> str:
+        # Raise, not warn-and-default: this is a safety knob, and silently
+        # falling back to "warn" on a typo such as "blok" is the failure it
+        # exists to prevent (same reasoning as approval_ceiling).
+        normalized = v.strip().lower()
+        if normalized not in ("warn", "block"):
+            raise ValueError(f"cost_ceiling_unpriced must be 'warn' or 'block', got {v!r}")
+        return normalized
 
     @field_validator("token_usage_display")
     @classmethod
@@ -904,6 +923,7 @@ class ReviewConfig(BaseModel):
             token_usage_warn_usd=_float("AI_TOKEN_USAGE_WARN_USD", 1.00),
             max_cost_usd=_float("AI_MAX_COST_USD", 0.0),
             fail_on_cost_ceiling=_bool("AI_FAIL_ON_COST_CEILING"),
+            cost_ceiling_unpriced=os.environ.get("AI_COST_CEILING_UNPRICED", "warn").strip() or "warn",
             enable_feedback_loop=_bool("AI_FEEDBACK_LOOP"),
             feedback_branch=os.environ.get("AI_FEEDBACK_BRANCH", "ai-pr-review-bot"),
             feedback_max_tokens=_int("AI_FEEDBACK_MAX_TOKENS", 2048),

@@ -402,6 +402,7 @@ jobs:
       token-usage-warn-usd: ${{ vars.AI_REVIEW_TOKEN_USAGE_WARN_USD || '1.00' }}
       max-cost-usd: ${{ vars.AI_REVIEW_MAX_COST_USD || '0' }}
       fail-on-cost-ceiling: ${{ vars.AI_REVIEW_FAIL_ON_COST_CEILING || 'false' }}
+      cost-ceiling-unpriced: ${{ vars.AI_REVIEW_COST_CEILING_UNPRICED || 'warn' }}
       context-max-queries: ${{ vars.AI_REVIEW_CONTEXT_MAX_QUERIES || '200' }}
       exclude-patterns: ${{ vars.AI_REVIEW_EXCLUDE_PATTERNS || '' }}
       exclude-patterns-mode: ${{ vars.AI_REVIEW_EXCLUDE_PATTERNS_MODE || 'append' }}
