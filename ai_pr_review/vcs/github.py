@@ -2280,11 +2280,15 @@ class GitHubProvider:
 
         GitHub-only (no GitLab/Bitbucket equivalent is wired here) — a
         follow-up, not required for the policy.yml routing feature itself.
-        This is intentionally a create-only, fire-and-forget primitive: each
-        invocation (the automatic review, or a later `/ai-pr-review
-        review-full`) posts its own check run for the current head_sha, so
-        a later run naturally supersedes an earlier `action_required` one in
-        the Checks tab without needing to look up or update a prior run's ID.
+        This is intentionally a create-only primitive: it never updates a
+        prior run, each call posts a new check run for `head_sha`, and the
+        newest run for a name is the one the Checks tab shows. That is only
+        correct if runs finish in the order they started, which they do not
+        (#979: a slow automatic quick review can post `action_required`
+        after `review-full` already posted `success`), so callers that
+        could downgrade a satisfied gate must consult
+        `list_check_run_conclusions` first (see cli.py's
+        `_post_policy_gate_check_run`).
         Never raises — a failure to post is logged to self._errors and
         must never block or fail the review itself (fail-soft, matching
         every other best-effort posting step in this provider).
@@ -2319,6 +2323,63 @@ class GitHubProvider:
             )
             return False
         return True
+
+    def list_check_run_conclusions(self, head_sha: str, name: str) -> list[str] | None:
+        """Return the conclusions of every completed check run named `name`
+        on `head_sha` that was posted by the GitHub Actions app (#979).
+
+        `filter=all` is required: the endpoint's default, `latest`, returns
+        only the most recent run per name, which would hide the earlier
+        `success` this exists to find. Runs from other apps are dropped so a
+        same-named check from elsewhere cannot satisfy the policy gate.
+        One page of 100 is enough for one check name on one commit, and a
+        larger `total_count` is logged rather than paginated.
+
+        Returns `None` on any failure so the caller can fall back to its
+        pre-#979 behavior, and logs a warning saying why: a token without
+        read access to check runs would otherwise make this fix a silent
+        no-op on every run. Never raises. That includes transport errors
+        and `RetryExhaustedError` after persistent 429/5xx responses, which
+        `self.client.request` raises rather than returns.
+        """
+        c = self.config
+
+        def _fail(reason: str) -> None:
+            self._errors.append(f"list_check_run_conclusions: {reason}")
+            _log.warning(
+                "policy-gate: could not list existing %r check runs on %s (%s)",
+                name, head_sha, reason,
+            )
+
+        try:
+            resp = self.client.request(
+                "GET",
+                f"/repos/{c.owner}/{c.repo}/commits/{head_sha}/check-runs",
+                params={"check_name": name, "filter": "all", "per_page": 100},
+            )
+            if resp.status_code >= 400:
+                _fail(f"HTTP {resp.status_code}: {resp.text[:200]}")
+                return None
+            data = resp.json()
+            if not isinstance(data, dict):
+                _fail("unexpected response shape")
+                return None
+            total = int(data.get("total_count") or 0)
+            runs = data.get("check_runs") or []
+            if total > 100:
+                _log.warning(
+                    "list_check_run_conclusions: %s runs named %r on %s, only the first 100 inspected",
+                    total, name, head_sha,
+                )
+            return [
+                str(run.get("conclusion") or "")
+                for run in runs
+                if run.get("status") == "completed"
+                and (run.get("app") or {}).get("slug") == "github-actions"
+            ]
+        except Exception as exc:  # noqa: BLE001 -- documented fail-soft contract
+            _fail(f"{type(exc).__name__}: {exc}")
+            return None
 
     def fetch_review_comment(self, comment_id: int) -> dict[str, Any] | None:
         """Fetch a single PR review (inline) comment by its REST databaseId.
