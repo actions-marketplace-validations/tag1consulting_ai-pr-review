@@ -106,3 +106,52 @@ def test_post_check_run_api_error_returns_false_and_records_error() -> None:
     )
     assert ok is False
     assert any("post_check_run" in e for e in provider._errors)
+
+
+def test_list_check_run_conclusions_queries_all_runs_for_the_name() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"total_count": 0, "check_runs": []})
+
+    provider, rec = _make_provider(handler)
+    assert provider.list_check_run_conclusions("abc1234", "ai-pr-review/policy-gate") == []
+    method, url, _ = rec.calls[0]
+    assert method == "GET"
+    parsed = httpx.URL(url)
+    assert parsed.path == "/repos/o/r/commits/abc1234/check-runs"
+    # filter=all is load-bearing: the default (latest) hides the earlier success.
+    assert dict(parsed.params) == {
+        "check_name": "ai-pr-review/policy-gate",
+        "filter": "all",
+        "per_page": "100",
+    }
+
+
+def test_list_check_run_conclusions_keeps_only_completed_github_actions_runs() -> None:
+    def run(conclusion: str | None, slug: str, status: str = "completed") -> dict:
+        return {"conclusion": conclusion, "status": status, "app": {"slug": slug}}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "total_count": 4,
+                "check_runs": [
+                    run("success", "github-actions"),
+                    run("success", "some-other-app"),
+                    run(None, "github-actions", status="in_progress"),
+                    run("action_required", "github-actions"),
+                ],
+            },
+        )
+
+    provider, _ = _make_provider(handler)
+    assert provider.list_check_run_conclusions("abc1234", "n") == ["success", "action_required"]
+
+
+def test_list_check_run_conclusions_api_error_returns_none_and_records_error() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, text="Resource not accessible by integration")
+
+    provider, _ = _make_provider(handler)
+    assert provider.list_check_run_conclusions("abc1234", "n") is None
+    assert any("list_check_run_conclusions" in e for e in provider._errors)

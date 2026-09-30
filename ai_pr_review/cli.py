@@ -124,10 +124,15 @@ def _post_policy_gate_check_run(runtime: ReviewRuntime) -> None:
     GitLab/Bitbucket). Fail-soft: a posting failure is logged and must
     never affect the review's own exit code.
 
-    Each invocation (the automatic review, or a later `/ai-pr-review
-    review-full`) posts its own check run for the current head_sha, so a
-    later run naturally supersedes an earlier `action_required` one in the
-    Checks tab -- no lookup or update of a prior run is needed.
+    Each invocation posts its own check run for the current head_sha, and
+    the newest run for the name wins in the Checks tab. Runs do not finish
+    in the order they started (#979: a slow automatic quick review can
+    finish after `/ai-pr-review review-full` already posted `success`), so
+    a run that would post `action_required` first looks for an existing
+    `success` on the same head_sha and re-posts that instead, then re-checks
+    once after posting to close the window where `review-full` lands
+    between the lookup and the post. Both lookups are fail-soft: if they
+    error, the run posts what it computed, as it did before #979.
     """
     if runtime.policy_gate_required is None:
         return
@@ -140,30 +145,52 @@ def _post_policy_gate_check_run(runtime: ReviewRuntime) -> None:
             runtime.policy_gate_required,
         )
         return
+    gate_name = "ai-pr-review/policy-gate"
+    required = runtime.policy_gate_required
+    provider = runtime.provider
+
+    def _post_success(summary: str) -> bool:
+        return provider.post_check_run(
+            head_sha=runtime.head_sha,
+            name=gate_name,
+            conclusion="success",
+            title=f"'{required}' review tier satisfied",
+            summary=summary,
+        )
+
+    def _already_satisfied() -> bool:
+        return "success" in (provider.list_check_run_conclusions(runtime.head_sha, gate_name) or [])
+
+    carried_over = (
+        f"The '{required}' review tier was already satisfied by an earlier "
+        "run on this commit (for example `/ai-pr-review review-full`), so this "
+        "run leaves the gate satisfied."
+    )
     if runtime.policy_gate_satisfied:
-        conclusion, title = "success", f"'{runtime.policy_gate_required}' review tier satisfied"
-        summary = (
-            f"This run satisfies the '{runtime.policy_gate_required}' review tier "
+        ok = _post_success(
+            f"This run satisfies the '{required}' review tier "
             "required by the matched .github/ai-pr-review/policy.yml route."
         )
+    elif _already_satisfied():
+        ok = _post_success(carried_over)
     else:
-        conclusion, title = (
-            "action_required",
-            f"'{runtime.policy_gate_required}' review tier required",
+        ok = provider.post_check_run(
+            head_sha=runtime.head_sha,
+            name=gate_name,
+            conclusion="action_required",
+            title=f"'{required}' review tier required",
+            summary=(
+                f"The matched .github/ai-pr-review/policy.yml route requires the "
+                f"'{required}' review tier before merge, and this "
+                "run did not run at that tier. Comment `/ai-pr-review review-full` on "
+                "this PR (or add the `ai-review-full` label) to satisfy it."
+            ),
         )
-        summary = (
-            f"The matched .github/ai-pr-review/policy.yml route requires the "
-            f"'{runtime.policy_gate_required}' review tier before merge, and this "
-            "run did not run at that tier. Comment `/ai-pr-review review-full` on "
-            "this PR (or add the `ai-review-full` label) to satisfy it."
-        )
-    if not runtime.provider.post_check_run(
-        head_sha=runtime.head_sha,
-        name="ai-pr-review/policy-gate",
-        conclusion=conclusion,
-        title=title,
-        summary=summary,
-    ):
+        # A satisfied run may have posted between the lookup above and this
+        # post. Re-check once and, if so, put `success` back on top.
+        if ok and _already_satisfied():
+            ok = _post_success(carried_over)
+    if not ok:
         logger.warning("policy-gate: failed to post check run (see provider errors)")
 
 

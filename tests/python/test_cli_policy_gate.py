@@ -24,7 +24,11 @@ class _FakeGitHubProvider(GitHubProvider):
     still pass.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, list_results: list[list[str] | None] | None = None) -> None:
+        # One entry per list_check_run_conclusions call, consumed in order.
+        # Once exhausted (or when not given) the fake reports no prior runs.
+        self._list_results = list(list_results or [])
+        self.list_calls = 0
         client = RecordingClient(
             http=None,  # never used — post_check_run is overridden below
             recorder=TapeRecorder(record_dir=None),
@@ -32,6 +36,10 @@ class _FakeGitHubProvider(GitHubProvider):
         )
         super().__init__(config=GitHubConfig(owner="o", repo="r", pr_number=1, token="t"), client=client)
         self.recorded = _FakeCheckRunCalls()
+
+    def list_check_run_conclusions(self, head_sha: str, name: str) -> list[str] | None:
+        self.list_calls += 1
+        return self._list_results.pop(0) if self._list_results else []
 
     def post_check_run(
         self, head_sha: str, name: str, conclusion: str, title: str, summary: str
@@ -100,3 +108,69 @@ def test_non_github_provider_is_a_noop() -> None:
     )
     # Must not raise even though the fake provider has no post_check_run method.
     _post_policy_gate_check_run(runtime)  # type: ignore[arg-type]
+
+
+def _conclusions(provider: _FakeGitHubProvider) -> list[str]:
+    return [c["conclusion"] for c in provider.recorded.calls]
+
+
+def test_satisfied_run_never_lists_prior_runs() -> None:
+    provider = _FakeGitHubProvider()
+    runtime = _fake_runtime(
+        policy_gate_required="deep", policy_gate_satisfied=True, provider=provider
+    )
+    _post_policy_gate_check_run(runtime)  # type: ignore[arg-type]
+    assert provider.list_calls == 0
+    assert _conclusions(provider) == ["success"]
+
+
+def test_quick_run_reposts_success_when_review_full_already_satisfied_the_gate() -> None:
+    # The #978 shape: review-full's success is already on the head SHA when
+    # the slower quick run finishes. It must not post action_required.
+    provider = _FakeGitHubProvider(list_results=[["success"]])
+    runtime = _fake_runtime(
+        policy_gate_required="deep", policy_gate_satisfied=False, provider=provider
+    )
+    _post_policy_gate_check_run(runtime)  # type: ignore[arg-type]
+    assert _conclusions(provider) == ["success"]
+    assert "earlier" in provider.recorded.calls[0]["summary"]
+    assert "deep" in provider.recorded.calls[0]["title"]
+
+
+def test_quick_run_restores_success_when_review_full_lands_mid_post() -> None:
+    # First lookup sees nothing, review-full posts success before our
+    # action_required, second lookup sees it. Newest run must end up success.
+    provider = _FakeGitHubProvider(list_results=[[], ["success"]])
+    runtime = _fake_runtime(
+        policy_gate_required="deep", policy_gate_satisfied=False, provider=provider
+    )
+    _post_policy_gate_check_run(runtime)  # type: ignore[arg-type]
+    assert _conclusions(provider) == ["action_required", "success"]
+
+
+def test_new_head_sha_with_no_prior_runs_stays_action_required() -> None:
+    provider = _FakeGitHubProvider(list_results=[[], []])
+    runtime = _fake_runtime(
+        policy_gate_required="deep", policy_gate_satisfied=False, provider=provider
+    )
+    _post_policy_gate_check_run(runtime)  # type: ignore[arg-type]
+    assert _conclusions(provider) == ["action_required"]
+    assert provider.list_calls == 2
+
+
+def test_prior_action_required_does_not_satisfy_the_gate() -> None:
+    provider = _FakeGitHubProvider(list_results=[["action_required"], ["action_required"]])
+    runtime = _fake_runtime(
+        policy_gate_required="deep", policy_gate_satisfied=False, provider=provider
+    )
+    _post_policy_gate_check_run(runtime)  # type: ignore[arg-type]
+    assert _conclusions(provider) == ["action_required"]
+
+
+def test_list_failure_falls_back_to_posting_action_required() -> None:
+    provider = _FakeGitHubProvider(list_results=[None, None])
+    runtime = _fake_runtime(
+        policy_gate_required="deep", policy_gate_satisfied=False, provider=provider
+    )
+    _post_policy_gate_check_run(runtime)  # type: ignore[arg-type]
+    assert _conclusions(provider) == ["action_required"]
