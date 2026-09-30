@@ -2306,20 +2306,29 @@ class GitHubProvider:
         status checks the same as "success", silently defeating the gate
         (see #688) — do not revert to "neutral" here.
         """
-        resp = self.client.request(
-            "POST",
-            self._check_runs_url(),
-            json_body={
-                "name": name,
-                "head_sha": head_sha,
-                "status": "completed",
-                "conclusion": conclusion,
-                "output": {"title": title, "summary": summary},
-            },
-        )
+        try:
+            resp = self.client.request(
+                "POST",
+                self._check_runs_url(),
+                json_body={
+                    "name": name,
+                    "head_sha": head_sha,
+                    "status": "completed",
+                    "conclusion": conclusion,
+                    "output": {"title": title, "summary": summary},
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 -- the client raises on transport errors and exhausted 429/5xx retries
+            self._errors.append(f"post_check_run: {type(exc).__name__}: {exc}")
+            _log.warning("policy-gate: posting check run %r raised %s: %s", name, type(exc).__name__, exc)
+            return False
         if resp.status_code >= 400:
             self._errors.append(
                 f"post_check_run: HTTP {resp.status_code}: {resp.text[:200]}"
+            )
+            _log.warning(
+                "policy-gate: posting check run %r failed with HTTP %d: %s",
+                name, resp.status_code, resp.text[:200],
             )
             return False
         return True
@@ -2330,8 +2339,15 @@ class GitHubProvider:
 
         `filter=all` is required: the endpoint's default, `latest`, returns
         only the most recent run per name, which would hide the earlier
-        `success` this exists to find. Runs from other apps are dropped so a
-        same-named check from elsewhere cannot satisfy the policy gate.
+        `success` this exists to find. Runs from other GitHub Apps are dropped,
+        but that is not an authentication check: every workflow's
+        `GITHUB_TOKEN` posts as the `github-actions` app, so anyone who can
+        run a workflow in this repository can post a same-named `success`.
+        That is the same trust boundary as before this lookup existed (they
+        could already post one after the bot's run), and the lookup only
+        makes such a run stick for later runs on the same commit. Pinning
+        this to the review workflow would need a marker the bot sets and
+        that a workflow author could copy, so it would not change that.
         One page of 100 is enough for one check name on one commit, and a
         larger `total_count` is logged rather than paginated.
 
@@ -2371,12 +2387,19 @@ class GitHubProvider:
                     "list_check_run_conclusions: %s runs named %r on %s, only the first 100 inspected",
                     total, name, head_sha,
                 )
-            return [
-                str(run.get("conclusion") or "")
-                for run in runs
-                if run.get("status") == "completed"
-                and (run.get("app") or {}).get("slug") == "github-actions"
-            ]
+            completed = [r for r in runs if r.get("status") == "completed"]
+            ours = [r for r in completed if (r.get("app") or {}).get("slug") == "github-actions"]
+            if completed and not ours:
+                # A token that is a GitHub App installation token posts under a
+                # different app slug, which would make this lookup a silent
+                # no-op. Say so.
+                _log.warning(
+                    "policy-gate: %d completed %r run(s) on %s were posted by another "
+                    "app and were ignored, so a prior success from this workflow's own "
+                    "token would not be found",
+                    len(completed), name, head_sha,
+                )
+            return [str(run.get("conclusion") or "") for run in ours]
         except Exception as exc:  # noqa: BLE001 -- documented fail-soft contract
             _fail(f"{type(exc).__name__}: {exc}")
             return None

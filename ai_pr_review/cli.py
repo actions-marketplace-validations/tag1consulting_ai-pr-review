@@ -174,9 +174,9 @@ def _post_policy_gate_check_run(runtime: ReviewRuntime) -> None:
         return "success" in (conclusions or [])
 
     carried_over = (
-        f"The '{required}' review tier was already satisfied by an earlier "
-        "run on this commit (for example `/ai-pr-review review-full`), so this "
-        "run leaves the gate satisfied."
+        "A successful `ai-pr-review/policy-gate` check already exists for this "
+        "commit (for example from `/ai-pr-review review-full`), so this run "
+        "leaves the gate satisfied."
     )
     try:
         if runtime.policy_gate_satisfied:

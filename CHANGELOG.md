@@ -7,9 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.18.1] - 2026-09-30
+
+### Added
+
+- **`AI_COST_CEILING_UNPRICED` (action input `cost-ceiling-unpriced`) decides what happens when `AI_MAX_COST_USD` cannot bound a model.** A model with no row in `config/model-pricing.json` is estimated at $0, so the ceiling could not stop it (#977). With the default `warn`, the review runs and a "Cost ceiling not enforced" notice naming the model(s) goes in the review comment (whatever `token-usage-display` is) and in the job summary. With `block`, the review is skipped before any LLM call, through the same skip comment as an exceeded ceiling, and exits 2 when `fail-on-cost-ceiling` is true (a skip that carries blocking analyzer findings can also exit 2 under `fail-on-findings`). The `pr-summarizer` and `issue-linker` models are included. If the pricing file cannot be loaded, or the pre-flight cost check itself fails, the review still runs and the notice says so, because blocking there would skip every ceiling-enabled review. An invalid value is an error instead of falling back to `warn`, even when `AI_MAX_COST_USD` is unset. Otherwise it only matters when `AI_MAX_COST_USD` is above 0. A setup that has a ceiling and a model with no pricing row (every `openai-compatible` model, for example) will now see the notice on every review. Images older than 2.18.1 ignore the setting, and a caller that passes `cost-ceiling-unpriced` to `slash-commands.yml` needs a ref that has the input.
+
+### Fixed
+
+- **The `ai-pr-review/policy-gate` check no longer goes back to `action_required` after `/ai-pr-review review-full` has satisfied it (#979).** A slower automatic quick review on the same commit could finish after `review-full` and post its own `action_required` run, and the newest run wins in the Checks tab. A run that would post `action_required` now first looks for a `success` from the GitHub Actions app on the same commit and posts `success` instead, and it checks once more after posting to cover `review-full` landing in between. A new push is a new commit and still starts at `action_required`. Neither the lookup nor the check-run post raises, and if the lookup fails the run posts what it computed, as before. Fixing this was a precondition for making the gate a required check.
+- **A request that still fails with HTTP 429 or a 5xx after all retries now keeps the provider's error body in its error message.** `retry_post` dropped the body (it only went to the log), so the error read `OpenAI returned HTTP 429 after 3 retries`. An exhausted OpenAI or Gemini key is a 429, and only the body says `insufficient_quota` or `RESOURCE_EXHAUSTED`, so the live model canary's new quota markers could never match one, and an exhausted key would still have been reported as a model regression. The body is cut at 500 characters, like the non-retried error path beside it. The same text now appears wherever that error is shown, such as a failed agent's message in the job log. The model watcher's checklist also no longer says the scheduled canary has only an Anthropic key.
+
 ### Changed
 
-- **The scheduled live model canary now tests the OpenAI and Google defaults as well as Anthropic.** `model-canary.yml` passes the `OPENAI_API_KEY` and `GOOGLE_API_KEY` repository secrets, adding 8 billed calls per weekly run (2 models and 2 agents per provider). The failure issue it files is no longer Anthropic-specific, and OpenAI (`insufficient_quota`) and Gemini (`RESOURCE_EXHAUSTED`) quota errors are now recognized as quota blocks rather than reported as model regressions.
+- **The scheduled live model canary is now set up to test the OpenAI and Google defaults as well as Anthropic.** The first scheduled run with the new keys is 2026-10-05, so it has not run against them yet. `model-canary.yml` passes the `OPENAI_API_KEY` and `GOOGLE_API_KEY` repository secrets, adding 8 billed calls per weekly run (2 models and 2 agents per provider). The job timeout goes from 20 to 45 minutes for the 12 calls, and a run that is cancelled at the timeout now files an issue too, with text saying no per-call result was reported. The failure issue it files is no longer Anthropic-specific, and OpenAI (`insufficient_quota`) and Gemini (`RESOURCE_EXHAUSTED`) quota errors are now recognized as quota blocks rather than reported as model regressions.
 
 ## [2.18.0] - 2026-09-29
 
@@ -26,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known issues
 
-- `AI_MAX_COST_USD` is not enforced for a model without a row in `config/model-pricing.json`: it is estimated at $0. Every default model is priced, but a model you choose yourself may not be (#977).
+- `AI_MAX_COST_USD` is not enforced for a model without a row in `config/model-pricing.json`: it is estimated at $0. Every default model is priced, but a model you choose yourself may not be (#977). Fixed in 2.18.1.
 
 ## [2.17.0] - 2026-09-28
 

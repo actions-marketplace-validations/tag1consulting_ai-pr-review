@@ -208,3 +208,63 @@ def test_list_check_run_conclusions_tolerates_null_app_and_null_conclusion() -> 
 
     provider, _ = _make_provider(handler)
     assert provider.list_check_run_conclusions("abc1234", "n") == [""]
+
+
+def test_post_check_run_persistent_5xx_returns_false_instead_of_raising() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, text="Service Unavailable")
+
+    provider, _ = _make_provider(handler)
+    ok = provider.post_check_run(
+        head_sha="abc1234", name="n", conclusion="success", title="t", summary="s",
+    )
+    assert ok is False
+    assert any("post_check_run" in e for e in provider._errors)
+
+
+def test_post_check_run_transport_error_returns_false_instead_of_raising() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    provider, _ = _make_provider(handler)
+    assert provider.post_check_run(
+        head_sha="abc1234", name="n", conclusion="success", title="t", summary="s",
+    ) is False
+
+
+def test_list_check_run_conclusions_warns_when_every_run_is_from_another_app(caplog) -> None:
+    import logging
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "total_count": 1,
+                "check_runs": [
+                    {"status": "completed", "conclusion": "success", "app": {"slug": "my-app"}},
+                ],
+            },
+        )
+
+    provider, _ = _make_provider(handler)
+    with caplog.at_level(logging.WARNING):
+        assert provider.list_check_run_conclusions("abc1234", "n") == []
+    assert "posted by another app" in caplog.text
+
+
+def test_post_check_run_failures_are_logged_not_only_recorded(caplog) -> None:
+    import logging
+
+    def boom(req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    provider, _ = _make_provider(boom)
+    with caplog.at_level(logging.WARNING):
+        assert provider.post_check_run("abc1234", "n", "success", "t", "s") is False
+    assert "policy-gate: posting check run" in caplog.text
+
+    caplog.clear()
+    provider, _ = _make_provider(lambda req: httpx.Response(403, text="forbidden"))
+    with caplog.at_level(logging.WARNING):
+        assert provider.post_check_run("abc1234", "n", "success", "t", "s") is False
+    assert "HTTP 403" in caplog.text

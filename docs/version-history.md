@@ -12,6 +12,7 @@ What changed in each release, newest first. Every release from v2.8.0 onward has
 
 | Version | Highlights |
 |---------|-----------|
+| [v2.18.1](version-history/v2.18.1) | Cost ceiling now reports or blocks when a model has no pricing row (new `cost-ceiling-unpriced`, default `warn`, #977), and the `ai-pr-review/policy-gate` check no longer flips back to `action_required` after `review-full` (#979) |
 | [v2.18.0](version-history/v2.18.0) | New default models: OpenAI `gpt-6-luna` / `gpt-6.1-sol` and Google `gemini-3.5-flash-lite` / `gemini-3.8-flash` (behavior changes, live-canary verified), Gemini 3 thinking capped at `low`, weekly model watcher now covers OpenAI and Google |
 | [v2.17.0](version-history/v2.17.0) | Default Anthropic standard model is now `claude-sonnet-5-5` (behavior change, live-canary verified), draft GitHub release created on tag push, token table labels Sonnet 5.5 correctly |
 | [v2.16.2](version-history/v2.16.2) | GitHub Marketplace metadata in `action.yml` (new name `Tag1 Multi-Agent PR Review`, short description, orange `git-pull-request` badge, author), plus two stale-statement fixes |

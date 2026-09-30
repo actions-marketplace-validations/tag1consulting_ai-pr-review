@@ -151,7 +151,7 @@ def test_quick_run_reposts_success_when_review_full_already_satisfied_the_gate()
     )
     _post_policy_gate_check_run(runtime)  # type: ignore[arg-type]
     assert _conclusions(provider) == ["success"]
-    assert "earlier" in provider.recorded.calls[0]["summary"]
+    assert "already exists" in provider.recorded.calls[0]["summary"]
     assert "deep" in provider.recorded.calls[0]["title"]
     # The lookup and the carried-over success must target this run's SHA and
     # the gate's check name, or the fix would silently read the wrong runs.
