@@ -24,10 +24,20 @@ class _FakeGitHubProvider(GitHubProvider):
     still pass.
     """
 
-    def __init__(self, list_results: list[list[str] | None] | None = None) -> None:
+    def __init__(
+        self,
+        list_results: list[list[str] | None] | None = None,
+        *,
+        list_raises: bool = False,
+        post_results: list[bool | Exception] | None = None,
+    ) -> None:
         # One entry per list_check_run_conclusions call, consumed in order.
         # Once exhausted (or when not given) the fake reports no prior runs.
         self._list_results = list(list_results or [])
+        self._list_raises = list_raises
+        # One entry per post_check_run call. An Exception entry is raised.
+        self._post_results = list(post_results or [])
+        self.list_args: list[tuple[str, str]] = []
         self.list_calls = 0
         client = RecordingClient(
             http=None,  # never used — post_check_run is overridden below
@@ -39,6 +49,9 @@ class _FakeGitHubProvider(GitHubProvider):
 
     def list_check_run_conclusions(self, head_sha: str, name: str) -> list[str] | None:
         self.list_calls += 1
+        self.list_args.append((head_sha, name))
+        if self._list_raises:
+            raise RuntimeError("lookup exploded")
         return self._list_results.pop(0) if self._list_results else []
 
     def post_check_run(
@@ -53,6 +66,11 @@ class _FakeGitHubProvider(GitHubProvider):
                 "summary": summary,
             }
         )
+        if self._post_results:
+            outcome = self._post_results.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
         return True
 
 
@@ -135,6 +153,11 @@ def test_quick_run_reposts_success_when_review_full_already_satisfied_the_gate()
     assert _conclusions(provider) == ["success"]
     assert "earlier" in provider.recorded.calls[0]["summary"]
     assert "deep" in provider.recorded.calls[0]["title"]
+    # The lookup and the carried-over success must target this run's SHA and
+    # the gate's check name, or the fix would silently read the wrong runs.
+    assert provider.list_args == [("abc1234", "ai-pr-review/policy-gate")]
+    assert provider.recorded.calls[0]["head_sha"] == "abc1234"
+    assert provider.recorded.calls[0]["name"] == "ai-pr-review/policy-gate"
 
 
 def test_quick_run_restores_success_when_review_full_lands_mid_post() -> None:
@@ -174,3 +197,112 @@ def test_list_failure_falls_back_to_posting_action_required() -> None:
     )
     _post_policy_gate_check_run(runtime)  # type: ignore[arg-type]
     assert _conclusions(provider) == ["action_required"]
+
+
+def test_lookup_uses_the_current_head_sha_not_a_fixed_one() -> None:
+    provider = _FakeGitHubProvider(list_results=[[], []])
+    runtime = _fake_runtime(
+        policy_gate_required="deep", policy_gate_satisfied=False,
+        provider=provider, head_sha="newsha99",
+    )
+    _post_policy_gate_check_run(runtime)  # type: ignore[arg-type]
+    assert {sha for sha, _ in provider.list_args} == {"newsha99"}
+    assert provider.recorded.calls[0]["head_sha"] == "newsha99"
+
+
+def test_failed_action_required_post_skips_the_recheck() -> None:
+    provider = _FakeGitHubProvider(list_results=[[]], post_results=[False])
+    runtime = _fake_runtime(
+        policy_gate_required="deep", policy_gate_satisfied=False, provider=provider
+    )
+    _post_policy_gate_check_run(runtime)  # type: ignore[arg-type]
+    assert _conclusions(provider) == ["action_required"]
+    assert provider.list_calls == 1
+
+
+def test_failed_carry_over_success_post_does_not_raise_or_repost() -> None:
+    provider = _FakeGitHubProvider(list_results=[["success"]], post_results=[False])
+    runtime = _fake_runtime(
+        policy_gate_required="deep", policy_gate_satisfied=False, provider=provider
+    )
+    _post_policy_gate_check_run(runtime)  # type: ignore[arg-type]
+    assert _conclusions(provider) == ["success"]
+
+
+def test_first_lookup_fails_but_recheck_finds_success() -> None:
+    # Fail-soft on the first lookup must not stop the recheck from repairing
+    # the gate once the API recovers.
+    provider = _FakeGitHubProvider(list_results=[None, ["success"]])
+    runtime = _fake_runtime(
+        policy_gate_required="deep", policy_gate_satisfied=False, provider=provider
+    )
+    _post_policy_gate_check_run(runtime)  # type: ignore[arg-type]
+    assert _conclusions(provider) == ["action_required", "success"]
+
+
+def test_raising_lookup_still_posts_action_required_and_does_not_propagate() -> None:
+    # The retrying client raises (transport errors, RetryExhaustedError after
+    # persistent 5xx/429). The gate must still be posted and nothing may
+    # escape, because the caller runs this before the telemetry emit.
+    provider = _FakeGitHubProvider(list_raises=True)
+    runtime = _fake_runtime(
+        policy_gate_required="deep", policy_gate_satisfied=False, provider=provider
+    )
+    _post_policy_gate_check_run(runtime)  # type: ignore[arg-type]
+    assert _conclusions(provider) == ["action_required"]
+
+
+def test_raising_post_does_not_propagate() -> None:
+    provider = _FakeGitHubProvider(post_results=[RuntimeError("post exploded")])
+    runtime = _fake_runtime(
+        policy_gate_required="deep", policy_gate_satisfied=True, provider=provider
+    )
+    _post_policy_gate_check_run(runtime)  # type: ignore[arg-type]  # must not raise
+
+
+def test_seam_with_real_provider_carries_over_a_prior_success() -> None:
+    """End to end through a real GitHubProvider on a mock transport: the
+    listing response shape the real method parses is what cli.py acts on, so
+    a drift between the fake above and the real method cannot hide."""
+    import json
+
+    import httpx
+
+    seen: list[tuple[str, str, dict | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content) if request.content else None
+        seen.append((request.method, str(request.url), body))
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "total_count": 1,
+                    "check_runs": [
+                        {"status": "completed", "conclusion": "success",
+                         "app": {"slug": "github-actions"}},
+                    ],
+                },
+            )
+        return httpx.Response(201, json={"id": 1})
+
+    client = RecordingClient(
+        http=httpx.Client(transport=httpx.MockTransport(handler), base_url="https://api.github.com"),
+        recorder=TapeRecorder(record_dir=None),
+        retry_policy=RetryPolicy(attempts=1, base_backoff=0, jitter=False),
+    )
+    provider = GitHubProvider(
+        config=GitHubConfig(owner="o", repo="r", pr_number=1, token="t"), client=client
+    )
+    runtime = _fake_runtime(
+        policy_gate_required="deep", policy_gate_satisfied=False,
+        provider=provider, head_sha="abc1234",
+    )
+    _post_policy_gate_check_run(runtime)  # type: ignore[arg-type]
+
+    gets = [u for m, u, _ in seen if m == "GET"]
+    posts = [b for m, _, b in seen if m == "POST"]
+    assert len(gets) == 1
+    assert "/commits/abc1234/check-runs" in gets[0]
+    assert "filter=all" in gets[0]
+    assert [p["conclusion"] for p in posts if p] == ["success"]

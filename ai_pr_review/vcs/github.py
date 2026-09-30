@@ -2335,36 +2335,51 @@ class GitHubProvider:
         One page of 100 is enough for one check name on one commit, and a
         larger `total_count` is logged rather than paginated.
 
-        Returns `None` (and appends to `self._errors`) on any HTTP error so
-        the caller can fall back to its pre-#979 behavior. Never raises.
+        Returns `None` on any failure so the caller can fall back to its
+        pre-#979 behavior, and logs a warning saying why: a token without
+        read access to check runs would otherwise make this fix a silent
+        no-op on every run. Never raises. That includes transport errors
+        and `RetryExhaustedError` after persistent 429/5xx responses, which
+        `self.client.request` raises rather than returns.
         """
         c = self.config
-        resp = self.client.request(
-            "GET",
-            f"/repos/{c.owner}/{c.repo}/commits/{head_sha}/check-runs",
-            params={"check_name": name, "filter": "all", "per_page": 100},
-        )
-        if resp.status_code >= 400:
-            self._errors.append(
-                f"list_check_run_conclusions: HTTP {resp.status_code}: {resp.text[:200]}"
-            )
-            return None
-        try:
-            data = resp.json() or {}
-        except ValueError:
-            self._errors.append("list_check_run_conclusions: response was not valid JSON")
-            return None
-        if int(data.get("total_count") or 0) > 100:
+
+        def _fail(reason: str) -> None:
+            self._errors.append(f"list_check_run_conclusions: {reason}")
             _log.warning(
-                "list_check_run_conclusions: %s runs named %r on %s, only the first 100 inspected",
-                data.get("total_count"), name, head_sha,
+                "policy-gate: could not list existing %r check runs on %s (%s)",
+                name, head_sha, reason,
             )
-        return [
-            str(run.get("conclusion") or "")
-            for run in data.get("check_runs") or []
-            if run.get("status") == "completed"
-            and (run.get("app") or {}).get("slug") == "github-actions"
-        ]
+
+        try:
+            resp = self.client.request(
+                "GET",
+                f"/repos/{c.owner}/{c.repo}/commits/{head_sha}/check-runs",
+                params={"check_name": name, "filter": "all", "per_page": 100},
+            )
+            if resp.status_code >= 400:
+                _fail(f"HTTP {resp.status_code}: {resp.text[:200]}")
+                return None
+            data = resp.json()
+            if not isinstance(data, dict):
+                _fail("unexpected response shape")
+                return None
+            total = int(data.get("total_count") or 0)
+            runs = data.get("check_runs") or []
+            if total > 100:
+                _log.warning(
+                    "list_check_run_conclusions: %s runs named %r on %s, only the first 100 inspected",
+                    total, name, head_sha,
+                )
+            return [
+                str(run.get("conclusion") or "")
+                for run in runs
+                if run.get("status") == "completed"
+                and (run.get("app") or {}).get("slug") == "github-actions"
+            ]
+        except Exception as exc:  # noqa: BLE001 -- documented fail-soft contract
+            _fail(f"{type(exc).__name__}: {exc}")
+            return None
 
     def fetch_review_comment(self, comment_id: int) -> dict[str, Any] | None:
         """Fetch a single PR review (inline) comment by its REST databaseId.

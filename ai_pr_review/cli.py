@@ -159,37 +159,53 @@ def _post_policy_gate_check_run(runtime: ReviewRuntime) -> None:
         )
 
     def _already_satisfied() -> bool:
-        return "success" in (provider.list_check_run_conclusions(runtime.head_sha, gate_name) or [])
+        # Fail-soft in depth: the provider method already returns None
+        # instead of raising, so this only guards against a provider that
+        # breaks that contract. A failed lookup means "unknown", which is
+        # treated as not satisfied so the gate is still posted.
+        try:
+            conclusions = provider.list_check_run_conclusions(runtime.head_sha, gate_name)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("policy-gate: prior-run lookup raised: %s", exc)
+            return False
+        return "success" in (conclusions or [])
 
     carried_over = (
         f"The '{required}' review tier was already satisfied by an earlier "
         "run on this commit (for example `/ai-pr-review review-full`), so this "
         "run leaves the gate satisfied."
     )
-    if runtime.policy_gate_satisfied:
-        ok = _post_success(
-            f"This run satisfies the '{required}' review tier "
-            "required by the matched .github/ai-pr-review/policy.yml route."
-        )
-    elif _already_satisfied():
-        ok = _post_success(carried_over)
-    else:
-        ok = provider.post_check_run(
-            head_sha=runtime.head_sha,
-            name=gate_name,
-            conclusion="action_required",
-            title=f"'{required}' review tier required",
-            summary=(
-                f"The matched .github/ai-pr-review/policy.yml route requires the "
-                f"'{required}' review tier before merge, and this "
-                "run did not run at that tier. Comment `/ai-pr-review review-full` on "
-                "this PR (or add the `ai-review-full` label) to satisfy it."
-            ),
-        )
-        # A satisfied run may have posted between the lookup above and this
-        # post. Re-check once and, if so, put `success` back on top.
-        if ok and _already_satisfied():
+    try:
+        if runtime.policy_gate_satisfied:
+            ok = _post_success(
+                f"This run satisfies the '{required}' review tier "
+                "required by the matched .github/ai-pr-review/policy.yml route."
+            )
+        elif _already_satisfied():
             ok = _post_success(carried_over)
+        else:
+            ok = provider.post_check_run(
+                head_sha=runtime.head_sha,
+                name=gate_name,
+                conclusion="action_required",
+                title=f"'{required}' review tier required",
+                summary=(
+                    f"The matched .github/ai-pr-review/policy.yml route requires the "
+                    f"'{required}' review tier before merge, and this "
+                    "run did not run at that tier. Comment `/ai-pr-review review-full` on "
+                    "this PR (or add the `ai-review-full` label) to satisfy it."
+                ),
+            )
+            # A satisfied run may have posted between the lookup above and
+            # this post. Re-check once and, if so, put `success` back on top.
+            if ok and _already_satisfied():
+                ok = _post_success(carried_over)
+    except Exception as exc:  # noqa: BLE001
+        # post_check_run goes through the retrying client, which raises on
+        # persistent 429/5xx and on transport errors. The caller runs this
+        # before the telemetry emit, so nothing here may propagate.
+        logger.warning("policy-gate: posting the check run raised: %s", exc)
+        return
     if not ok:
         logger.warning("policy-gate: failed to post check run (see provider errors)")
 
