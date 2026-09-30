@@ -46,3 +46,20 @@ def test_no_workflow_or_job_level_env_exposes_a_key() -> None:
 def test_issue_text_is_not_anthropic_specific() -> None:
     issue_step = next(s for s in _steps() if "gh issue create" in s.get("run", ""))
     assert "Anthropic API quota" not in issue_step["run"]
+
+
+def test_job_timeout_leaves_room_for_every_provider() -> None:
+    # 12 calls run one after another (3 providers x 2 models x 2 agents). Four
+    # Anthropic calls alone took 5 to 6 minutes, so 20 minutes was too short and
+    # the cancelled job filed no issue.
+    assert _load()["jobs"]["canary"]["timeout-minutes"] >= 45
+
+
+def test_issue_step_also_runs_when_the_job_is_cancelled() -> None:
+    # A job that hits timeout-minutes is cancelled, not failed, so a bare
+    # failure() would file nothing for a canary that ran out of time.
+    step = next(s for s in _steps() if s.get("name") == "File an issue on failure")
+    condition = step["if"]
+    assert "failure()" in condition
+    assert "cancelled()" in condition
+    assert "schedule" in condition

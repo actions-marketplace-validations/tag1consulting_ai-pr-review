@@ -27,7 +27,10 @@ jobs:
   canary:
     name: Live model canary
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Three providers with two models and two agents each run one call after
+    # another: 12 calls. Four Anthropic calls alone took 5 to 6 minutes, and
+    # each call has a 180 s client timeout, so 20 minutes was not enough.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -52,7 +55,10 @@ jobs:
         run: python tests/canary/live_model_canary.py
 
       - name: File an issue on failure
-        if: failure() && github.event_name == 'schedule'
+        # cancelled() as well as failure(): a job that hits timeout-minutes is
+        # cancelled, not failed, so failure() alone would file nothing for a
+        # canary that ran out of time.
+        if: (failure() || cancelled()) && github.event_name == 'schedule'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -70,7 +76,9 @@ jobs:
           # not a model-behavior regression, and the hardcoded text sent whoever
           # triaged it chasing the wrong root cause. Word it from what actually
           # happened instead.
-          if [ "$ALL_QUOTA_EXHAUSTED" = "true" ]; then
+          if [ -z "$FAILURE_DETAIL" ]; then
+            EXPLANATION="The canary did not report any per-call result. It most likely ran past the job's timeout-minutes limit and was cancelled, or crashed before writing its output (for example an import error or a dependency install failure). Check the end of the run log for the last call it finished."
+          elif [ "$ALL_QUOTA_EXHAUSTED" = "true" ]; then
             EXPLANATION="Every failing model/agent combination hit a provider API quota, rate-limit or billing error (see the provider on each line below). This looks like a key's usage limit, not a model-behavior regression or code bug. Re-run manually (workflow_dispatch) once the limit resets to confirm. No investigation is needed unless it recurs after that."
           else
             EXPLANATION="See the failure detail below for what actually happened before assuming a cause. Each line names the provider, model and agent. A wrong stop reason with a high thinking-token count may be the same class of failure as #592 (thinking exhausting the output limit before any text). A missing or invalid json-findings block means the model answered but its review would be dropped. Check the stop_reason and error text first: #636 looked like a #592 repeat from the title alone and turned out to be an unrelated API quota block."
