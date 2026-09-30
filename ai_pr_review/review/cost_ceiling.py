@@ -29,11 +29,17 @@ separately-dispatched preflight agents, pr-summarizer and issue-linker, when
 they will actually run (via ``estimate_preflight_agent_cost``, a coarser
 approximation -- see its docstring for why they need a different one).
 
-Fail-soft (matching this repo's general convention -- see
-``findings/judge.py``'s module docstring for the model this follows): a
-model with no entry in the pricing file is not an error. Its cost is
-excluded from the total (logged as a warning), and the ceiling check simply
-does not see that agent's contribution rather than raising or aborting.
+A model with no entry in the pricing file is not an estimation error, but
+the ceiling cannot bound it either: its cost is excluded from the total
+(logged as a warning) and the total compared to the ceiling does not include
+it. Before #977 that was silent to the user, so a run whose agents were all
+unpriced always passed. Now, when a ceiling is set, ``enforce_cost_ceiling``
+applies ``AI_COST_CEILING_UNPRICED``: ``block`` raises
+``UnpricedModelCeiling`` (the review is skipped before any LLM call), and
+the default ``warn`` lets the review run while the caller surfaces the
+names from ``unpriced_models()`` in the posted review. An entirely empty
+pricing file is the exception: that is an image packaging bug, not a model
+choice, so it never blocks.
 
 Also out of scope, by design: this is a single-pass, single-attempt
 estimate. It does not model provider-side retries (rate limits, transient
@@ -89,6 +95,17 @@ class CostCeilingExceeded(RuntimeError):
     """
 
 
+class UnpricedModelCeiling(CostCeilingExceeded):
+    """Raised instead of a plain ``CostCeilingExceeded`` when the estimate is
+    within the ceiling but cannot be trusted because a model has no pricing
+    entry and ``AI_COST_CEILING_UNPRICED=block`` (#977).
+
+    A subclass on purpose: the caller's existing ``except CostCeilingExceeded``
+    turns it into the same skip comment, carries the same analyzer findings
+    along, and honors ``AI_FAIL_ON_COST_CEILING`` for the exit code.
+    """
+
+
 @dataclass(frozen=True)
 class AgentCostEstimate:
     """One agent's contribution to a review's pre-flight cost estimate."""
@@ -101,7 +118,8 @@ class AgentCostEstimate:
     unknown_pricing: bool
     """True when *model* has no entry in the pricing data. This agent's
     estimated_cost_units is 0 in that case and it is excluded from the
-    ceiling comparison -- see the module docstring's fail-soft note."""
+    ceiling comparison. ``enforce_cost_ceiling`` and the posted review
+    report it (#977) -- see the module docstring."""
 
 
 @dataclass(frozen=True)
@@ -281,6 +299,13 @@ def merge_cost_estimates(*parts: CostEstimate | AgentCostEstimate) -> CostEstima
     )
 
 
+def unpriced_models(estimate: CostEstimate) -> tuple[str, ...]:
+    """Sorted, de-duplicated model ids of the agents in *estimate* that have
+    no pricing entry. Reads the merged ``per_agent`` list, so the separately
+    dispatched pr-summarizer and issue-linker are included."""
+    return tuple(sorted({a.model for a in estimate.per_agent if a.unknown_pricing}))
+
+
 def log_cost_estimate(estimate: CostEstimate, *, ceiling_usd: float) -> None:
     """Emit the structured ``COST_ESTIMATE`` log line.
 
@@ -310,8 +335,23 @@ def log_cost_estimate(estimate: CostEstimate, *, ceiling_usd: float) -> None:
     )
 
 
-def enforce_cost_ceiling(estimate: CostEstimate, *, ceiling_usd: float) -> None:
+def enforce_cost_ceiling(
+    estimate: CostEstimate,
+    *,
+    ceiling_usd: float,
+    unpriced_mode: str = "warn",
+    pricing_loaded: bool = True,
+) -> None:
     """Raise ``CostCeilingExceeded`` if *estimate* exceeds *ceiling_usd*.
+
+    Also raises ``UnpricedModelCeiling`` (#977) when the estimate is within
+    the ceiling but *unpriced_mode* is ``"block"`` and an agent uses a model
+    with no pricing entry, because that model's cost is counted as $0 and
+    the ceiling cannot bound it. Never raised when *pricing_loaded* is False
+    (an empty pricing file makes every model look unpriced, which is an
+    image packaging bug rather than a model choice, so blocking would skip
+    every ceiling-enabled review). ``"warn"`` never raises for this: the
+    caller reports ``unpriced_models()`` in the posted review instead.
 
     A ceiling of 0 (or less -- ``ReviewConfig`` already clamps negative
     values to 0) means "no ceiling configured"; this is a no-op in that
@@ -333,6 +373,22 @@ def enforce_cost_ceiling(estimate: CostEstimate, *, ceiling_usd: float) -> None:
     if ceiling_usd <= 0:
         return
     if estimate.total_cost_usd <= ceiling_usd:
+        models = unpriced_models(estimate)
+        if unpriced_mode == "block" and pricing_loaded and models:
+            logger.warning(
+                "cost ceiling not enforceable: no pricing entry for %s and "
+                "AI_COST_CEILING_UNPRICED=block -- skipping the review",
+                ", ".join(models),
+            )
+            raise UnpricedModelCeiling(
+                f"AI_MAX_COST_USD is set to ${ceiling_usd:.2f}, but the cost of "
+                f"this review cannot be bounded: no pricing entry for "
+                f"{', '.join(models)}, so the estimate counts it as $0. The review "
+                "was skipped because AI_COST_CEILING_UNPRICED is set to block. "
+                "A repository maintainer can switch the review models to ones "
+                "with a pricing entry, set AI_COST_CEILING_UNPRICED to warn, or "
+                "unset AI_MAX_COST_USD."
+            )
         return
 
     top = sorted(estimate.per_agent, key=lambda a: a.estimated_cost_units, reverse=True)[:3]

@@ -663,6 +663,9 @@ class TestWriteStepSummary:
         rt = MagicMock()
         rt.changed_files = parse_changed_files_payload(["foo.py", "bar.py"])
         rt.config.review_mode = "full"
+        rt.config.max_cost_usd = 0.0
+        rt.cost_ceiling_unenforced_models = ()
+        rt.cost_ceiling_pricing_missing = False
         rt.agents = [MagicMock(), MagicMock()]
         rt.sarif_elapsed_s = None
         rt.script_dir = _Path(".")
@@ -709,6 +712,35 @@ class TestWriteStepSummary:
         assert "**Mode:** full" in content
         assert "**Findings:** 1" in content
         assert "PR summary text" in content
+
+    def test_cost_ceiling_notice_shown_when_a_model_is_unpriced(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """#977: the job log line was the only signal. The step summary must
+        also say the ceiling could not bound an unpriced model."""
+        from ai_pr_review.review.reporting import write_step_summary as _write_step_summary
+
+        summary_path = tmp_path / "step_summary.md"
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
+        rt = self._make_runtime(tmp_path)
+        rt.config.max_cost_usd = 2.0  # type: ignore[attr-defined]
+        rt.cost_ceiling_unenforced_models = ("my-unpriced-model",)  # type: ignore[attr-defined]
+
+        _write_step_summary(self._make_result(), rt, "PR summary text")
+
+        content = summary_path.read_text()
+        assert "Cost ceiling not enforced" in content
+        assert "`my-unpriced-model`" in content
+
+    def test_no_cost_ceiling_notice_when_nothing_is_unpriced(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from ai_pr_review.review.reporting import write_step_summary as _write_step_summary
+
+        summary_path = tmp_path / "step_summary.md"
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
+        _write_step_summary(self._make_result(), self._make_runtime(tmp_path), "PR summary text")
+        assert "Cost ceiling not enforced" not in summary_path.read_text()
 
     def test_no_op_when_env_unset(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """When GITHUB_STEP_SUMMARY is not set, no file is created."""

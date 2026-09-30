@@ -1110,3 +1110,45 @@ def test_fail_on_cost_ceiling_known_ai_var_no_unknown_warning(
     ReviewConfig.from_env()
     captured = capsys.readouterr()
     assert "Unknown AI_* variable" not in captured.err
+
+
+# ---------------------------------------------------------------------------
+# cost_ceiling_unpriced (#977)
+# ---------------------------------------------------------------------------
+
+
+def test_cost_ceiling_unpriced_defaults_to_warn(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AI_COST_CEILING_UNPRICED", raising=False)
+    assert ReviewConfig().cost_ceiling_unpriced == "warn"
+    assert ReviewConfig.from_env().cost_ceiling_unpriced == "warn"
+
+
+def test_cost_ceiling_unpriced_empty_env_falls_back_to_warn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The action passes the input through even when a caller leaves it blank.
+    monkeypatch.setenv("AI_COST_CEILING_UNPRICED", "  ")
+    assert ReviewConfig.from_env().cost_ceiling_unpriced == "warn"
+
+
+@pytest.mark.parametrize("raw", ["block", "BLOCK", " Block "])
+def test_cost_ceiling_unpriced_block_is_normalized(
+    monkeypatch: pytest.MonkeyPatch, raw: str,
+) -> None:
+    monkeypatch.setenv("AI_COST_CEILING_UNPRICED", raw)
+    assert ReviewConfig.from_env().cost_ceiling_unpriced == "block"
+
+
+def test_cost_ceiling_unpriced_typo_is_rejected_not_silently_warn() -> None:
+    # A safety knob: "blok" quietly becoming "warn" is the failure it exists
+    # to prevent, same reasoning as approval_ceiling.
+    with pytest.raises(ValueError, match="cost_ceiling_unpriced"):
+        ReviewConfig(cost_ceiling_unpriced="blok")
+
+
+def test_cost_ceiling_unpriced_is_a_known_ai_var(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("AI_COST_CEILING_UNPRICED", "block")
+    ReviewConfig.from_env()
+    assert "AI_COST_CEILING_UNPRICED" not in capsys.readouterr().err

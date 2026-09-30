@@ -300,6 +300,19 @@ inputs:
     required: false
     default: 'false'
 
+  cost-ceiling-unpriced:
+    description: >
+      What to do when max-cost-usd is set but a model in this run has no
+      pricing entry. Such a model is estimated at $0, so the ceiling cannot
+      bound it. 'warn' (default) runs the review and adds a visible notice to
+      the summary comment and the job summary. 'block' skips the review before
+      any LLM call, with a skip comment naming the unpriced model(s), exactly
+      like an exceeded ceiling (and exiting 2 only if fail-on-cost-ceiling is
+      true). Has no effect when max-cost-usd is unset/'0'. A missing or
+      unreadable pricing file never blocks.
+    required: false
+    default: 'warn'
+
   exclude-patterns:
     description: >
       Comma-separated list of git pathspec globs to exclude from the diff
@@ -439,6 +452,7 @@ runs:
         AI_TOKEN_USAGE_WARN_USD: ${{ inputs.token-usage-warn-usd }}
         AI_MAX_COST_USD: ${{ inputs.max-cost-usd }}
         AI_FAIL_ON_COST_CEILING: ${{ inputs.fail-on-cost-ceiling == 'true' && 'true' || '' }}
+        AI_COST_CEILING_UNPRICED: ${{ inputs.cost-ceiling-unpriced }}
         AI_EXCLUDE_PATTERNS: ${{ inputs.exclude-patterns }}
         AI_EXCLUDE_PATTERNS_MODE: ${{ inputs.exclude-patterns-mode }}
         AI_ANALYZERS: ${{ inputs.analyzers }}
@@ -571,6 +585,7 @@ runs:
           -e AI_TOKEN_USAGE_WARN_USD \
           -e AI_MAX_COST_USD \
           -e AI_FAIL_ON_COST_CEILING \
+          -e AI_COST_CEILING_UNPRICED \
           -e AI_EXCLUDE_PATTERNS \
           -e AI_EXCLUDE_PATTERNS_MODE \
           -e AI_ANALYZERS \

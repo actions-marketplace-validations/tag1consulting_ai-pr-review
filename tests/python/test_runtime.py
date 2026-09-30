@@ -1254,3 +1254,75 @@ class TestMergeAllowlist:
         allow, deny = _merge_allowlist((), ("x",), (), True, self.NAMES)
         assert allow == ()
         assert set(deny) == self.NAMES | {"x"}
+
+
+class TestBuildReviewRuntimeUnpricedCeiling:
+    """#977: a ceiling that cannot bound an unpriced model must say so."""
+
+    async def _build(
+        self, tmp_path: Path, **config_kwargs: object,
+    ) -> ReviewRuntime | SkipPlan:
+        config = _make_config(model_standard="not-a-priced-model", **config_kwargs)
+        provider = _make_fake_provider()
+        with (
+            patch("ai_pr_review.diff.compute.compute_diff", return_value=_make_diff_result()),
+            patch("ai_pr_review.agents.gates.evaluate_gates", return_value={}),
+            patch.dict(
+                "os.environ",
+                {"AI_PR_REVIEW_DIFF_FILE": str(tmp_path / "diff.txt")},
+                clear=False,
+            ),
+        ):
+            return await build_review_runtime(config, provider_factory=lambda: provider)
+
+    @pytest.mark.anyio
+    async def test_warn_runs_and_records_the_unenforced_models(self, tmp_path: Path) -> None:
+        result = await self._build(tmp_path, max_cost_usd=5.0, cost_ceiling_unpriced="warn")
+        assert isinstance(result, ReviewRuntime)
+        assert result.cost_ceiling_unenforced_models == ("not-a-priced-model",)
+        assert result.cost_ceiling_pricing_missing is False
+
+    @pytest.mark.anyio
+    async def test_block_returns_cost_ceiling_skip_plan_naming_the_model(
+        self, tmp_path: Path,
+    ) -> None:
+        result = await self._build(tmp_path, max_cost_usd=5.0, cost_ceiling_unpriced="block")
+        assert isinstance(result, SkipPlan)
+        # Same flag the exit-code logic (AI_FAIL_ON_COST_CEILING) keys on.
+        assert result.is_cost_ceiling_skip is True
+        assert "not-a-priced-model" in result.reason
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("mode", ["warn", "block"])
+    async def test_ceiling_unset_records_nothing_and_never_blocks(
+        self, tmp_path: Path, mode: str,
+    ) -> None:
+        result = await self._build(tmp_path, max_cost_usd=0.0, cost_ceiling_unpriced=mode)
+        assert isinstance(result, ReviewRuntime)
+        assert result.cost_ceiling_unenforced_models == ()
+
+    @pytest.mark.anyio
+    async def test_empty_pricing_file_reports_but_never_blocks(self, tmp_path: Path) -> None:
+        with patch("ai_pr_review.pricing.load_pricing", return_value=[]):
+            result = await self._build(
+                tmp_path, max_cost_usd=5.0, cost_ceiling_unpriced="block",
+            )
+        assert isinstance(result, ReviewRuntime)
+        assert result.cost_ceiling_pricing_missing is True
+
+    @pytest.mark.anyio
+    async def test_priced_model_records_nothing(self, tmp_path: Path) -> None:
+        config = _make_config(max_cost_usd=1000.0, cost_ceiling_unpriced="block")
+        provider = _make_fake_provider()
+        with (
+            patch("ai_pr_review.diff.compute.compute_diff", return_value=_make_diff_result()),
+            patch("ai_pr_review.agents.gates.evaluate_gates", return_value={}),
+            patch.dict(
+                "os.environ",
+                {"AI_PR_REVIEW_DIFF_FILE": str(tmp_path / "diff.txt")},
+                clear=False,
+            ),
+        ):
+            result = await build_review_runtime(config, provider_factory=lambda: provider)
+        assert isinstance(result, ReviewRuntime)
+        assert result.cost_ceiling_unenforced_models == ()

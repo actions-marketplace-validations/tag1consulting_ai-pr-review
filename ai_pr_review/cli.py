@@ -29,6 +29,9 @@ from ai_pr_review.review.compute import run_compute
 from ai_pr_review.review.preflight import run_issue_linker as _run_issue_linker
 from ai_pr_review.review.preflight import run_summarizer as _run_summarizer
 from ai_pr_review.review.reporting import (
+    build_cost_ceiling_notice as _build_cost_ceiling_notice,
+)
+from ai_pr_review.review.reporting import (
     build_full_token_table as _build_full_token_table,
 )
 from ai_pr_review.review.reporting import (
@@ -389,24 +392,35 @@ async def _run_review_async(config: ReviewConfig) -> int:
         judge_cache_read_tokens: int,
         judge_model: str,
     ) -> str:
-        """High-usage warning line (#758), independent of _token_renderer's
-        payload -- see protocol.py's post_findings docstring for why the two
-        are never combined into one string. Silent under
-        token-usage-display: off, matching "no token-usage content in the
-        comment at all."
+        """Warning segment appended after the usage payload, independent of
+        _token_renderer's payload -- see protocol.py's post_findings
+        docstring for why the two are never combined into one string.
+
+        Two warnings share this slot. The high-usage warning (#758) is
+        silent under token-usage-display: off, matching "no token-usage
+        content in the comment at all." The cost-ceiling-not-enforced
+        notice (#977) is not: it reports a safety setting that is not doing
+        its job, so it is shown in every display mode.
         """
-        if rc.token_usage_display == "off":
-            return ""
-        totals = _compute_token_totals(
-            successes, runtime.script_dir,
-            effective_max_tokens=runtime.dispatch_context.max_tokens_per_agent,
-            judge_input_tokens=judge_input_tokens,
-            judge_output_tokens=judge_output_tokens,
-            judge_cache_creation_tokens=judge_cache_creation_tokens,
-            judge_cache_read_tokens=judge_cache_read_tokens,
-            judge_model=judge_model,
-        )
-        return _build_high_usage_warning(totals, rc.token_usage_warn_usd)
+        parts = [
+            _build_cost_ceiling_notice(
+                runtime.cost_ceiling_unenforced_models,
+                pricing_missing=runtime.cost_ceiling_pricing_missing,
+                ceiling_usd=rc.max_cost_usd,
+            )
+        ]
+        if rc.token_usage_display != "off":
+            totals = _compute_token_totals(
+                successes, runtime.script_dir,
+                effective_max_tokens=runtime.dispatch_context.max_tokens_per_agent,
+                judge_input_tokens=judge_input_tokens,
+                judge_output_tokens=judge_output_tokens,
+                judge_cache_creation_tokens=judge_cache_creation_tokens,
+                judge_cache_read_tokens=judge_cache_read_tokens,
+                judge_model=judge_model,
+            )
+            parts.append(_build_high_usage_warning(totals, rc.token_usage_warn_usd))
+        return "\n\n".join(p for p in parts if p)
 
     # Honour AI_DRY_RUN — assemble is complete but skip VCS posting.
     if rc.dry_run:
