@@ -388,5 +388,21 @@ def test_cost_ceiling_notice_for_missing_pricing_file_asks_to_report_it() -> Non
 
     text = build_cost_ceiling_notice(("a", "b"), pricing_missing=True, ceiling_usd=1.0)
     assert "pricing file could not be loaded" in text
-    assert "issues" in text
+    assert "problem with the action image" in text
+    assert "https://github.com/tag1consulting/ai-pr-review/issues" in text
     assert "`a`" not in text  # every model is unpriced then, listing them is noise
+
+
+def test_cost_ceiling_notice_when_the_preflight_check_failed() -> None:
+    from ai_pr_review.review.reporting import build_cost_ceiling_notice
+
+    text = build_cost_ceiling_notice((), pricing_missing=False, ceiling_usd=3.0, check_failed=True)
+    assert "pre-flight cost check failed" in text
+    assert "$3.00" in text
+    assert "ran without it" in text
+
+
+def test_cost_ceiling_notice_check_failed_ignored_when_ceiling_unset() -> None:
+    from ai_pr_review.review.reporting import build_cost_ceiling_notice
+
+    assert build_cost_ceiling_notice((), pricing_missing=False, ceiling_usd=0, check_failed=True) == ""

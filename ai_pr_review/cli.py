@@ -407,19 +407,25 @@ async def _run_review_async(config: ReviewConfig) -> int:
                 runtime.cost_ceiling_unenforced_models,
                 pricing_missing=runtime.cost_ceiling_pricing_missing,
                 ceiling_usd=rc.max_cost_usd,
+                check_failed=runtime.cost_ceiling_check_failed,
             )
         ]
         if rc.token_usage_display != "off":
-            totals = _compute_token_totals(
-                successes, runtime.script_dir,
-                effective_max_tokens=runtime.dispatch_context.max_tokens_per_agent,
-                judge_input_tokens=judge_input_tokens,
-                judge_output_tokens=judge_output_tokens,
-                judge_cache_creation_tokens=judge_cache_creation_tokens,
-                judge_cache_read_tokens=judge_cache_read_tokens,
-                judge_model=judge_model,
-            )
-            parts.append(_build_high_usage_warning(totals, rc.token_usage_warn_usd))
+            # The high-usage warning is optional. If computing it raises, the
+            # safety notice built above must still be returned.
+            try:
+                totals = _compute_token_totals(
+                    successes, runtime.script_dir,
+                    effective_max_tokens=runtime.dispatch_context.max_tokens_per_agent,
+                    judge_input_tokens=judge_input_tokens,
+                    judge_output_tokens=judge_output_tokens,
+                    judge_cache_creation_tokens=judge_cache_creation_tokens,
+                    judge_cache_read_tokens=judge_cache_read_tokens,
+                    judge_model=judge_model,
+                )
+                parts.append(_build_high_usage_warning(totals, rc.token_usage_warn_usd))
+            except Exception as exc:
+                logger.warning("high-usage warning could not be computed: %s", exc)
         return "\n\n".join(p for p in parts if p)
 
     # Honour AI_DRY_RUN — assemble is complete but skip VCS posting.

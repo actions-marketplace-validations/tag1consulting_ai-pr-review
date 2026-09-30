@@ -484,7 +484,11 @@ def build_high_usage_warning(totals: TokenTotals | None, warn_usd: float) -> str
 
 
 def build_cost_ceiling_notice(
-    models: Sequence[str], *, pricing_missing: bool, ceiling_usd: float
+    models: Sequence[str],
+    *,
+    pricing_missing: bool,
+    ceiling_usd: float,
+    check_failed: bool = False,
 ) -> str:
     """Return a visible notice that ``AI_MAX_COST_USD`` could not be enforced
     for this run, or "" when it could (#977).
@@ -499,11 +503,19 @@ def build_cost_ceiling_notice(
 
     ``pricing_missing`` (the pricing file failed to load, so every model looks
     unpriced) is worded as a problem with the action image, because users
-    cannot fix it and should report it.
+    cannot fix it and should report it. ``check_failed`` (the pre-flight
+    check itself raised and was skipped) is reported the same way.
     """
     if ceiling_usd <= 0:
         return ""
     ceiling = f"${ceiling_usd:.2f}"
+    if check_failed:
+        return (
+            f"⚠️ **Cost ceiling not enforced:** `AI_MAX_COST_USD` is set to {ceiling}, "
+            "but the pre-flight cost check failed, so this review ran without it. "
+            "See the job log for the error and please report it at "
+            "https://github.com/tag1consulting/ai-pr-review/issues."
+        )
     if pricing_missing:
         return (
             f"⚠️ **Cost ceiling not enforced:** `AI_MAX_COST_USD` is set to {ceiling}, "
@@ -583,6 +595,7 @@ def write_step_summary(
             runtime.cost_ceiling_unenforced_models,
             pricing_missing=runtime.cost_ceiling_pricing_missing,
             ceiling_usd=rc.max_cost_usd,
+            check_failed=runtime.cost_ceiling_check_failed,
         )
         if cost_notice:
             lines += [cost_notice, ""]

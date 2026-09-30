@@ -113,6 +113,9 @@ class ReviewRuntime:
     # failed to load. cli.py turns these into a visible notice.
     cost_ceiling_unenforced_models: tuple[str, ...] = ()
     cost_ceiling_pricing_missing: bool = False
+    # True when the pre-flight cost check itself raised (fail-soft) with a
+    # ceiling set, so the run went ahead with no ceiling check at all.
+    cost_ceiling_check_failed: bool = False
 
 
 def _merge_allowlist(
@@ -611,6 +614,7 @@ async def build_review_runtime(
     pre_flight_cost_estimate_units: int | None = None
     cost_ceiling_unenforced_models: tuple[str, ...] = ()
     cost_ceiling_pricing_missing = False
+    cost_ceiling_check_failed = False
     try:
         from ai_pr_review.pricing import load_pricing
         from ai_pr_review.review.cost_ceiling import (
@@ -717,6 +721,9 @@ async def build_review_runtime(
             "proceeding without a cost ceiling check for this run): %s",
             exc, exc_info=True,
         )
+        # A ceiling the user set is not being applied. Say so in the posted
+        # review as well, not only in this job-log line (#977).
+        cost_ceiling_check_failed = config.max_cost_usd > 0
 
     # 13. Build orchestrator config.
     _judge_prompt_path = script_dir / "prompts" / "finding-judge.md"
@@ -763,4 +770,5 @@ async def build_review_runtime(
         pre_flight_cost_estimate_units=pre_flight_cost_estimate_units,
         cost_ceiling_unenforced_models=cost_ceiling_unenforced_models,
         cost_ceiling_pricing_missing=cost_ceiling_pricing_missing,
+        cost_ceiling_check_failed=cost_ceiling_check_failed,
     )

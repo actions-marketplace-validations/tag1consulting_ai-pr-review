@@ -1146,6 +1146,16 @@ def test_cost_ceiling_unpriced_typo_is_rejected_not_silently_warn() -> None:
         ReviewConfig(cost_ceiling_unpriced="blok")
 
 
+def test_cost_ceiling_unpriced_typo_in_the_env_fails_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The action reads the setting through from_env, so the typo must reach
+    # the validator on that path and not be swallowed or defaulted there.
+    monkeypatch.setenv("AI_COST_CEILING_UNPRICED", "blok")
+    with pytest.raises(ValueError, match="cost_ceiling_unpriced"):
+        ReviewConfig.from_env()
+
+
 def test_cost_ceiling_unpriced_is_a_known_ai_var(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:

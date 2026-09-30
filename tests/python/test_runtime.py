@@ -1311,6 +1311,34 @@ class TestBuildReviewRuntimeUnpricedCeiling:
         assert result.cost_ceiling_pricing_missing is True
 
     @pytest.mark.anyio
+    async def test_a_failing_cost_check_with_a_ceiling_is_reported_not_silent(
+        self, tmp_path: Path,
+    ) -> None:
+        # The cost check is fail-soft by design, but a user who set a ceiling
+        # must be told it was not applied (#977), even under block mode.
+        with patch(
+            "ai_pr_review.review.cost_ceiling.estimate_review_cost",
+            side_effect=RuntimeError("estimator bug"),
+        ):
+            result = await self._build(
+                tmp_path, max_cost_usd=5.0, cost_ceiling_unpriced="block",
+            )
+        assert isinstance(result, ReviewRuntime)
+        assert result.cost_ceiling_check_failed is True
+
+    @pytest.mark.anyio
+    async def test_a_failing_cost_check_without_a_ceiling_says_nothing(
+        self, tmp_path: Path,
+    ) -> None:
+        with patch(
+            "ai_pr_review.review.cost_ceiling.estimate_review_cost",
+            side_effect=RuntimeError("estimator bug"),
+        ):
+            result = await self._build(tmp_path, max_cost_usd=0.0)
+        assert isinstance(result, ReviewRuntime)
+        assert result.cost_ceiling_check_failed is False
+
+    @pytest.mark.anyio
     async def test_priced_model_records_nothing(self, tmp_path: Path) -> None:
         config = _make_config(max_cost_usd=1000.0, cost_ceiling_unpriced="block")
         provider = _make_fake_provider()

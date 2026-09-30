@@ -447,7 +447,7 @@ inputs:
       What to do when max-cost-usd is set but a model in this run has no
       pricing entry. Such a model is estimated at $0, so the ceiling cannot
       bound it. 'warn' (default) runs the review and adds a visible notice to
-      the summary comment and the job summary. 'block' skips the review before
+      the review comment and the job summary. 'block' skips the review before
       any LLM call, with a skip comment naming the unpriced model(s), exactly
       like an exceeded ceiling (and exiting 2 only if fail-on-cost-ceiling is
       true). Has no effect when max-cost-usd is unset/'0'. A missing or

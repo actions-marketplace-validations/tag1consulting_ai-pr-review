@@ -592,6 +592,29 @@ class TestEnforceUnpricedModels:
             self._all_unpriced(), ceiling_usd=1.00, unpriced_mode="block", pricing_loaded=False,
         )
 
+    def test_unpriced_premium_model_alone_is_caught(self) -> None:
+        # Standard is priced, the tier-2 agent in full mode uses the premium
+        # model, which is not. A bug computing unknown_pricing only for the
+        # standard model would miss this.
+        est = estimate_review_cost(
+            agents=[_agent("code-reviewer", tier=1), _agent("architecture-reviewer", tier=2)],
+            diff_text="", shared_context_text="", language_profile_text="",
+            standard_model="known-model", premium_model="unpriced-premium",
+            review_mode="full", effective_max_output_tokens=10, pricing_data=_PRICING,
+        )
+        assert unpriced_models(est) == ("unpriced-premium",)
+        with pytest.raises(UnpricedModelCeiling) as exc:
+            enforce_cost_ceiling(est, ceiling_usd=1.00, unpriced_mode="block")
+        assert "unpriced-premium" in str(exc.value)
+
+    def test_empty_model_id_is_named_not_blank(self) -> None:
+        est = estimate_review_cost(
+            agents=[_agent("code-reviewer")], diff_text="", shared_context_text="",
+            language_profile_text="", standard_model="", premium_model="",
+            review_mode="quick", effective_max_output_tokens=10, pricing_data=_PRICING,
+        )
+        assert unpriced_models(est) == ("<unset>",)
+
     def test_block_with_everything_priced_does_not_raise(self) -> None:
         priced = estimate_review_cost(
             agents=[_agent("code-reviewer")], diff_text="", shared_context_text="",

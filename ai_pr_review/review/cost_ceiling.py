@@ -303,7 +303,7 @@ def unpriced_models(estimate: CostEstimate) -> tuple[str, ...]:
     """Sorted, de-duplicated model ids of the agents in *estimate* that have
     no pricing entry. Reads the merged ``per_agent`` list, so the separately
     dispatched pr-summarizer and issue-linker are included."""
-    return tuple(sorted({a.model for a in estimate.per_agent if a.unknown_pricing}))
+    return tuple(sorted({a.model or "<unset>" for a in estimate.per_agent if a.unknown_pricing}))
 
 
 def log_cost_estimate(estimate: CostEstimate, *, ceiling_usd: float) -> None:
