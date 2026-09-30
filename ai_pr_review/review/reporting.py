@@ -483,6 +483,58 @@ def build_high_usage_warning(totals: TokenTotals | None, warn_usd: float) -> str
     )
 
 
+def build_cost_ceiling_notice(
+    models: Sequence[str],
+    *,
+    pricing_missing: bool,
+    ceiling_usd: float,
+    check_failed: bool = False,
+) -> str:
+    """Return a visible notice that ``AI_MAX_COST_USD`` could not be enforced
+    for this run, or "" when it could (#977).
+
+    The pre-flight estimate counts a model with no pricing entry as $0, so a
+    ceiling cannot bound it. Until this notice existed the only signal was a
+    job-log warning, which a user who set a ceiling would never see. Like
+    ``build_high_usage_warning`` it is its own segment, never part of the
+    token-usage payload, and unlike it the caller must not suppress it under
+    ``token-usage-display: off``: it reports a safety setting that is not
+    doing its job, not usage.
+
+    ``pricing_missing`` (the pricing file failed to load, so every model looks
+    unpriced) is worded as a problem with the action image, because users
+    cannot fix it and should report it. ``check_failed`` (the pre-flight
+    check itself raised and was skipped) is reported the same way.
+    """
+    if ceiling_usd <= 0:
+        return ""
+    ceiling = f"${ceiling_usd:.2f}"
+    if check_failed:
+        return (
+            f"⚠️ **Cost ceiling not enforced:** `AI_MAX_COST_USD` is set to {ceiling}, "
+            "but the pre-flight cost check failed, so this review ran without it. "
+            "See the job log for the error and please report it at "
+            "https://github.com/tag1consulting/ai-pr-review/issues."
+        )
+    if pricing_missing:
+        return (
+            f"⚠️ **Cost ceiling not enforced:** `AI_MAX_COST_USD` is set to {ceiling}, "
+            "but the model pricing file could not be loaded, so every model's cost "
+            "was counted as $0. This is a problem with the action image. Please "
+            "report it at https://github.com/tag1consulting/ai-pr-review/issues."
+        )
+    if not models:
+        return ""
+    names = ", ".join(f"`{m}`" for m in models)
+    return (
+        f"⚠️ **Cost ceiling not enforced:** `AI_MAX_COST_USD` is set to {ceiling}, "
+        f"but there is no pricing entry for {names}, so their cost was counted as "
+        "$0 and the ceiling could not limit this review. A maintainer can switch "
+        "to models with a pricing entry, or set `AI_COST_CEILING_UNPRICED` to "
+        "`block` to skip reviews like this one."
+    )
+
+
 def write_step_summary(
     result: ReviewResult,
     runtime: ReviewRuntime,
@@ -539,6 +591,14 @@ def write_step_summary(
             + (f" ({n_failed} agent(s) failed)" if n_failed else ""),
             "",
         ]
+        cost_notice = build_cost_ceiling_notice(
+            runtime.cost_ceiling_unenforced_models,
+            pricing_missing=runtime.cost_ceiling_pricing_missing,
+            ceiling_usd=rc.max_cost_usd,
+            check_failed=runtime.cost_ceiling_check_failed,
+        )
+        if cost_notice:
+            lines += [cost_notice, ""]
 
         # --- Durable fallback trace when the post itself failed (#588) ---
         # post_summary/post_findings can fail (e.g. a 401) after every agent

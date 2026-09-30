@@ -233,6 +233,14 @@ on:
         type: string
         required: false
         default: 'false'
+      cost-ceiling-unpriced:
+        description: >
+          What to do when max-cost-usd is set but a model has no pricing
+          entry: 'warn' runs the review and adds a notice, 'block' skips it.
+          Omit to inherit container-action's own default ('warn').
+        type: string
+        required: false
+        default: 'warn'
       context-max-queries:
         description: >
           Maximum ripgrep symbol-lookup queries across all agents in a run
@@ -685,6 +693,7 @@ jobs:
           token-usage-warn-usd: ${{ inputs.token-usage-warn-usd }}
           max-cost-usd: ${{ inputs.max-cost-usd }}
           fail-on-cost-ceiling: ${{ inputs.fail-on-cost-ceiling }}
+          cost-ceiling-unpriced: ${{ inputs.cost-ceiling-unpriced }}
           context-max-queries: ${{ inputs.context-max-queries }}
           policy-source: ${{ inputs.policy-source }}
           exclude-patterns: ${{ inputs.exclude-patterns }}

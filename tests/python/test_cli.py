@@ -663,6 +663,10 @@ class TestWriteStepSummary:
         rt = MagicMock()
         rt.changed_files = parse_changed_files_payload(["foo.py", "bar.py"])
         rt.config.review_mode = "full"
+        rt.config.max_cost_usd = 0.0
+        rt.cost_ceiling_unenforced_models = ()
+        rt.cost_ceiling_pricing_missing = False
+        rt.cost_ceiling_check_failed = False
         rt.agents = [MagicMock(), MagicMock()]
         rt.sarif_elapsed_s = None
         rt.script_dir = _Path(".")
@@ -709,6 +713,61 @@ class TestWriteStepSummary:
         assert "**Mode:** full" in content
         assert "**Findings:** 1" in content
         assert "PR summary text" in content
+
+    def test_cost_ceiling_notice_shown_when_a_model_is_unpriced(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """#977: the job log line was the only signal. The step summary must
+        also say the ceiling could not bound an unpriced model."""
+        from ai_pr_review.review.reporting import write_step_summary as _write_step_summary
+
+        summary_path = tmp_path / "step_summary.md"
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
+        rt = self._make_runtime(tmp_path)
+        rt.config.max_cost_usd = 2.0  # type: ignore[attr-defined]
+        rt.cost_ceiling_unenforced_models = ("my-unpriced-model",)  # type: ignore[attr-defined]
+
+        _write_step_summary(self._make_result(), rt, "PR summary text")
+
+        content = summary_path.read_text()
+        assert "Cost ceiling not enforced" in content
+        assert "`my-unpriced-model`" in content
+
+    def test_no_cost_ceiling_notice_when_nothing_is_unpriced(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from ai_pr_review.review.reporting import write_step_summary as _write_step_summary
+
+        summary_path = tmp_path / "step_summary.md"
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
+        _write_step_summary(self._make_result(), self._make_runtime(tmp_path), "PR summary text")
+        assert "Cost ceiling not enforced" not in summary_path.read_text()
+
+    def test_step_summary_notice_for_missing_pricing_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from ai_pr_review.review.reporting import write_step_summary as _write_step_summary
+
+        summary_path = tmp_path / "step_summary.md"
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
+        rt = self._make_runtime(tmp_path)
+        rt.config.max_cost_usd = 2.0  # type: ignore[attr-defined]
+        rt.cost_ceiling_pricing_missing = True  # type: ignore[attr-defined]
+        _write_step_summary(self._make_result(), rt, "PR summary text")
+        assert "pricing file could not be loaded" in summary_path.read_text()
+
+    def test_step_summary_notice_when_the_cost_check_failed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from ai_pr_review.review.reporting import write_step_summary as _write_step_summary
+
+        summary_path = tmp_path / "step_summary.md"
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
+        rt = self._make_runtime(tmp_path)
+        rt.config.max_cost_usd = 2.0  # type: ignore[attr-defined]
+        rt.cost_ceiling_check_failed = True  # type: ignore[attr-defined]
+        _write_step_summary(self._make_result(), rt, "PR summary text")
+        assert "pre-flight cost check failed" in summary_path.read_text()
 
     def test_no_op_when_env_unset(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """When GITHUB_STEP_SUMMARY is not set, no file is created."""
@@ -1830,7 +1889,12 @@ class TestTokenUsageDisplayModeSelection:
     """
 
     def _run_and_capture(
-        self, tmp_path: Path, *, token_usage_display: str, token_usage_warn_usd: float = 1.00,
+        self,
+        tmp_path: Path,
+        *,
+        token_usage_display: str,
+        token_usage_warn_usd: float = 1.00,
+        **config_kwargs: object,
     ) -> dict[str, object]:
         import anyio
 
@@ -1891,6 +1955,7 @@ class TestTokenUsageDisplayModeSelection:
                 _make_config(
                     token_usage_display=token_usage_display,
                     token_usage_warn_usd=token_usage_warn_usd,
+                    **config_kwargs,
                 ),
             )
 
@@ -1900,6 +1965,58 @@ class TestTokenUsageDisplayModeSelection:
         usage_block = token_renderer([agent_result], None, 0, 0, 0, 0, "")  # type: ignore[operator]
         usage_warning = warning_renderer([agent_result], None, 0, 0, 0, 0, "")  # type: ignore[operator]
         return {"usage_block": usage_block, "usage_warning": usage_warning}
+
+    # --- #977: the cost-ceiling-not-enforced notice shares the usage_warning
+    # slot. These drive the real closure, so dropping the notice, passing it
+    # the wrong inputs, or re-gating it on token-usage-display would fail here.
+
+    def test_cost_ceiling_notice_shown_even_when_token_usage_display_is_off(
+        self, tmp_path: Path,
+    ) -> None:
+        out = self._run_and_capture(
+            tmp_path, token_usage_display="off",
+            model_standard="not-a-priced-model", max_cost_usd=5.0,
+        )
+        assert "Cost ceiling not enforced" in out["usage_warning"]  # type: ignore[operator]
+        assert "not-a-priced-model" in out["usage_warning"]  # type: ignore[operator]
+
+    def test_cost_ceiling_notice_and_high_usage_warning_are_separate_paragraphs(
+        self, tmp_path: Path,
+    ) -> None:
+        out = self._run_and_capture(
+            tmp_path, token_usage_display="compact", token_usage_warn_usd=0.0001,
+            model_standard="not-a-priced-model", max_cost_usd=5.0,
+        )
+        warning = out["usage_warning"]
+        assert "Cost ceiling not enforced" in warning  # type: ignore[operator]
+        assert "High token usage" in warning  # type: ignore[operator]
+        notice, _, rest = warning.partition("\n\n")  # type: ignore[union-attr]
+        assert "Cost ceiling not enforced" in notice
+        assert "High token usage" in rest
+
+    def test_only_the_notice_when_high_usage_warning_is_disabled(self, tmp_path: Path) -> None:
+        out = self._run_and_capture(
+            tmp_path, token_usage_display="compact", token_usage_warn_usd=0,
+            model_standard="not-a-priced-model", max_cost_usd=5.0,
+        )
+        assert "Cost ceiling not enforced" in out["usage_warning"]  # type: ignore[operator]
+        assert "High token usage" not in out["usage_warning"]  # type: ignore[operator]
+
+    def test_no_notice_and_empty_warning_when_the_model_is_priced(self, tmp_path: Path) -> None:
+        out = self._run_and_capture(
+            tmp_path, token_usage_display="off", max_cost_usd=1000.0,
+        )
+        assert out["usage_warning"] == ""
+
+    def test_notice_survives_a_failure_computing_the_high_usage_warning(
+        self, tmp_path: Path,
+    ) -> None:
+        with patch("ai_pr_review.cli._build_high_usage_warning", side_effect=RuntimeError("boom")):
+            out = self._run_and_capture(
+                tmp_path, token_usage_display="compact",
+                model_standard="not-a-priced-model", max_cost_usd=5.0,
+            )
+        assert "Cost ceiling not enforced" in out["usage_warning"]  # type: ignore[operator]
 
     def test_full_mode_renders_accordion(self, tmp_path: Path) -> None:
         out = self._run_and_capture(tmp_path, token_usage_display="full")

@@ -29,6 +29,9 @@ from ai_pr_review.review.compute import run_compute
 from ai_pr_review.review.preflight import run_issue_linker as _run_issue_linker
 from ai_pr_review.review.preflight import run_summarizer as _run_summarizer
 from ai_pr_review.review.reporting import (
+    build_cost_ceiling_notice as _build_cost_ceiling_notice,
+)
+from ai_pr_review.review.reporting import (
     build_full_token_table as _build_full_token_table,
 )
 from ai_pr_review.review.reporting import (
@@ -124,10 +127,15 @@ def _post_policy_gate_check_run(runtime: ReviewRuntime) -> None:
     GitLab/Bitbucket). Fail-soft: a posting failure is logged and must
     never affect the review's own exit code.
 
-    Each invocation (the automatic review, or a later `/ai-pr-review
-    review-full`) posts its own check run for the current head_sha, so a
-    later run naturally supersedes an earlier `action_required` one in the
-    Checks tab -- no lookup or update of a prior run is needed.
+    Each invocation posts its own check run for the current head_sha, and
+    the newest run for the name wins in the Checks tab. Runs do not finish
+    in the order they started (#979: a slow automatic quick review can
+    finish after `/ai-pr-review review-full` already posted `success`), so
+    a run that would post `action_required` first looks for an existing
+    `success` on the same head_sha and re-posts that instead, then re-checks
+    once after posting to close the window where `review-full` lands
+    between the lookup and the post. Both lookups are fail-soft: if they
+    error, the run posts what it computed, as it did before #979.
     """
     if runtime.policy_gate_required is None:
         return
@@ -140,30 +148,68 @@ def _post_policy_gate_check_run(runtime: ReviewRuntime) -> None:
             runtime.policy_gate_required,
         )
         return
-    if runtime.policy_gate_satisfied:
-        conclusion, title = "success", f"'{runtime.policy_gate_required}' review tier satisfied"
-        summary = (
-            f"This run satisfies the '{runtime.policy_gate_required}' review tier "
-            "required by the matched .github/ai-pr-review/policy.yml route."
+    gate_name = "ai-pr-review/policy-gate"
+    required = runtime.policy_gate_required
+    provider = runtime.provider
+
+    def _post_success(summary: str) -> bool:
+        return provider.post_check_run(
+            head_sha=runtime.head_sha,
+            name=gate_name,
+            conclusion="success",
+            title=f"'{required}' review tier satisfied",
+            summary=summary,
         )
-    else:
-        conclusion, title = (
-            "action_required",
-            f"'{runtime.policy_gate_required}' review tier required",
-        )
-        summary = (
-            f"The matched .github/ai-pr-review/policy.yml route requires the "
-            f"'{runtime.policy_gate_required}' review tier before merge, and this "
-            "run did not run at that tier. Comment `/ai-pr-review review-full` on "
-            "this PR (or add the `ai-review-full` label) to satisfy it."
-        )
-    if not runtime.provider.post_check_run(
-        head_sha=runtime.head_sha,
-        name="ai-pr-review/policy-gate",
-        conclusion=conclusion,
-        title=title,
-        summary=summary,
-    ):
+
+    def _already_satisfied() -> bool:
+        # Fail-soft in depth: the provider method already returns None
+        # instead of raising, so this only guards against a provider that
+        # breaks that contract. A failed lookup means "unknown", which is
+        # treated as not satisfied so the gate is still posted.
+        try:
+            conclusions = provider.list_check_run_conclusions(runtime.head_sha, gate_name)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("policy-gate: prior-run lookup raised: %s", exc)
+            return False
+        return "success" in (conclusions or [])
+
+    carried_over = (
+        f"The '{required}' review tier was already satisfied by an earlier "
+        "run on this commit (for example `/ai-pr-review review-full`), so this "
+        "run leaves the gate satisfied."
+    )
+    try:
+        if runtime.policy_gate_satisfied:
+            ok = _post_success(
+                f"This run satisfies the '{required}' review tier "
+                "required by the matched .github/ai-pr-review/policy.yml route."
+            )
+        elif _already_satisfied():
+            ok = _post_success(carried_over)
+        else:
+            ok = provider.post_check_run(
+                head_sha=runtime.head_sha,
+                name=gate_name,
+                conclusion="action_required",
+                title=f"'{required}' review tier required",
+                summary=(
+                    f"The matched .github/ai-pr-review/policy.yml route requires the "
+                    f"'{required}' review tier before merge, and this "
+                    "run did not run at that tier. Comment `/ai-pr-review review-full` on "
+                    "this PR (or add the `ai-review-full` label) to satisfy it."
+                ),
+            )
+            # A satisfied run may have posted between the lookup above and
+            # this post. Re-check once and, if so, put `success` back on top.
+            if ok and _already_satisfied():
+                ok = _post_success(carried_over)
+    except Exception as exc:  # noqa: BLE001
+        # post_check_run goes through the retrying client, which raises on
+        # persistent 429/5xx and on transport errors. The caller runs this
+        # before the telemetry emit, so nothing here may propagate.
+        logger.warning("policy-gate: posting the check run raised: %s", exc)
+        return
+    if not ok:
         logger.warning("policy-gate: failed to post check run (see provider errors)")
 
 
@@ -389,24 +435,41 @@ async def _run_review_async(config: ReviewConfig) -> int:
         judge_cache_read_tokens: int,
         judge_model: str,
     ) -> str:
-        """High-usage warning line (#758), independent of _token_renderer's
-        payload -- see protocol.py's post_findings docstring for why the two
-        are never combined into one string. Silent under
-        token-usage-display: off, matching "no token-usage content in the
-        comment at all."
+        """Warning segment appended after the usage payload, independent of
+        _token_renderer's payload -- see protocol.py's post_findings
+        docstring for why the two are never combined into one string.
+
+        Two warnings share this slot. The high-usage warning (#758) is
+        silent under token-usage-display: off, matching "no token-usage
+        content in the comment at all." The cost-ceiling-not-enforced
+        notice (#977) is not: it reports a safety setting that is not doing
+        its job, so it is shown in every display mode.
         """
-        if rc.token_usage_display == "off":
-            return ""
-        totals = _compute_token_totals(
-            successes, runtime.script_dir,
-            effective_max_tokens=runtime.dispatch_context.max_tokens_per_agent,
-            judge_input_tokens=judge_input_tokens,
-            judge_output_tokens=judge_output_tokens,
-            judge_cache_creation_tokens=judge_cache_creation_tokens,
-            judge_cache_read_tokens=judge_cache_read_tokens,
-            judge_model=judge_model,
-        )
-        return _build_high_usage_warning(totals, rc.token_usage_warn_usd)
+        parts = [
+            _build_cost_ceiling_notice(
+                runtime.cost_ceiling_unenforced_models,
+                pricing_missing=runtime.cost_ceiling_pricing_missing,
+                ceiling_usd=rc.max_cost_usd,
+                check_failed=runtime.cost_ceiling_check_failed,
+            )
+        ]
+        if rc.token_usage_display != "off":
+            # The high-usage warning is optional. If computing it raises, the
+            # safety notice built above must still be returned.
+            try:
+                totals = _compute_token_totals(
+                    successes, runtime.script_dir,
+                    effective_max_tokens=runtime.dispatch_context.max_tokens_per_agent,
+                    judge_input_tokens=judge_input_tokens,
+                    judge_output_tokens=judge_output_tokens,
+                    judge_cache_creation_tokens=judge_cache_creation_tokens,
+                    judge_cache_read_tokens=judge_cache_read_tokens,
+                    judge_model=judge_model,
+                )
+                parts.append(_build_high_usage_warning(totals, rc.token_usage_warn_usd))
+            except Exception as exc:
+                logger.warning("high-usage warning could not be computed: %s", exc)
+        return "\n\n".join(p for p in parts if p)
 
     # Honour AI_DRY_RUN — assemble is complete but skip VCS posting.
     if rc.dry_run:

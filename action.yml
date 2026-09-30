@@ -442,6 +442,19 @@ inputs:
     required: false
     default: 'false'
 
+  cost-ceiling-unpriced:
+    description: >
+      What to do when max-cost-usd is set but a model in this run has no
+      pricing entry. Such a model is estimated at $0, so the ceiling cannot
+      bound it. 'warn' (default) runs the review and adds a visible notice to
+      the review comment and the job summary. 'block' skips the review before
+      any LLM call, with a skip comment naming the unpriced model(s), exactly
+      like an exceeded ceiling (and exiting 2 only if fail-on-cost-ceiling is
+      true). Has no effect when max-cost-usd is unset/'0'. A missing or
+      unreadable pricing file never blocks.
+    required: false
+    default: 'warn'
+
 runs:
   using: composite
   steps:
@@ -548,5 +561,6 @@ runs:
         AI_TOKEN_USAGE_WARN_USD: ${{ inputs.token-usage-warn-usd }}
         AI_MAX_COST_USD: ${{ inputs.max-cost-usd }}
         AI_FAIL_ON_COST_CEILING: ${{ inputs.fail-on-cost-ceiling }}
+        AI_COST_CEILING_UNPRICED: ${{ inputs.cost-ceiling-unpriced }}
         AI_PR_REVIEW_SCRIPT_DIR: ${{ github.action_path }}
       run: python3 -m ai_pr_review review

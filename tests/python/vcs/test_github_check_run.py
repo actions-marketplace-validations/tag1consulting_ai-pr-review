@@ -106,3 +106,105 @@ def test_post_check_run_api_error_returns_false_and_records_error() -> None:
     )
     assert ok is False
     assert any("post_check_run" in e for e in provider._errors)
+
+
+def test_list_check_run_conclusions_queries_all_runs_for_the_name() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"total_count": 0, "check_runs": []})
+
+    provider, rec = _make_provider(handler)
+    assert provider.list_check_run_conclusions("abc1234", "ai-pr-review/policy-gate") == []
+    method, url, _ = rec.calls[0]
+    assert method == "GET"
+    parsed = httpx.URL(url)
+    assert parsed.path == "/repos/o/r/commits/abc1234/check-runs"
+    # filter=all is load-bearing: the default (latest) hides the earlier success.
+    assert dict(parsed.params) == {
+        "check_name": "ai-pr-review/policy-gate",
+        "filter": "all",
+        "per_page": "100",
+    }
+
+
+def test_list_check_run_conclusions_keeps_only_completed_github_actions_runs() -> None:
+    def run(conclusion: str | None, slug: str, status: str = "completed") -> dict:
+        return {"conclusion": conclusion, "status": status, "app": {"slug": slug}}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "total_count": 4,
+                "check_runs": [
+                    run("success", "github-actions"),
+                    run("success", "some-other-app"),
+                    run(None, "github-actions", status="in_progress"),
+                    run("action_required", "github-actions"),
+                ],
+            },
+        )
+
+    provider, _ = _make_provider(handler)
+    assert provider.list_check_run_conclusions("abc1234", "n") == ["success", "action_required"]
+
+
+def test_list_check_run_conclusions_api_error_returns_none_and_records_error() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, text="Resource not accessible by integration")
+
+    provider, _ = _make_provider(handler)
+    assert provider.list_check_run_conclusions("abc1234", "n") is None
+    assert any("list_check_run_conclusions" in e for e in provider._errors)
+
+
+def test_list_check_run_conclusions_persistent_5xx_returns_none_instead_of_raising() -> None:
+    # RecordingClient.request raises RetryExhaustedError after persistent
+    # 429/5xx rather than returning the response, so a status-code check
+    # alone would let it escape.
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, text="Service Unavailable")
+
+    provider, _ = _make_provider(handler)
+    assert provider.list_check_run_conclusions("abc1234", "n") is None
+    assert any("list_check_run_conclusions" in e for e in provider._errors)
+
+
+def test_list_check_run_conclusions_transport_error_returns_none_instead_of_raising() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    provider, _ = _make_provider(handler)
+    assert provider.list_check_run_conclusions("abc1234", "n") is None
+
+
+def test_list_check_run_conclusions_non_object_json_returns_none() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=["not", "an", "object"])
+
+    provider, _ = _make_provider(handler)
+    assert provider.list_check_run_conclusions("abc1234", "n") is None
+
+
+def test_list_check_run_conclusions_invalid_json_returns_none() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html>not json</html>")
+
+    provider, _ = _make_provider(handler)
+    assert provider.list_check_run_conclusions("abc1234", "n") is None
+
+
+def test_list_check_run_conclusions_tolerates_null_app_and_null_conclusion() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "total_count": 2,
+                "check_runs": [
+                    {"status": "completed", "conclusion": None, "app": {"slug": "github-actions"}},
+                    {"status": "completed", "conclusion": "success", "app": None},
+                ],
+            },
+        )
+
+    provider, _ = _make_provider(handler)
+    assert provider.list_check_run_conclusions("abc1234", "n") == [""]

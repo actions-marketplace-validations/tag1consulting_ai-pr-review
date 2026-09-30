@@ -11,11 +11,13 @@ from ai_pr_review.review.cost_ceiling import (
     AgentCostEstimate,
     CostCeilingExceeded,
     CostEstimate,
+    UnpricedModelCeiling,
     enforce_cost_ceiling,
     estimate_preflight_agent_cost,
     estimate_review_cost,
     log_cost_estimate,
     merge_cost_estimates,
+    unpriced_models,
 )
 
 # Rates chosen so the math is easy to hand-verify:
@@ -492,3 +494,138 @@ class TestEnforceCostCeiling:
             "AI_REVIEW_MODE", "AI_AGENTS", "AI_EXCLUDE_AGENTS", "AI_MAX_TOKENS_PER_AGENT",
         ):
             assert operator_only_var in caplog.text
+
+
+class TestUnpricedModels:
+    """#977: unpriced models used to be invisible to the ceiling."""
+
+    @staticmethod
+    def _estimate(*agent_models: tuple[str, str]) -> CostEstimate:
+        # (agent name, model) pairs, one agent per pair on the standard model.
+        parts = [
+            estimate_preflight_agent_cost(
+                agent_name=name, model=model, diff_text="x" * 400,
+                output_tokens=100, pricing_data=_PRICING,
+            )
+            for name, model in agent_models
+        ]
+        return merge_cost_estimates(*parts)
+
+    def test_lists_sorted_deduplicated_unpriced_models(self) -> None:
+        est = self._estimate(
+            ("a", "zeta-model"), ("b", "alpha-model"), ("c", "zeta-model"), ("d", "known-model"),
+        )
+        assert unpriced_models(est) == ("alpha-model", "zeta-model")
+
+    def test_all_priced_yields_empty(self) -> None:
+        assert unpriced_models(self._estimate(("a", "known-model"))) == ()
+
+    def test_includes_preflight_agents_not_just_the_main_roster(self) -> None:
+        roster = estimate_review_cost(
+            agents=[_agent("code-reviewer")], diff_text="", shared_context_text="",
+            language_profile_text="", standard_model="known-model", premium_model="",
+            review_mode="quick", effective_max_output_tokens=10, pricing_data=_PRICING,
+        )
+        summarizer = estimate_preflight_agent_cost(
+            agent_name="pr-summarizer", model="unpriced-model", diff_text="",
+            output_tokens=10, pricing_data=_PRICING,
+        )
+        assert unpriced_models(merge_cost_estimates(roster, summarizer)) == ("unpriced-model",)
+
+
+class TestEnforceUnpricedModels:
+    def _all_unpriced(self) -> CostEstimate:
+        return estimate_review_cost(
+            agents=[_agent("code-reviewer"), _agent("blind-hunter")],
+            diff_text="x" * 400, shared_context_text="", language_profile_text="",
+            standard_model="unpriced-model", premium_model="", review_mode="quick",
+            effective_max_output_tokens=100, pricing_data=_PRICING,
+        )
+
+    def _some_unpriced(self) -> CostEstimate:
+        priced = estimate_review_cost(
+            agents=[_agent("code-reviewer")], diff_text="", shared_context_text="",
+            language_profile_text="", standard_model="known-model", premium_model="",
+            review_mode="quick", effective_max_output_tokens=10, pricing_data=_PRICING,
+        )
+        unpriced = estimate_preflight_agent_cost(
+            agent_name="issue-linker", model="unpriced-model", diff_text="",
+            output_tokens=10, pricing_data=_PRICING,
+        )
+        return merge_cost_estimates(priced, unpriced)
+
+    def test_total_is_zero_when_everything_is_unpriced(self) -> None:
+        # The exact bug: the estimate is $0, so the old check always passed.
+        assert self._all_unpriced().total_cost_usd == 0
+
+    @pytest.mark.parametrize("make", ["_all_unpriced", "_some_unpriced"])
+    def test_block_raises_and_names_the_models(self, make: str) -> None:
+        with pytest.raises(UnpricedModelCeiling) as exc:
+            enforce_cost_ceiling(
+                getattr(self, make)(), ceiling_usd=1.00, unpriced_mode="block",
+            )
+        assert "unpriced-model" in str(exc.value)
+        assert "AI_COST_CEILING_UNPRICED" in str(exc.value)
+        # Only levers a consumer has: they cannot add a pricing row.
+        assert "pricing row" not in str(exc.value)
+
+    def test_unpriced_block_is_a_cost_ceiling_exceeded_subclass(self) -> None:
+        # runtime.py's single `except CostCeilingExceeded` relies on this.
+        with pytest.raises(CostCeilingExceeded):
+            enforce_cost_ceiling(self._all_unpriced(), ceiling_usd=1.00, unpriced_mode="block")
+
+    @pytest.mark.parametrize("make", ["_all_unpriced", "_some_unpriced"])
+    def test_warn_never_raises(self, make: str) -> None:
+        enforce_cost_ceiling(getattr(self, make)(), ceiling_usd=1.00, unpriced_mode="warn")
+
+    def test_default_mode_is_warn(self) -> None:
+        enforce_cost_ceiling(self._all_unpriced(), ceiling_usd=1.00)
+
+    @pytest.mark.parametrize("mode", ["warn", "block"])
+    def test_ceiling_unset_is_unchanged(self, mode: str) -> None:
+        enforce_cost_ceiling(self._all_unpriced(), ceiling_usd=0, unpriced_mode=mode)
+
+    def test_block_with_empty_pricing_file_does_not_raise(self) -> None:
+        # An empty pricing file is an image packaging bug. Blocking would
+        # skip every ceiling-enabled review, so it must only be reported.
+        enforce_cost_ceiling(
+            self._all_unpriced(), ceiling_usd=1.00, unpriced_mode="block", pricing_loaded=False,
+        )
+
+    def test_unpriced_premium_model_alone_is_caught(self) -> None:
+        # Standard is priced, the tier-2 agent in full mode uses the premium
+        # model, which is not. A bug computing unknown_pricing only for the
+        # standard model would miss this.
+        est = estimate_review_cost(
+            agents=[_agent("code-reviewer", tier=1), _agent("architecture-reviewer", tier=2)],
+            diff_text="", shared_context_text="", language_profile_text="",
+            standard_model="known-model", premium_model="unpriced-premium",
+            review_mode="full", effective_max_output_tokens=10, pricing_data=_PRICING,
+        )
+        assert unpriced_models(est) == ("unpriced-premium",)
+        with pytest.raises(UnpricedModelCeiling) as exc:
+            enforce_cost_ceiling(est, ceiling_usd=1.00, unpriced_mode="block")
+        assert "unpriced-premium" in str(exc.value)
+
+    def test_empty_model_id_is_named_not_blank(self) -> None:
+        est = estimate_review_cost(
+            agents=[_agent("code-reviewer")], diff_text="", shared_context_text="",
+            language_profile_text="", standard_model="", premium_model="",
+            review_mode="quick", effective_max_output_tokens=10, pricing_data=_PRICING,
+        )
+        assert unpriced_models(est) == ("<unset>",)
+
+    def test_block_with_everything_priced_does_not_raise(self) -> None:
+        priced = estimate_review_cost(
+            agents=[_agent("code-reviewer")], diff_text="", shared_context_text="",
+            language_profile_text="", standard_model="known-model", premium_model="",
+            review_mode="quick", effective_max_output_tokens=10, pricing_data=_PRICING,
+        )
+        enforce_cost_ceiling(priced, ceiling_usd=1.00, unpriced_mode="block")
+
+    def test_priced_overrun_still_raises_the_ordinary_error_first(self) -> None:
+        est = self._some_unpriced()
+        with pytest.raises(CostCeilingExceeded) as exc:
+            enforce_cost_ceiling(est, ceiling_usd=0.00001, unpriced_mode="block")
+        assert not isinstance(exc.value, UnpricedModelCeiling)
+        assert "exceeds" in str(exc.value)

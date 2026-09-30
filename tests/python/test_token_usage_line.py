@@ -352,3 +352,57 @@ def test_prepare_survives_exception_in_context_tokens_computation(
     )
     result = reporting.build_full_token_table([bad_agent_result], None, _REPO_ROOT)
     assert result == ""
+
+
+# ---------------------------------------------------------------------------
+# build_cost_ceiling_notice() (#977)
+# ---------------------------------------------------------------------------
+
+
+def test_cost_ceiling_notice_names_unpriced_models() -> None:
+    from ai_pr_review.review.reporting import build_cost_ceiling_notice
+
+    text = build_cost_ceiling_notice(
+        ("gemini-3.9-flash", "my-model"), pricing_missing=False, ceiling_usd=2.5,
+    )
+    assert "Cost ceiling not enforced" in text
+    assert "$2.50" in text
+    assert "`gemini-3.9-flash`" in text and "`my-model`" in text
+    assert "AI_COST_CEILING_UNPRICED" in text
+
+
+def test_cost_ceiling_notice_is_empty_when_nothing_to_report() -> None:
+    from ai_pr_review.review.reporting import build_cost_ceiling_notice
+
+    assert build_cost_ceiling_notice((), pricing_missing=False, ceiling_usd=5.0) == ""
+
+
+def test_cost_ceiling_notice_is_empty_when_ceiling_unset() -> None:
+    from ai_pr_review.review.reporting import build_cost_ceiling_notice
+
+    assert build_cost_ceiling_notice(("m",), pricing_missing=True, ceiling_usd=0) == ""
+
+
+def test_cost_ceiling_notice_for_missing_pricing_file_asks_to_report_it() -> None:
+    from ai_pr_review.review.reporting import build_cost_ceiling_notice
+
+    text = build_cost_ceiling_notice(("a", "b"), pricing_missing=True, ceiling_usd=1.0)
+    assert "pricing file could not be loaded" in text
+    assert "problem with the action image" in text
+    assert "https://github.com/tag1consulting/ai-pr-review/issues" in text
+    assert "`a`" not in text  # every model is unpriced then, listing them is noise
+
+
+def test_cost_ceiling_notice_when_the_preflight_check_failed() -> None:
+    from ai_pr_review.review.reporting import build_cost_ceiling_notice
+
+    text = build_cost_ceiling_notice((), pricing_missing=False, ceiling_usd=3.0, check_failed=True)
+    assert "pre-flight cost check failed" in text
+    assert "$3.00" in text
+    assert "ran without it" in text
+
+
+def test_cost_ceiling_notice_check_failed_ignored_when_ceiling_unset() -> None:
+    from ai_pr_review.review.reporting import build_cost_ceiling_notice
+
+    assert build_cost_ceiling_notice((), pricing_missing=False, ceiling_usd=0, check_failed=True) == ""

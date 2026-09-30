@@ -289,6 +289,7 @@ token-usage-display: ${{ vars.AI_REVIEW_TOKEN_USAGE_DISPLAY || 'compact' }}  # T
 token-usage-warn-usd: ${{ vars.AI_REVIEW_TOKEN_USAGE_WARN_USD || '1.00' }}   # Warn above this estimated USD spend
 max-cost-usd: ${{ vars.AI_REVIEW_MAX_COST_USD || '0' }}         # Abort before any LLM call above this USD estimate (0 = disabled)
 fail-on-cost-ceiling: ${{ vars.AI_REVIEW_FAIL_ON_COST_CEILING || 'false' }}  # Non-zero exit if the cost ceiling is exceeded
+cost-ceiling-unpriced: ${{ vars.AI_REVIEW_COST_CEILING_UNPRICED || 'warn' }}  # 'block' skips the review when a model has no pricing entry
 context-max-queries: ${{ vars.AI_REVIEW_CONTEXT_MAX_QUERIES || '200' }}      # Max ripgrep symbol-lookup queries per run
 exclude-patterns: ${{ vars.AI_REVIEW_EXCLUDE_PATTERNS || '' }}  # Comma-separated globs to exclude from review
 exclude-patterns-mode: ${{ vars.AI_REVIEW_EXCLUDE_PATTERNS_MODE || 'append' }}  # 'append' or 'replace'
