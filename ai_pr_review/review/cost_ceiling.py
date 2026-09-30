@@ -384,10 +384,10 @@ def enforce_cost_ceiling(
                 f"AI_MAX_COST_USD is set to ${ceiling_usd:.2f}, but the cost of "
                 f"this review cannot be bounded: no pricing entry for "
                 f"{', '.join(models)}, so the estimate counts it as $0. The review "
-                "was skipped because AI_COST_CEILING_UNPRICED is set to block. "
-                "A repository maintainer can switch the review models to ones "
-                "with a pricing entry, set AI_COST_CEILING_UNPRICED to warn, or "
-                "unset AI_MAX_COST_USD."
+                "was skipped because cost-ceiling-unpriced (AI_COST_CEILING_UNPRICED) "
+                "is set to block. A repository maintainer can switch the review "
+                "models to ones with a pricing entry, set cost-ceiling-unpriced "
+                "to warn, or unset max-cost-usd (AI_MAX_COST_USD)."
             )
         return
 

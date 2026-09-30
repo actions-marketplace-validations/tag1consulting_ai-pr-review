@@ -451,7 +451,7 @@ inputs:
       any LLM call, with a skip comment naming the unpriced model(s), exactly
       like an exceeded ceiling. It exits 2 when fail-on-cost-ceiling is true,
       and a skip that carries blocking analyzer findings can also exit 2
-      under fail-on-findings. Has no effect when max-cost-usd is unset/'0'. A missing or
+      under fail-on-findings. Requires image 2.18.1 or later (older images ignore it). Has no effect when max-cost-usd is unset/'0', but an invalid value is always an error. A missing or
       unreadable pricing file never blocks.
     required: false
     default: 'warn'

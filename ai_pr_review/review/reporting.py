@@ -530,8 +530,8 @@ def build_cost_ceiling_notice(
         f"⚠️ **Cost ceiling not enforced:** `AI_MAX_COST_USD` is set to {ceiling}, "
         f"but there is no pricing entry for {names}, so their cost was counted as "
         "$0 and the ceiling could not limit this review. A maintainer can switch "
-        "to models with a pricing entry, or set `AI_COST_CEILING_UNPRICED` to "
-        "`block` to skip reviews like this one."
+        "to models with a pricing entry, or set the `cost-ceiling-unpriced` "
+        "input (`AI_COST_CEILING_UNPRICED`) to `block` to skip reviews like this one."
     )
 
 
