@@ -53,11 +53,10 @@ STRESS_DIFF_PATH = Path(__file__).resolve().parent / "stress_diff.txt"
 TARGET_AGENT_NAMES = ("code-reviewer", "silent-failure-hunter")
 
 # provider -> (env var holding the API key, standard model, premium model).
-# CI (secrets.AI_REVIEW_API_KEY, see .github/workflows/ai-review.yml) can
-# authenticate only against Anthropic as of this writing, so the scheduled
-# workflow SKIPs the other providers. They are here so a model-default change
-# for them can be verified locally with a real key, as this repo's CLAUDE.md
-# requires. A SKIP line is not coverage: only an OK line is.
+# The scheduled workflow (.github/workflows/model-canary.yml) passes the
+# Anthropic, OpenAI and Google keys, so those three run weekly. bedrock-proxy
+# runs only where BEDROCK_API_KEY and BEDROCK_API_URL are set (locally today).
+# A SKIP line is not coverage: only an OK line is.
 PROVIDER_MODELS: dict[str, tuple[str, str, str]] = {
     "anthropic": ("ANTHROPIC_API_KEY", "claude-sonnet-5-5", "claude-opus-5-5"),
     "openai": ("OPENAI_API_KEY", "gpt-6-luna", "gpt-6.1-sol"),
@@ -97,7 +96,16 @@ class CanaryResult:
 # key's Anthropic workspace usage limit (resets monthly) auto-labeled as a
 # "#592-class" model regression by the workflow's hardcoded issue body --
 # nothing to do with model behavior at all. Matched case-insensitively.
-_QUOTA_ERROR_MARKERS = ("usage limit", "rate_limit_error", "credit balance is too low")
+# OpenAI reports an exhausted quota as `insufficient_quota` ("You exceeded your
+# current quota"), and the Gemini API as status `RESOURCE_EXHAUSTED`.
+_QUOTA_ERROR_MARKERS = (
+    "usage limit",
+    "rate_limit_error",
+    "credit balance is too low",
+    "insufficient_quota",
+    "exceeded your current quota",
+    "resource_exhausted",
+)
 
 
 def _is_quota_error(detail: str) -> bool:

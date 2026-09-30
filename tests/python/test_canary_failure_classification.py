@@ -83,6 +83,25 @@ class TestIsQuotaError:
     def test_case_insensitive(self) -> None:
         assert _is_quota_error("USAGE LIMIT reached")
 
+    def test_openai_insufficient_quota_is_quota(self) -> None:
+        detail = (
+            "agent failed (exit_code=1): SystemExit: 1 | caused by LLMError: OpenAI "
+            'returned HTTP 429: {"error": {"message": "You exceeded your current quota, '
+            'please check your plan and billing details.", "type": "insufficient_quota"}}'
+        )
+        assert _is_quota_error(detail)
+
+    def test_gemini_resource_exhausted_is_quota(self) -> None:
+        detail = (
+            "agent failed (exit_code=1): SystemExit: 1 | caused by LLMError: Google "
+            'returned HTTP 429: {"error": {"code": 429, "message": "Quota exceeded.", '
+            '"status": "RESOURCE_EXHAUSTED"}}'
+        )
+        assert _is_quota_error(detail)
+
+    def test_missing_findings_block_is_not_quota(self) -> None:
+        assert not _is_quota_error("stop_reason=stop but no json-findings block, output_tokens=12")
+
 
 class TestWriteGithubOutput:
     def test_noop_without_github_output_env(self, monkeypatch) -> None:

@@ -45,6 +45,10 @@ jobs:
         id: canary
         env:
           ANTHROPIC_API_KEY: ${{ secrets.AI_REVIEW_API_KEY }}
+          # The canary runs every provider whose key is set, against that
+          # provider's pinned defaults (PROVIDER_MODELS in the script).
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
         run: python tests/canary/live_model_canary.py
 
       - name: File an issue on failure
@@ -54,7 +58,7 @@ jobs:
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           # Routed through env vars (not interpolated directly via ${{ }} into the
-          # body string below) so that arbitrary text in an Anthropic error message
+          # body string below) so that arbitrary text in a provider error message
           # can't be read as shell syntax -- these values only ever reach bash as
           # quoted variable expansions.
           ALL_QUOTA_EXHAUSTED: ${{ steps.canary.outputs.all_quota_exhausted }}
@@ -67,9 +71,9 @@ jobs:
           # triaged it chasing the wrong root cause. Word it from what actually
           # happened instead.
           if [ "$ALL_QUOTA_EXHAUSTED" = "true" ]; then
-            EXPLANATION="Every failing model/agent combination hit the same Anthropic API quota/billing error below -- this looks like the CI key's usage limit, not a model-behavior regression or code bug. Re-run manually (workflow_dispatch) once the limit resets to confirm; no investigation needed unless it recurs after that."
+            EXPLANATION="Every failing model/agent combination hit a provider API quota, rate-limit or billing error (see the provider on each line below). This looks like a key's usage limit, not a model-behavior regression or code bug. Re-run manually (workflow_dispatch) once the limit resets to confirm. No investigation is needed unless it recurs after that."
           else
-            EXPLANATION="See the failure detail below for what actually happened before assuming a cause. This *may* be the same class of failure as #592 (Sonnet 5 adaptive thinking exhausting max_tokens before any text was produced), but check the stop_reason/error text first -- #636 looked like a #592 repeat from the title alone and turned out to be an unrelated API quota block."
+            EXPLANATION="See the failure detail below for what actually happened before assuming a cause. Each line names the provider, model and agent. A wrong stop reason with a high thinking-token count may be the same class of failure as #592 (thinking exhausting the output limit before any text). A missing or invalid json-findings block means the model answered but its review would be dropped. Check the stop_reason and error text first: #636 looked like a #592 repeat from the title alone and turned out to be an unrelated API quota block."
           fi
           BODY="The scheduled live-model canary (\`tests/canary/live_model_canary.py\`) failed. See the [failed run]($RUN_URL) for full logs.
 
