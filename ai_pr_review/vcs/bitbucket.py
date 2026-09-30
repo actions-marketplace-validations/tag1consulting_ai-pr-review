@@ -1182,8 +1182,9 @@ class BitbucketProvider:
             > _MAX_BITBUCKET_BODY_SIZE - _MIN_BODY_BYTES
         ):
             _log.warning(
-                "bitbucket: high-usage warning (%d bytes) too large to fit "
-                "in comment body for %s/%s PR #%s; omitting it for this cycle",
+                "bitbucket: usage warning (%d bytes, may include the cost-ceiling "
+                "notice) too large to fit in comment body for %s/%s PR #%s. "
+                "Omitting it for this cycle",
                 usage_warning_bytes,
                 self.config.workspace, self.config.repo_slug, self.config.pr_id,
             )

@@ -190,8 +190,11 @@ class VcsProvider(Protocol):
         ``token-usage-display: full``, the compact one-line summary under
         ``compact``, or just the bare marker under ``off``) — see
         ``review.reporting`` and ``vcs.marker.build_usage_block``.
-        ``usage_warning`` is a separate, optional high-usage warning line,
-        never combined into ``usage_block`` itself (a warning embedded
+        ``usage_warning`` is a separate segment of warnings and notices, never
+        combined into ``usage_block`` itself. It carries the optional
+        high-usage warning and, since #977, the "Cost ceiling not enforced"
+        notice, which is shown whatever the display mode. Providers should
+        treat it as content a user needs to see, not as optional decoration (a warning embedded
         inside a collapsed ``<details>`` block would be invisible, and
         concatenating it would break Bitbucket's accordion-stripping regex).
         ``summary_comment_id`` (#930) is the id the same run's own

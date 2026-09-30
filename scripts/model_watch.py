@@ -332,8 +332,8 @@ ANTHROPIC = Provider(
 
 _LOCAL_CANARY_STEP = (
     "- [ ] Run `tests/canary/live_model_canary.py` locally with `{env_var}` set and the new "
-    "model in `PROVIDER_MODELS` (the scheduled `Live Model Canary` workflow has only an "
-    "Anthropic key). Set `CANARY_OUTPUT_DIR` and read the saved reviews, not only the stop "
+    "model in `PROVIDER_MODELS` (the scheduled `Live Model Canary` workflow only tests the "
+    "pinned defaults). Set `CANARY_OUTPUT_DIR` and read the saved reviews, not only the stop "
     "reasons, and record exactly what it did and did not show. It makes billed API calls, so "
     "it needs explicit approval."
 )

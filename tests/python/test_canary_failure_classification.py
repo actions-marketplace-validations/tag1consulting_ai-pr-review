@@ -85,17 +85,18 @@ class TestIsQuotaError:
 
     def test_openai_insufficient_quota_is_quota(self) -> None:
         detail = (
-            "agent failed (exit_code=1): SystemExit: 1 | caused by LLMError: OpenAI "
-            'returned HTTP 429: {"error": {"message": "You exceeded your current quota, '
-            'please check your plan and billing details.", "type": "insufficient_quota"}}'
+            "agent failed (exit_code=1): SystemExit: 1 | caused by LLMTransientError: OpenAI "
+            'returned HTTP 429 after 3 retries: {"error": {"message": "You exceeded your '
+            'current quota, please check your plan and billing details.", '
+            '"type": "insufficient_quota"}}'
         )
         assert _is_quota_error(detail)
 
     def test_gemini_resource_exhausted_is_quota(self) -> None:
         detail = (
-            "agent failed (exit_code=1): SystemExit: 1 | caused by LLMError: Google "
-            'returned HTTP 429: {"error": {"code": 429, "message": "Quota exceeded.", '
-            '"status": "RESOURCE_EXHAUSTED"}}'
+            "agent failed (exit_code=1): SystemExit: 1 | caused by LLMTransientError: Google "
+            'returned HTTP 429 after 3 retries: {"error": {"code": 429, "message": '
+            '"Quota exceeded.", "status": "RESOURCE_EXHAUSTED"}}'
         )
         assert _is_quota_error(detail)
 
@@ -287,3 +288,49 @@ def test_save_output_write_error_does_not_raise(
     monkeypatch.setenv("CANARY_OUTPUT_DIR", str(blocker / "sub"))
     _save_output("openai", "m", "a", "text")
     assert "could not save canary output" in capsys.readouterr().err
+
+
+class TestQuotaClassificationOfRealRetryErrors:
+    """The markers only help if the exception text the retry layer really
+    produces contains them. An exhausted OpenAI or Gemini key is a 429, and
+    429 is retried, so the canary sees LLMTransientError, never the body of
+    the non-retried LLMError path. These tests build the exception text
+    through the real client instead of writing the string by hand."""
+
+    @staticmethod
+    async def _exhausted(provider: str, env_var: str, url: str, body: str, monkeypatch) -> str:
+        import httpx
+        import respx
+
+        from ai_pr_review.agents.dispatch import _format_exception_chain
+        from ai_pr_review.llm import call_llm
+        from tests.python.llm.conftest import make_request
+
+        monkeypatch.setenv(env_var, "test-key")
+        monkeypatch.setenv("LLM_RETRY_COUNT", "1")
+        monkeypatch.setenv("LLM_RETRY_BASE_DELAY", "0")
+        with respx.mock:
+            respx.post(url).mock(return_value=httpx.Response(429, text=body))
+            with pytest.raises(SystemExit) as exc:
+                await call_llm(make_request(model_id=PROVIDER_MODELS[provider][1]), provider)
+        # The same rendering the dispatcher gives the canary as a failure detail.
+        return _format_exception_chain(exc.value)
+
+    @pytest.mark.anyio
+    async def test_openai_exhausted_key_is_classified_as_quota(self, monkeypatch) -> None:
+        detail = await self._exhausted(
+            "openai", "OPENAI_API_KEY", "https://api.openai.com/v1/chat/completions",
+            '{"error": {"message": "You exceeded your current quota, please check your '
+            'plan and billing details.", "type": "insufficient_quota"}}',
+            monkeypatch,
+        )
+        assert _is_quota_error(detail)
+
+    @pytest.mark.anyio
+    async def test_a_429_without_a_body_is_not_misread_as_quota(self, monkeypatch) -> None:
+        detail = await self._exhausted(
+            "openai", "OPENAI_API_KEY", "https://api.openai.com/v1/chat/completions",
+            "", monkeypatch,
+        )
+        assert "HTTP 429" in detail
+        assert not _is_quota_error(detail)

@@ -176,3 +176,24 @@ async def test_call_strips_whitespace_from_api_key(monkeypatch):
 
     sent_headers = route.calls.last.request.headers
     assert sent_headers["x-goog-api-key"] == "test-key"
+
+
+@pytest.mark.anyio
+async def test_call_429_exhausted_error_keeps_the_provider_body(monkeypatch):
+    # An exhausted Gemini key is a 429 with status RESOURCE_EXHAUSTED in the
+    # body. The live model canary classifies billing blocks from this text.
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_RETRY_COUNT", "1")
+    monkeypatch.setenv("LLM_RETRY_BASE_DELAY", "0")
+    body = (
+        '{"error": {"code": 429, "message": "You exceeded your current quota.", '
+        '"status": "RESOURCE_EXHAUSTED"}}'
+    )
+
+    with respx.mock:
+        respx.post(API_URL).mock(return_value=httpx.Response(429, text=body))
+        req = make_request(model_id=MODEL_ID)
+        with pytest.raises(LLMTransientError) as exc:
+            await call(req)
+
+    assert "RESOURCE_EXHAUSTED" in str(exc.value)
