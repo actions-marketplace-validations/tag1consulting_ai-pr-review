@@ -20,9 +20,17 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+import pytest  # noqa: E402
+
+import tests.canary.live_model_canary as canary  # noqa: E402
+from ai_pr_review.agents.dispatch import AgentResult, TokenUsage  # noqa: E402
 from tests.canary.live_model_canary import (  # noqa: E402
+    _CLEAN_STOP_REASONS,
+    PROVIDER_MODELS,
     CanaryResult,
+    _findings_block_error,
     _is_quota_error,
+    _save_output,
     _write_github_output,
 )
 
@@ -74,6 +82,25 @@ class TestIsQuotaError:
 
     def test_case_insensitive(self) -> None:
         assert _is_quota_error("USAGE LIMIT reached")
+
+    def test_openai_insufficient_quota_is_quota(self) -> None:
+        detail = (
+            "agent failed (exit_code=1): SystemExit: 1 | caused by LLMError: OpenAI "
+            'returned HTTP 429: {"error": {"message": "You exceeded your current quota, '
+            'please check your plan and billing details.", "type": "insufficient_quota"}}'
+        )
+        assert _is_quota_error(detail)
+
+    def test_gemini_resource_exhausted_is_quota(self) -> None:
+        detail = (
+            "agent failed (exit_code=1): SystemExit: 1 | caused by LLMError: Google "
+            'returned HTTP 429: {"error": {"code": 429, "message": "Quota exceeded.", '
+            '"status": "RESOURCE_EXHAUSTED"}}'
+        )
+        assert _is_quota_error(detail)
+
+    def test_missing_findings_block_is_not_quota(self) -> None:
+        assert not _is_quota_error("stop_reason=stop but no json-findings block, output_tokens=12")
 
 
 class TestWriteGithubOutput:
@@ -160,3 +187,103 @@ class TestWriteGithubOutput:
         content = out_path.read_text()
         assert content.startswith("existing_output=1\n")
         assert "all_quota_exhausted=true" in content
+
+
+# ---------------------------------------------------------------------------
+# Per-provider stop reasons, findings-block validation, saved output
+# ---------------------------------------------------------------------------
+
+_GOOD = "Review.\n```json-findings\n[]\n```\n"
+
+
+def test_clean_stop_reasons_cover_every_canary_provider() -> None:
+    assert set(_CLEAN_STOP_REASONS) == set(PROVIDER_MODELS)
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        (_GOOD, ""),
+        ("No block at all.", "no json-findings block"),
+        ("```json-findings\n[{\"a\": 1,\n```\n", "not valid JSON"),
+        ("```json-findings\n{\"a\": 1}\n```\n", "not a JSON array"),
+    ],
+)
+def test_findings_block_error(output: str, expected: str) -> None:
+    error = _findings_block_error(output)
+    if expected:
+        assert expected in error
+    else:
+        assert error == ""
+
+
+def _stub_run_tier(monkeypatch: pytest.MonkeyPatch, *, output: str, stop_reason: str) -> None:
+    result = AgentResult(
+        name="code-reviewer",
+        output=output,
+        token_log=TokenUsage(input=10, output=20, cache_creation=0, cache_read=0, model="m"),
+        truncated=False,
+        stop_reason=stop_reason,
+    )
+
+    async def fake_run_tier(*_args: object, **_kwargs: object) -> tuple[list[AgentResult], list[object]]:
+        return [result], []
+
+    monkeypatch.setattr(canary, "run_tier", fake_run_tier)
+
+
+@pytest.mark.parametrize(
+    ("provider", "stop_reason", "ok"),
+    [
+        ("openai", "stop", True),
+        ("openai", "length", False),
+        ("google", "STOP", True),
+        ("google", "MAX_TOKENS", False),
+        ("anthropic", "end_turn", True),
+        ("anthropic", "max_tokens", False),
+    ],
+)
+def test_run_one_checks_each_providers_own_stop_reason(
+    monkeypatch: pytest.MonkeyPatch, provider: str, stop_reason: str, ok: bool
+) -> None:
+    import asyncio
+
+    monkeypatch.delenv("CANARY_OUTPUT_DIR", raising=False)
+    _stub_run_tier(monkeypatch, output=_GOOD, stop_reason=stop_reason)
+    result = asyncio.run(canary._run_one(provider, "m", "code-reviewer"))
+    assert result.ok is ok
+
+
+def test_run_one_fails_clean_stop_with_malformed_block(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    monkeypatch.delenv("CANARY_OUTPUT_DIR", raising=False)
+    _stub_run_tier(monkeypatch, output="```json-findings\n{}\n```\n", stop_reason="stop")
+    result = asyncio.run(canary._run_one("openai", "m", "code-reviewer"))
+    assert result.ok is False
+    assert "not a JSON array" in result.detail
+
+
+def test_save_output_writes_flat_file_and_is_noop_when_unset(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("CANARY_OUTPUT_DIR", raising=False)
+    _save_output("google", "models/x", "code-reviewer", "text")
+    assert list(tmp_path.iterdir()) == []
+
+    out = tmp_path / "out"
+    monkeypatch.setenv("CANARY_OUTPUT_DIR", str(out))
+    _save_output("google", "models/x", "code-reviewer", "text")
+    files = list(out.iterdir())
+    assert [f.name for f in files] == ["google__models_x__code-reviewer.md"]
+    assert files[0].read_text() == "text"
+
+
+def test_save_output_write_error_does_not_raise(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    monkeypatch.setenv("CANARY_OUTPUT_DIR", str(blocker / "sub"))
+    _save_output("openai", "m", "a", "text")
+    assert "could not save canary output" in capsys.readouterr().err

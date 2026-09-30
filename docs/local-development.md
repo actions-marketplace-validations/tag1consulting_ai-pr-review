@@ -202,7 +202,7 @@ By default the container runs in `quick` mode (code-reviewer + silent-failure-hu
 | `AI_ENABLE_SUGGESTIONS` | No | `true` (default). Enable "Apply suggestion" buttons on inline comments (GitHub and GitLab; ignored on Bitbucket). |
 | `LLM_PROMPT_CACHING` | No | `auto` (default). Enable Anthropic/Bedrock prompt caching. `true` force-enables; `false` force-disables. |
 | `AI_CACHE_PRIMING` | No | Deprecated, ignored (#824 audit of #807): cache-priming serialization was deleted as dead code. Accepted as a no-op with a deprecation warning; rejected starting in v3.0.0. |
-| `AI_TEMPERATURE` | No | Sampling temperature for LLM calls (default: 0.3; clamped to [0, 2]) |
+| `AI_TEMPERATURE` | No | Sampling temperature for LLM calls (default: 0.3, clamped to [0, 2]). Not sent to models that reject or discourage a non-default value (currently Claude Opus 4.7, 4.8, 5 and 5.5, Claude Sonnet 5 and 5.5, OpenAI `o1`/`o3`/`o4`, `gpt-5`, `gpt-5.5`, `gpt-5.6-*`, `gpt-6*`, and Gemini 3), where the provider's default applies. `gpt-5.4` and `gpt-5.4-mini` still receive it. The exact list is `resolve_temperature()` in `ai_pr_review/llm/_config.py`. |
 
 ## Pinning a version
 

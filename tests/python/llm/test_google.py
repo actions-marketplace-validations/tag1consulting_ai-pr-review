@@ -75,6 +75,21 @@ def test_body_temperature_skipped_for_opus():
     assert "temperature" not in body["generationConfig"]
 
 
+def test_body_thinking_level_low_for_gemini_3_8_flash():
+    """#592-class guard: 3.8 Flash's default thinking nearly filled a 32k budget."""
+    body = _build_body(make_request(model_id="gemini-3.8-flash"))
+    assert body["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "low"}
+    assert "temperature" not in body["generationConfig"]
+
+
+def test_body_no_thinking_config_for_flash_lite_or_2_5():
+    """Flash-Lite defaults to "minimal" (sending "low" would raise it), and 2.5
+    models use thinkingBudget (mixing the two is a 400)."""
+    for model_id in ("gemini-3.5-flash-lite", "gemini-2.5-flash"):
+        body = _build_body(make_request(model_id=model_id))
+        assert "thinkingConfig" not in body["generationConfig"]
+
+
 def test_body_system_prefix_reaches_system_instruction():
     """#F2: feedback addendum / language profiles (system_prefix) must not be
     silently dropped on Google, matching Anthropic's prefix-first ordering."""

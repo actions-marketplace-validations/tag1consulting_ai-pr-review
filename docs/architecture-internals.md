@@ -192,7 +192,7 @@ After the findings pipeline (extract → merge → suppress → diff-scope) prod
 
 ## Token usage and cost estimation
 
-Token counts are accumulated per agent across all LLM calls. For Google Gemini, `cache_read` reports `cachedContentTokenCount` when present; thinking tokens (`thoughtsTokenCount`) are added to the output count since they are billed at the output rate.
+Token counts are accumulated per agent across all LLM calls. For Google Gemini, `cache_read` reports `cachedContentTokenCount` when present; thinking tokens (`thoughtsTokenCount`) are added to the output count since they are billed at the output rate. Gemini 3 models other than Flash-Lite are sent `thinkingConfig.thinkingLevel: low`, because the default level can use up nearly the whole output limit, which includes thinking (observed: 30,938 of 32,768 tokens on `tests/canary/stress_diff.txt`). See `resolve_gemini_thinking_level()` in `ai_pr_review/llm/_config.py`. For OpenAI, `completion_tokens_details.reasoning_tokens` is reported as thinking tokens for visibility only, since reasoning tokens are already counted in `completion_tokens`.
 
 `config/model-pricing.json` maps model ID patterns to display names and per-token rates. Each entry carries four rates: `input_rate`, `output_rate`, `cache_write_rate`, and `cache_read_rate` (all cost per 1M tokens). The token table uses an adaptive column layout — 6 columns when no rows have cache activity, 8 columns when any row does.
 
@@ -324,7 +324,7 @@ The `Dockerfile` builds for linux/amd64 and linux/arm64. Each binary download us
 
 ### Multi-stage layout
 
-- **`builder`** — installs build-time tooling, downloads analyzer binaries, pip-installs ruff/semgrep/checkov, composer-installs phpcs/phpstan. Semgrep registry rulesets are **not** baked into the image (they are use-restricted under the Semgrep Rules License v1.0); the semgrep analyzer uses `--config=auto` to fetch rules at runtime instead. See [Third-party licenses](#third-party-licenses).
+- **`builder`** — installs build-time tooling, downloads analyzer binaries, pip-installs ruff/semgrep/checkov, composer-installs phpcs/phpstan. Semgrep registry rulesets are **not** baked into the image (they are use-restricted under the Semgrep Rules License v1.0); the semgrep analyzer uses `--config=auto` to fetch rules at runtime instead. See [`THIRD-PARTY-LICENSES/`](https://github.com/tag1consulting/ai-pr-review/tree/main/THIRD-PARTY-LICENSES).
 - **final stage** — slim runtime with `bash`, `ca-certificates`, `curl`, `git`, `jq`, `php-cli` + extensions, `python3`. Copies `/usr/local/bin` and `/usr/local/lib/python${PYTHON_VERSION}/dist-packages` (parameterized via `ARG PYTHON_VERSION`, default `3.14` to match Ubuntu 26.04) wholesale from the builder. The Python package and action assets are copied at the end so source-only changes don't invalidate heavy builder layers.
 
 ## Test architecture
@@ -398,7 +398,7 @@ For the complete, always-current list of every `AI_*` variable, see `_KNOWN_AI_V
 | Provider | Standard model | Premium model |
 |----------|---------------|---------------|
 | `anthropic` | `claude-sonnet-5-5` | `claude-opus-5-5` |
-| `openai` | `gpt-5.4-mini` | `gpt-5.4` |
+| `openai` | `gpt-6-luna` | `gpt-6.1-sol` |
 | `openai-compatible` | (user-specified) | same as standard |
-| `google` | `gemini-2.5-flash` | `gemini-2.5-pro` |
+| `google` | `gemini-3.5-flash-lite` | `gemini-3.8-flash` |
 | `bedrock-proxy` | `us.anthropic.claude-sonnet-5` | `global.anthropic.claude-opus-4-7` |

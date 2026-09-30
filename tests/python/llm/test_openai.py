@@ -34,6 +34,47 @@ def test_parse_with_cache():
     assert resp.cache_read_tokens == 768
 
 
+def test_parse_reports_reasoning_tokens_without_double_counting():
+    """GPT-5-family reasoning tokens are reported as thinking_tokens, but they
+    are already inside completion_tokens, so output_tokens must not grow."""
+    import json
+
+    body = json.dumps({
+        "choices": [{"finish_reason": "stop", "message": {"content": "Review."}}],
+        "usage": {
+            "prompt_tokens": 1000,
+            "completion_tokens": 900,
+            "completion_tokens_details": {"reasoning_tokens": 700},
+        },
+    })
+    resp = _parse_response(body, {})
+    assert resp.thinking_tokens == 700
+    assert resp.output_tokens == 900
+
+
+@pytest.mark.parametrize(
+    "usage_extra",
+    [{}, {"completion_tokens_details": None}, {"completion_tokens_details": {"reasoning_tokens": None}},
+     {"completion_tokens_details": "odd"}, {"completion_tokens_details": {"reasoning_tokens": "n/a"}}],
+)
+def test_parse_reasoning_tokens_missing_or_malformed_is_zero(usage_extra):
+    """A display-only field must never discard an otherwise complete response."""
+    import json
+
+    usage = {"prompt_tokens": 10, "completion_tokens": 5, **usage_extra}
+    body = json.dumps({"choices": [{"finish_reason": "stop", "message": {"content": "R."}}], "usage": usage})
+    resp = _parse_response(body, {})
+    assert resp.thinking_tokens == 0
+    assert resp.output_tokens == 5
+
+
+@pytest.mark.parametrize("model_id", ["gpt-5.6-luna", "gpt-6-luna", "gpt-6.1-sol"])
+def test_body_temperature_omitted_for_gpt_5_6_and_6(model_id):
+    """The judge sends temperature=0.0; these models must never receive it."""
+    body = _build_body(make_request(model_id=model_id, temperature=0.0), provider="openai")
+    assert "temperature" not in body
+
+
 def test_parse_content_filter_raises():
     import json
 

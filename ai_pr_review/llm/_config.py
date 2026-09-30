@@ -90,6 +90,18 @@ def resolve_temperature(raw: float, model_id: str) -> float | None:
     claude-opus-5-5 becomes the default (see the model-change verification
     process in this repo's CLAUDE.md).
 
+    gpt-5.6-* (luna/terra/sol) and gpt-6* (luna/sol/astra, gpt-6.1-sol) are
+    included for the same reason as gpt-5.5: these reasoning models accept only
+    the default temperature of 1, per third-party reports, NOT live-verified
+    (the canary never sends a temperature to them).
+
+    gemini-3* is included for a different reason: the API accepts a
+    temperature, but Google's Gemini 3 developer guide "strongly recommend[s]
+    keeping the temperature parameter at its default value of 1.0" and warns
+    that lowering it "may lead to unexpected behavior, such as looping or
+    degraded performance". The judge's temperature=0.0 is exactly that case,
+    so omission is the safe choice here too.
+
     Consequences, do not "fix" this by making temperature apply:
       * An explicit temperature is a hard 400 for these models -- including the
         temperature=0.0 the judge pass is coded for (judge.py). Sending it would
@@ -111,6 +123,9 @@ def resolve_temperature(raw: float, model_id: str) -> float | None:
         or lower.startswith("o3")
         or lower.startswith("o4")
         or lower.startswith("gpt-5.5")
+        or lower.startswith("gpt-5.6")
+        or lower.startswith("gpt-6")
+        or lower.startswith("gemini-3")
         or lower.startswith("gpt-5-")
         or lower == "gpt-5"
     ):
@@ -162,6 +177,36 @@ def resolve_effort(model_id: str) -> str | None:
     """
     lower = model_id.lower()
     if "sonnet-5" in lower or _is_opus_5_family(lower):
+        return "low"
+    return None
+
+
+def resolve_gemini_thinking_level(model_id: str) -> str | None:
+    """Return the generationConfig.thinkingConfig.thinkingLevel to send, or None to omit it.
+
+    Same failure class as resolve_effort() above (#592): on Gemini 3.x,
+    maxOutputTokens is a hard cutoff that includes thought tokens (Google's
+    thinking guide). Live canary, 2026-09-29, tests/canary/stress_diff.txt,
+    max_output_tokens=32768, no thinking control sent: gemini-3.8-flash
+    (default level "medium") spent 30,938 thinking tokens on code-reviewer
+    and 23,789 on silent-failure-hunter. Both still ended with STOP, but the
+    first left at most about 1,830 tokens for the review itself.
+
+    With "low", same diff and agents (2026-09-29): 0 thinking tokens, 190 and
+    712 output tokens, 5s per call, 0 and 1 findings. An uncapped re-run in
+    the same session: 22,860 and 20,141 thinking tokens, 54-83s per call, 0
+    and 0 findings, with review text that said essentially the same thing.
+    So "low" did not reduce findings on this diff. That is one diff and two
+    agents, not a general guarantee about review quality.
+
+    Capped at "low" for Gemini 3 models only. Flash-Lite is excluded: its
+    default is "minimal" (0 thinking tokens on the same canary run), so "low"
+    would raise its thinking, not bound it. Gemini 2.5 models use the older
+    thinkingBudget mechanism, and Google returns a 400 if a request mixes the
+    two, so nothing is sent for them.
+    """
+    lower = model_id.lower()
+    if lower.startswith("gemini-3") and "flash-lite" not in lower:
         return "low"
     return None
 

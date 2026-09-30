@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from ai_pr_review.config import ReviewConfig
 from ai_pr_review.pricing import (
     ModelRates,
@@ -450,6 +452,48 @@ def test_bedrock_proxy_standard_default_has_pricing_entry() -> None:
         f"{cfg.model_standard!r}; the token-cost table would show 'n/a'."
     )
     assert rates.output_rate > 0
+
+
+@pytest.mark.parametrize("provider", ["openai", "google", "bedrock-proxy"])
+def test_other_provider_defaults_have_pricing_entries(provider: str) -> None:
+    """An unpriced default is excluded from the AI_MAX_COST_USD pre-flight total
+    (review/cost_ceiling.py), so a default with no pricing row silently turns
+    the ceiling off for that agent. Every provider default must be priced."""
+    pricing_data = load_pricing(str(_REAL_PRICING_FILE))
+    cfg = ReviewConfig(provider=provider).resolve_models()
+    for model_id in (cfg.model_standard, cfg.model_premium):
+        rates = model_pricing(model_id, pricing_data)
+        assert rates.input_rate > 0, f"no pricing entry for {provider} default {model_id!r}"
+        assert rates.output_rate > 0
+
+
+@pytest.mark.parametrize(
+    ("model_id", "display_name", "input_rate", "output_rate"),
+    [
+        ("gpt-6-luna", "GPT-6 Luna", 100000, 500000),
+        ("gpt-6-sol", "GPT-6 Sol", 2000000, 10000000),
+        ("gpt-6.1-sol", "GPT-6.1 Sol", 2000000, 10000000),
+        ("gpt-6-astra", "GPT-6 Astra", 10000000, 50000000),
+        ("gpt-5.6-luna", "GPT-5.6 Luna", 200000, 1200000),
+        ("gpt-5.6-terra", "GPT-5.6 Terra", 2000000, 12000000),
+        ("gpt-5.6-sol", "GPT-5.6 Sol", 4000000, 20000000),
+        # Priced at the 2027-01-01 rate, not the intro rate, so the cost
+        # ceiling never under-estimates.
+        ("gemini-3.8-flash", "Gemini 3.8 Flash", 1500000, 7500000),
+        ("gemini-3.5-flash-lite", "Gemini 3.5 Flash Lite", 300000, 2500000),
+    ],
+)
+def test_new_provider_rows_priced_and_labeled(
+    model_id: str, display_name: str, input_rate: int, output_rate: int
+) -> None:
+    """Each new row must win over its neighbors (for example, gpt-5.6-luna must
+    not fall through to the GPT-5 row, and gemini-3.5-flash-lite must not be
+    caught by a Flash row)."""
+    pricing_data = load_pricing(str(_REAL_PRICING_FILE))
+    rates = model_pricing(model_id, pricing_data)
+    assert rates.display_name == display_name
+    assert rates.input_rate == input_rate
+    assert rates.output_rate == output_rate
 
 
 def test_opus_5_5_priced_separately_from_opus_5() -> None:

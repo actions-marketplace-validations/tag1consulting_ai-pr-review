@@ -47,9 +47,9 @@ The action uses the Python engine in `ai_pr_review/`.
 | Provider | Standard model | Premium model |
 |----------|---------------|---------------|
 | `anthropic` | `claude-sonnet-5-5` | `claude-opus-5-5` |
-| `openai` | `gpt-5.4-mini` | `gpt-5.4` |
+| `openai` | `gpt-6-luna` | `gpt-6.1-sol` |
 | `openai-compatible` | (user-specified) | same as standard |
-| `google` | `gemini-2.5-flash` | `gemini-2.5-pro` |
+| `google` | `gemini-3.5-flash-lite` | `gemini-3.8-flash` |
 | `bedrock-proxy` | `us.anthropic.claude-sonnet-5` | `global.anthropic.claude-opus-4-7` |
 
 ### Verifying a model change before merge (required)
@@ -70,9 +70,11 @@ Before merging a model-default or new-model-support PR:
 
 See `tests/canary/live_model_canary.py`'s module docstring and the #592 test-plan writeup for the full reasoning; this is one required step from that plan (the "process" tier), not the whole plan.
 
+A bump usually starts from the weekly `model-watch.yml` workflow, which opens a "New <Anthropic|OpenAI|Google> standard/premium model available" issue when that provider's models API lists a newer model in a watched family than the pinned default: Sonnet/Opus, the pinned GPT tiers plus any tier in a newer GPT version (OpenAI renames tiers between versions, so those open a "New OpenAI model tier available" issue), and Gemini `flash-lite`/`flash` plus a stable Gemini Pro for premium (see `scripts/model_watch.py`). A provider whose API key secret is not set is skipped. The scheduled `Live Model Canary` workflow runs Anthropic, OpenAI and Google weekly against the current defaults, but a new model has to be verified with a local run first, because the workflow only tests the pinned defaults. It only reports and never changes a default, and it does not select a model at runtime on purpose: an unknown model prices at zero rates with no warning, and effort and temperature handling are matched per model name.
+
 ### CHECKPOINT: live-model harness runs require explicit human approval first
 
-`tests/canary/live_model_canary.py` and `tests/canary/consistency_eval.py` (and the `Live Model Canary` GitHub workflow's `workflow_dispatch` trigger) make **real, billed Anthropic API calls** against a full corpus (`tests/canary/corpus/`, 14 fixtures as of E9.S2) — not a single request. They are known to have exhausted the shared `ANTHROPIC_API_KEY` used by both this repo's CI and local harness testing (workspace-level quota, blocked until 2026-10-01): Anthropic's own usage export shows ~$142 of a ~$149 six-day total for that key landed on 2026-09-12/09-13, correlating exactly with Epic 9's harness/corpus work (#800, #809, #811, #834, #835), against a same-window CI-workflow total of only ~$7.32 measured directly from GitHub Actions job logs — confirming the harness runs, not the CI review workflow, were the overwhelming majority of the spend.
+`tests/canary/live_model_canary.py` and `tests/canary/consistency_eval.py` (and the `Live Model Canary` GitHub workflow's `workflow_dispatch` trigger) make **real, billed provider API calls** (the workflow bills Anthropic, OpenAI and Google, and a local `live_model_canary.py` run also bills `bedrock-proxy` when its key is set) against a full corpus (`tests/canary/corpus/`, 14 fixtures as of E9.S2) — not a single request. They are known to have exhausted the shared `ANTHROPIC_API_KEY` used by both this repo's CI and local harness testing (workspace-level quota, blocked until 2026-10-01): Anthropic's own usage export shows ~$142 of a ~$149 six-day total for that key landed on 2026-09-12/09-13, correlating exactly with Epic 9's harness/corpus work (#800, #809, #811, #834, #835), against a same-window CI-workflow total of only ~$7.32 measured directly from GitHub Actions job logs — confirming the harness runs, not the CI review workflow, were the overwhelming majority of the spend.
 
 **Before running either script locally, triggering the `Live Model Canary` workflow, or running any corpus-mode multi-fixture/multi-run evaluation against a real provider key: stop and get explicit confirmation from a human first.** State what you're about to run, against which corpus/fixture count, how many models/runs, and that it will incur real API cost — then wait. This applies regardless of any earlier approval in the same session; a green-light for a single canary check does not authorize a full corpus sweep or a repeated consistency-eval run. A single narrow `live_model_canary.py` run against one model/one diff (the "process" tier step above) is comparatively cheap and is not itself the concern — the corpus-mode and consistency-eval multi-run sweeps are the expensive ones.
 
