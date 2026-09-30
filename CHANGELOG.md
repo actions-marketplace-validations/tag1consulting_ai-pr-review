@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The scheduled live model canary now tests the OpenAI and Google defaults as well as Anthropic.** `model-canary.yml` passes the `OPENAI_API_KEY` and `GOOGLE_API_KEY` repository secrets, adding 8 billed calls per weekly run (2 models and 2 agents per provider). The failure issue it files is no longer Anthropic-specific, and OpenAI (`insufficient_quota`) and Gemini (`RESOURCE_EXHAUSTED`) quota errors are now recognized as quota blocks rather than reported as model regressions.
+
 ## [2.18.0] - 2026-09-29
 
 ### Added
