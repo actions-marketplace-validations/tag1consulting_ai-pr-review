@@ -90,9 +90,15 @@ async def retry_post(
                 )
                 await anyio.sleep(delay + jitter)
                 continue
+            # Keep the provider's error body (as the non-retried path below
+            # does): an exhausted OpenAI or Gemini key is a 429, and the only
+            # thing that says "quota" and not "rate limit" is in the body.
+            # Without it the live model canary cannot tell a billing block
+            # from a model regression.
+            body = response.text[:500] if response.content else ""
             raise LLMTransientError(
                 f"{provider_label} returned HTTP {response.status_code} after "
-                f"{retry_count} retries"
+                f"{retry_count} retries" + (f": {body}" if body else "")
             )
 
         if response.status_code < 200 or response.status_code >= 300:

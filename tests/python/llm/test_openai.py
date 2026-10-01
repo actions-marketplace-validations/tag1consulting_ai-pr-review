@@ -250,3 +250,25 @@ async def test_call_strips_whitespace_from_base_url(monkeypatch):
         await call(req, provider="openai-compatible")
 
     assert route.calls.call_count == 1
+
+
+@pytest.mark.anyio
+async def test_call_429_exhausted_error_keeps_the_provider_body(monkeypatch):
+    # An exhausted OpenAI key is a 429. Only the body says "quota", and the
+    # live model canary classifies billing blocks from the exception text.
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_RETRY_COUNT", "1")
+    monkeypatch.setenv("LLM_RETRY_BASE_DELAY", "0")
+    body = (
+        '{"error": {"message": "You exceeded your current quota, please check your plan '
+        'and billing details.", "type": "insufficient_quota"}}'
+    )
+
+    with respx.mock:
+        respx.post(API_URL).mock(return_value=httpx.Response(429, text=body))
+        req = make_request(model_id="gpt-5.4")
+        with pytest.raises(LLMTransientError) as exc:
+            await call(req, provider="openai")
+
+    assert "after 1 retries" in str(exc.value)
+    assert "insufficient_quota" in str(exc.value)
