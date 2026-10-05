@@ -451,7 +451,7 @@ CVE check queries [OSV.dev](https://osv.dev/) against `go.mod`, `package.json`, 
 
 By default, each posted review comment carries a single compact line summarizing the run's cost, e.g.:
 
-> _Review cost: $0.1234 · 45,678 tokens · 8 agents · Sonnet 5 · [full breakdown](run-url)_
+> _Review cost: $0.1234 · 45,678 tokens · 8 agents · Sonnet 5 · [full breakdown](https://github.com/OWNER/REPO/actions/runs/RUN_ID)_
 
 The full **Token usage by agent** table (the default before this feature shipped) is always available in two other places, regardless of `token-usage-display`:
 
