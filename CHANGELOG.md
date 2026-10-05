@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.18.2] - 2026-10-05
+
+### Fixed
+
+- **A Bitbucket review comment no longer shows two "Summary" headings (#987).** `prompts/pr-summarizer.md` makes the model start with `## Summary`, and the renderer wrapped that text under its own `### Summary`. A new `strip_leading_summary_heading()` in `vcs/_body.py` removes one leading `Summary` heading of any level before the wrap, and `_extract_walkthrough` applies it too, so comments that are already posted heal on the next run. `review/reporting.py` uses it for the GitHub step summary. The prompt is unchanged because `summarizer.py` parses by `## ` headings.
+- **The Bitbucket Code Insights annotation note now follows the findings list and always says "findings".** It used to precede the list and say "above". The verb follows the count.
+- **The Bitbucket headline shows "N in the diff, M total" when out-of-diff findings exist.** `compute_headline` excludes them from the count, but Bitbucket renders them in the flat list.
+- **A failed `GET /2.0/user` on Bitbucket is no longer silent.** `_list_summary_comments` fails closed and returned `[]`, so a run lost the last reviewed SHA, reviewed the full diff, and posted a new summary comment on each push. `_bot_account_id` now logs a WARNING with the HTTP status on every failure path, and `post_findings` adds a "Bot account not verified" notice to the comment. The author check from #894 is unchanged, with no marker-only fallback. `docs/bitbucket-setup.md` and `examples/pipelines/bitbucket-pipelines.yml` now list the Account:Read scope (`read:user:bitbucket`).
+
+### Added
+
+- **A one-line pointer to the dismiss instructions in findings comments.** GitHub links to the slash command reference. Bitbucket links to `bitbucket-setup#dismissing-findings` and only when `AI_BITBUCKET_VERDICTS` is true. It sits before the footer, and `_FOOTER` is unchanged because `_extract_walkthrough` and `_canonical.py` match on it. `SLASH_COMMANDS_DOC_URL` moved from `slash/handlers.py` to `vcs/_body.py` so `vcs/` does not import `slash/`.
+- **An invalid `policy.yml` is reported in the posted comment.** `load_policy_file` takes an optional `problems` list and `ReviewRuntime.policy_ignored_reason` carries the first reason to `cli.py`, which shows `policy.yml ignored: <reason>` in the usage warning slot for every provider. The reason is collapsed to one line and cut at 300 characters. The error for a policy named like a built-in base now suggests a new name with `extends:`.
+
+### Changed
+
+- **Dependency digests and tags.** `ubuntu:26.04` base image digest (#986), `ghcr.io/astral-sh/ruff` tag v0.16.10 (#985), and the `docker/dockerfile:1.27` digest (#984).
+- **Docs.** The supported-providers table was corrected, and the token usage example in the README uses a placeholder URL instead of a relative `run-url` link target.
+
 ## [2.18.1] - 2026-09-30
 
 ### Added

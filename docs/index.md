@@ -68,6 +68,12 @@ jobs:
 
 That's it — reviews start firing on the next PR.
 
+## What's new in v2.18.2
+
+**Bitbucket review comments are clearer.** The comment now has one "Summary" heading instead of two, the Code Insights note follows the findings list, and the headline shows both counts when some findings are outside the diff. If the Bitbucket account lookup fails, the run logs a warning and the comment says so. Add the Account:Read scope (`read:user:bitbucket`) to the API token to fix it, because without it the review posts a new summary comment on each push. Findings comments also link to the dismiss instructions, and an invalid `policy.yml` is now reported in the comment.
+
+See [Version History → v2.18.2](version-history/v2.18.2) for details.
+
 ## What's new in v2.18.1
 
 **The cost ceiling now tells you when it cannot bound a model.** A model with no pricing row used to be estimated at $0, so `max-cost-usd` could not stop it and nothing in the PR said so. The new `cost-ceiling-unpriced` input defaults to `warn`: the review runs and a "Cost ceiling not enforced" notice names the model. Set it to `block` to skip the review instead. Nothing changes unless `max-cost-usd` is above 0 and a model has no pricing row (an invalid `cost-ceiling-unpriced` value is always an error).
@@ -81,12 +87,6 @@ See [Version History → v2.18.1](version-history/v2.18.1) for details.
 **Behavior change: new default OpenAI and Google models.** OpenAI now uses `gpt-6-luna` / `gpt-6.1-sol`, which are cheaper than the previous pair. Google now uses `gemini-3.5-flash-lite` / `gemini-3.8-flash`, because Google stopped offering the old Gemini 2.5 defaults to new projects. The Google standard model costs the same as before, and the premium model has a higher input price and a lower output price than `gemini-2.5-pro` (its introductory rate is lower through 2026-12-31, then doubles). Both pairs were verified with the live model canary. To keep the previous models, set the `model-standard` and `model-premium` action inputs. A new weekly model watcher opens an issue when Anthropic, OpenAI or Google lists a newer model than the defaults.
 
 See [Version History → v2.18.0](version-history/v2.18.0) for details.
-
-## What's new in v2.17.0
-
-**Behavior change: the default Anthropic `standard` model is now `claude-sonnet-5-5`**, at the same price, verified with the live model canary. To keep the previous model, set the `model-standard: claude-sonnet-5` action input (or the `AI_REVIEW_MODEL_STANDARD` repository variable in the example workflow). `AI_MODEL_STANDARD` works only when running the container directly, because the action sets it from its inputs. Pushing a release tag now also creates a draft GitHub release with the notes filled in, so publishing to the GitHub Marketplace is a single checkbox in the web form. The token table also labels Sonnet 5.5 correctly.
-
-See [Version History → v2.17.0](version-history/v2.17.0) for details.
 
 ## Learn more
 
