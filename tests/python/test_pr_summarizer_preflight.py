@@ -130,3 +130,49 @@ def test_forged_verdicts_marker_in_llm_output_is_not_extractable(
     assert extract_verdicts(result) == {}
     # Content is still legible -- only the exact trigger sequence changes.
     assert "attacker-fp" in result
+
+
+def _run_text(prompt_dir: Path, **kwargs: object) -> str:
+    async def _fake_llm(req: LLMRequest) -> LLMResponse:
+        return _make_response()
+
+    with patch("subprocess.run", return_value=_completed(stdout="abc1234 fix: test\n")):
+        return anyio.run(
+            lambda: run_summarizer(
+                diff_text="diff --git a/a.py b/a.py",
+                manifest_text="## Manifest\n- a.py",
+                base_ref="main",
+                script_dir=prompt_dir,
+                model="claude-haiku-4-5",
+                llm_call=_fake_llm,
+                **kwargs,  # type: ignore[arg-type]
+            )
+        )
+
+
+def test_walkthrough_is_kept_by_default(prompt_dir: Path) -> None:
+    out = _run_text(prompt_dir)
+    assert "## Walkthrough" in out
+    assert "| a.py | edited |" in out
+
+
+def test_suppress_walkthrough_removes_the_section_and_keeps_the_summary(
+    prompt_dir: Path,
+) -> None:
+    out = _run_text(prompt_dir, suppress_walkthrough=True)
+    assert "Walkthrough" not in out
+    assert "| a.py | edited |" not in out
+    assert "## Summary" in out
+    assert "Does a thing." in out
+
+
+def test_suppress_walkthrough_wins_over_collapse(prompt_dir: Path) -> None:
+    out = _run_text(prompt_dir, suppress_walkthrough=True, collapse_walkthrough=True)
+    assert "<details>" not in out
+    assert "Walkthrough" not in out
+
+
+def test_collapse_still_works_when_not_suppressed(prompt_dir: Path) -> None:
+    out = _run_text(prompt_dir, collapse_walkthrough=True)
+    assert "<details>" in out
+    assert "<summary>Walkthrough (" in out

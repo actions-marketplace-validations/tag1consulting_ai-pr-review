@@ -164,6 +164,11 @@ class BitbucketConfig:
     # pre-Phase-3 behavior (every finding rendered flat in the comment body,
     # no suppression) byte-for-byte.
     code_insights: bool = True
+    # AI_SUPPRESS_WALKTHROUGH: also remove the `## Walkthrough` section from a
+    # summary comment that was posted before the setting was turned on. The
+    # carried-forward summary text is re-embedded on every run, so without this
+    # an old table would stay in the comment.
+    suppress_walkthrough: bool = False
     # Bitbucket parity Phase 4 (#874): poll the PR's own top-level comments
     # for /ai-pr-review dismiss|false-positive|wont-fix|fixed F<n> commands
     # at review time (Bitbucket Pipelines has no comment-triggered event, so
@@ -983,6 +988,7 @@ class BitbucketProvider:
             workspace=self.config.workspace,
             repo_slug=self.config.repo_slug,
             head_sha=diff.head_sha,
+            suppress_walkthrough=self.config.suppress_walkthrough,
         )
 
         # Embed the ID map as a hidden marker so the next run (and the
@@ -1544,8 +1550,13 @@ def _render_combined_body(
     headline_findings: Sequence[Finding] | None = None,
     annotated_count: int = 0,
     annotated_fingerprints: frozenset[str] = frozenset(),
+    suppress_walkthrough: bool = False,
 ) -> str:
     """Render the combined summary+findings body for Bitbucket.
+
+    ``suppress_walkthrough`` removes the ``## Walkthrough`` section from the
+    summary text carried forward from the existing comment (see
+    ``BitbucketConfig.suppress_walkthrough``).
 
     ``findings`` is what actually renders as flat bullets below -- every
     active finding (issue #919), not just the ones that didn't land a Code
@@ -1737,6 +1748,13 @@ def _render_combined_body(
     head_lines = existing_body.split("\n", 1)
     marker_line = head_lines[0] if head_lines else ""
     original_summary_text = _extract_walkthrough(existing_body)
+    if suppress_walkthrough:
+        # Local import: agents.summarizer imports vcs._body, and importing
+        # `ai_pr_review.vcs` loads this module, so a module-level import here
+        # is circular.
+        from ai_pr_review.agents.summarizer import strip_walkthrough_section
+
+        original_summary_text = strip_walkthrough_section(original_summary_text).strip()
 
     pr_summary_block = f"\n### Summary\n{original_summary_text}\n" if original_summary_text else ""
 

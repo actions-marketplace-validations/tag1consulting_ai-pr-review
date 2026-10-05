@@ -333,6 +333,7 @@ jobs:
           # loads recent <repo-feedback> entries from the ai-pr-review-bot branch
           # and injects them into agent prompts. GitHub-only.
           feedback-loop: ${{ vars.AI_REVIEW_FEEDBACK_LOOP || 'false' }}
+          suppress-walkthrough: ${{ vars.AI_REVIEW_SUPPRESS_WALKTHROUGH || 'false' }}
           # --- Analyzer / agent filtering (Python engine) ---
           analyzers: ${{ vars.AI_REVIEW_ANALYZERS || '' }}
           exclude-analyzers: ${{ vars.AI_REVIEW_EXCLUDE_ANALYZERS || '' }}
@@ -399,6 +400,7 @@ jobs:
       approval-ceiling: ${{ vars.AI_REVIEW_APPROVAL_CEILING || 'approve' }}
       feedback-loop: ${{ vars.AI_REVIEW_FEEDBACK_LOOP || 'false' }}
       token-usage-display: ${{ vars.AI_REVIEW_TOKEN_USAGE_DISPLAY || 'compact' }}
+      suppress-walkthrough: ${{ vars.AI_REVIEW_SUPPRESS_WALKTHROUGH || 'false' }}
       token-usage-warn-usd: ${{ vars.AI_REVIEW_TOKEN_USAGE_WARN_USD || '1.00' }}
       max-cost-usd: ${{ vars.AI_REVIEW_MAX_COST_USD || '0' }}
       fail-on-cost-ceiling: ${{ vars.AI_REVIEW_FAIL_ON_COST_CEILING || 'false' }}

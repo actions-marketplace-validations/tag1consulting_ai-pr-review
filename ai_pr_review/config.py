@@ -79,6 +79,8 @@ _KNOWN_AI_VARS: frozenset[str] = frozenset(
         "AI_FEEDBACK_MAX_TOKENS",
         "AI_FEEDBACK_RETENTION_COUNT",
         "AI_FEEDBACK_RETENTION_AGE_DAYS",
+        # --- Summary ---
+        "AI_SUPPRESS_WALKTHROUGH",
         # --- Judge pass ---
         "AI_JUDGE_PASS",
         # --- Fail-on-findings ---
@@ -525,6 +527,11 @@ class ReviewConfig(BaseModel):
     # "off"  -- pass through unchanged (full-file linting behaviour).
     analyzer_diff_scope: str = "cap"
 
+    # --- Summary ---
+    # When true, the pr-summarizer's `## Walkthrough` table is left out of the
+    # posted summary (Summary, Type and Effort stay). Off by default.
+    suppress_walkthrough: bool = False
+
     # --- Judge pass ---
     # On by default per explicit decision (session 2026-06-22). Adds one cheap-model
     # LLM call per review. Set AI_JUDGE_PASS=false to disable.
@@ -916,6 +923,7 @@ class ReviewConfig(BaseModel):
                 if p.strip()
             ),
             analyzer_diff_scope=os.environ.get("AI_ANALYZER_DIFF_SCOPE", "cap"),
+            suppress_walkthrough=_bool("AI_SUPPRESS_WALKTHROUGH"),
             enable_judge_pass=_bool("AI_JUDGE_PASS", True),
             fail_on_findings=_bool("AI_FAIL_ON_FINDINGS"),
             approval_ceiling=os.environ.get("AI_APPROVAL_CEILING", "approve").strip() or "approve",

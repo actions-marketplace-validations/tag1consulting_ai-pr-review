@@ -614,3 +614,27 @@ def test_bitbucket_verdict_min_role_invalid_value_ignored_when_verdicts_disabled
     prov = provider_from_env()
     assert isinstance(prov, BitbucketProvider)
     assert prov.config.verdicts is False
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"), [(None, False), ("false", False), ("true", True), ("1", True), ("yes", True)]
+)
+def test_bitbucket_suppress_walkthrough_env_wiring(
+    monkeypatch: pytest.MonkeyPatch, value: str | None, expected: bool
+) -> None:
+    """AI_SUPPRESS_WALKTHROUGH reaches BitbucketConfig (default off)."""
+    _clear_provider_envs(monkeypatch)
+    monkeypatch.setenv("VCS_PROVIDER", "bitbucket")
+    monkeypatch.setenv("BITBUCKET_EMAIL", "x@y")
+    monkeypatch.setenv("BITBUCKET_API_TOKEN", "tok")
+    monkeypatch.setenv("BITBUCKET_WORKSPACE", "ws")
+    monkeypatch.setenv("BITBUCKET_REPO_SLUG", "repo")
+    monkeypatch.setenv("PR_NUMBER", "42")
+    monkeypatch.delenv("AI_SUPPRESS_WALKTHROUGH", raising=False)
+    if value is not None:
+        monkeypatch.setenv("AI_SUPPRESS_WALKTHROUGH", value)
+
+    provider = provider_from_env()
+
+    assert isinstance(provider, BitbucketProvider)
+    assert provider.config.suppress_walkthrough is expected

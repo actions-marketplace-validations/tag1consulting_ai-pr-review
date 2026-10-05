@@ -328,6 +328,12 @@ def _build_bitbucket_from_env() -> BitbucketProvider:
     feedback_retention_count = _int_env("AI_FEEDBACK_RETENTION_COUNT", 500)
     feedback_retention_age_days = _int_env("AI_FEEDBACK_RETENTION_AGE_DAYS", 365)
 
+    # Same parse as config.py's _bool: only true/1/yes turn it on.
+    suppress_walkthrough = (
+        os.environ.get("AI_SUPPRESS_WALKTHROUGH", "false").strip().lower()
+        in ("true", "1", "yes")
+    )
+
     config = BitbucketConfig(
         workspace=workspace,
         repo_slug=repo_slug,
@@ -335,6 +341,7 @@ def _build_bitbucket_from_env() -> BitbucketProvider:
         email=email,
         api_token=token,
         code_insights=code_insights,
+        suppress_walkthrough=suppress_walkthrough,
         verdicts=verdicts,
         verdict_min_role=verdict_min_role,
         review_state=review_state,

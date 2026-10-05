@@ -92,6 +92,7 @@ async def run_summarizer(
     temperature: float = 0.3,
     llm_call: Callable[[LLMRequest], Awaitable[LLMResponse]],
     collapse_walkthrough: bool = False,
+    suppress_walkthrough: bool = False,
 ) -> str:
     """Run the pr-summarizer agent and return its formatted markdown output.
 
@@ -108,6 +109,10 @@ async def run_summarizer(
     must gate this on the VCS provider — Bitbucket Cloud renders no HTML at
     all (issue #703), so it must stay False there. See cli.py's provider gate.
 
+    suppress_walkthrough: when True, removes the `## Walkthrough` section via
+    `strip_walkthrough_section` (``AI_SUPPRESS_WALKTHROUGH``). Takes precedence
+    over collapse_walkthrough. The Summary, Type and Effort stay.
+
     Fail-soft: on any error logs a WARNING and returns _SUMMARIZER_FAILURE_NOTICE
     so the PR comment communicates the partial failure rather than silently
     omitting the summary.  except Exception is intentional: the fail-soft contract
@@ -119,6 +124,7 @@ async def run_summarizer(
         build_summarizer_system_prompt,
         build_summarizer_user_message,
         parse_summarizer_output,
+        strip_walkthrough_section,
         wrap_walkthrough_in_details,
     )
     from ai_pr_review.llm.base import LLMRequest
@@ -181,6 +187,10 @@ async def run_summarizer(
         # doesn't rely on any of the defanged sequences.
         text = sanitize_display_text(response.text)
         parsed = parse_summarizer_output(text)
+        # parse_summarizer_output ran above on the full text, so a suppressed
+        # walkthrough never shows up as a "missing-walkthrough-section" warning.
+        if suppress_walkthrough:
+            return strip_walkthrough_section(text)
         if collapse_walkthrough:
             return wrap_walkthrough_in_details(text, file_count=len(parsed.walkthrough))
         return text

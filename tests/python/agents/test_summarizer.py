@@ -13,6 +13,7 @@ from ai_pr_review.agents.summarizer import (
     build_summarizer_system_prompt,
     build_summarizer_user_message,
     parse_summarizer_output,
+    strip_walkthrough_section,
     wrap_walkthrough_in_details,
 )
 
@@ -590,3 +591,64 @@ Adversarial PR.
     # Exactly one real </details> remains: the wrapper's own closing tag.
     assert result.count("</details>") == 1
     assert result.rstrip().endswith("</details>")
+
+
+# ---------------------------------------------------------------------------
+# strip_walkthrough_section (AI_SUPPRESS_WALKTHROUGH, #997)
+# ---------------------------------------------------------------------------
+
+_FULL = (
+    "## Summary\n\nAdds a thing.\n\n**Type:** feature\n**Effort:** 2/5 -- small\n\n"
+    "## Walkthrough\n\n| File | Change | Summary |\n|------|--------|---------|\n"
+    "| a.py | Modified | edits a |\n"
+)
+
+
+def test_strip_walkthrough_removes_the_trailing_section() -> None:
+    out = strip_walkthrough_section(_FULL)
+    assert "Walkthrough" not in out
+    assert "| a.py |" not in out
+    assert out == "## Summary\n\nAdds a thing.\n\n**Type:** feature\n**Effort:** 2/5 -- small\n"
+
+
+def test_strip_walkthrough_keeps_a_section_that_follows_it() -> None:
+    text = _FULL + "\n## Notes\n\nKeep me.\n"
+    out = strip_walkthrough_section(text)
+    assert "| a.py |" not in out
+    assert out.endswith("\n\n## Notes\n\nKeep me.\n")
+    assert "**Effort:** 2/5" in out
+
+
+def test_strip_walkthrough_without_the_section_is_unchanged() -> None:
+    text = "## Summary\n\nOnly a summary.\n"
+    assert strip_walkthrough_section(text) == text
+    assert strip_walkthrough_section("NONE") == "NONE"
+    assert strip_walkthrough_section("") == ""
+
+
+def test_strip_walkthrough_ignores_a_heading_inside_a_code_fence() -> None:
+    text = "## Summary\n\nExample:\n\n```\n## Walkthrough\n| x |\n```\n"
+    assert strip_walkthrough_section(text) == text
+
+
+def test_strip_walkthrough_never_returns_an_empty_summary() -> None:
+    # A degraded response with only a walkthrough would otherwise become "", which
+    # the orchestrator reads as an incremental run and posts nothing.
+    only = "## Walkthrough\n\n| File | Change | Summary |\n|---|---|---|\n| a.py | Added | x |\n"
+    assert strip_walkthrough_section(only) == only
+
+
+def test_strip_walkthrough_matches_the_heading_case_insensitively() -> None:
+    text = "## Summary\n\nS.\n\n## walkthrough\n\n| a |\n"
+    assert strip_walkthrough_section(text) == "## Summary\n\nS.\n"
+
+
+def test_strip_walkthrough_on_carried_forward_bitbucket_text() -> None:
+    # The Bitbucket comment re-embeds the summary text (without its own
+    # "## Summary" heading) under "### Summary", so the text starts with
+    # prose and carries the Walkthrough as a trailing top-level section.
+    text = "Adds a thing.\n\n## Walkthrough\n\n| File | Change | Summary |\n|--|--|--|\n| a.py | Added | x |"
+    assert strip_walkthrough_section(text) == "Adds a thing."
+    # A "### " sub-heading is not a top-level section and must survive.
+    kept = "Adds a thing.\n\n### Walkthrough notes\n\nStays.\n"
+    assert strip_walkthrough_section(kept) == kept

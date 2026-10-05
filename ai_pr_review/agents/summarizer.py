@@ -368,6 +368,29 @@ def _find_section_span(raw: str, name: str) -> tuple[int, int] | None:
     return None
 
 
+def strip_walkthrough_section(markdown: str) -> str:
+    """Remove the `## Walkthrough` section (heading and table) from `markdown`.
+
+    Used when `AI_SUPPRESS_WALKTHROUGH` is on. Applied as a deterministic
+    post-process on the model's output, not as a prompt instruction, for the
+    same reason as `wrap_walkthrough_in_details`. Returns `markdown` unchanged
+    when there is no `## Walkthrough` heading, and also when removing the
+    section would leave nothing: an empty summary reads as "no summary" to the
+    orchestrator, which then treats the run as incremental and posts nothing.
+    """
+    span = _find_section_span(markdown, "walkthrough")
+    if span is None:
+        return markdown
+    start, end = span
+    head = markdown[:start].rstrip()
+    tail = markdown[end:].lstrip("\n")
+    if not head and not tail.strip():
+        return markdown
+    if tail:
+        return f"{head}\n\n{tail}" if head else tail
+    return head + ("\n" if markdown.endswith("\n") else "")
+
+
 def wrap_walkthrough_in_details(markdown: str, *, file_count: int) -> str:
     """Wrap the `## Walkthrough` section in a collapsed `<details>` accordion.
 

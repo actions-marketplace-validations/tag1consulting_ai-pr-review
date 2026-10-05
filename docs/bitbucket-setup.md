@@ -25,6 +25,11 @@ the full reasoning behind that choice.
 ## What works
 
 - Summary comment upsert (single comment per PR, updated on each run)
+- Leaving out the Walkthrough table: Bitbucket cannot collapse it the way
+  GitHub and GitLab do, so the per-file table shows in full by default. Set
+  `AI_SUPPRESS_WALKTHROUGH=true` (a Pipelines variable) to leave it out. The
+  Summary text, Type and Effort stay. A summary comment that already has a
+  table loses it on the next run.
 - Inline findings via Code Insights annotations, rebuilt from scratch every
   run (`AI_BITBUCKET_CODE_INSIGHTS`, default `true`). Every active finding
   still renders as a bullet in the summary comment too — one that also got
