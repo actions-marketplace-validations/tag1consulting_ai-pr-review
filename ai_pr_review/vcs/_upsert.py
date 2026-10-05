@@ -28,6 +28,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from ai_pr_review.vcs._body import format_http_error_body
 from ai_pr_review.vcs.marker import replace_summary_sha
 from ai_pr_review.vcs.protocol import SummaryResult
 
@@ -59,7 +60,7 @@ def upsert_comment(
         keep_id = item_id(keep)
         resp = request(update_verb, item_url(keep_id), json_body=payload)
         if resp.status_code >= 400:
-            err = f"{update_label}: HTTP {resp.status_code}: {resp.text[:200]}"
+            err = f"{update_label}: HTTP {resp.status_code}: {format_http_error_body(resp.text)}"
             errors.append(err)
             return SummaryResult(comment_id=keep_id, created=False, updated=False, error=err)
         for dup in existing[1:]:
@@ -68,7 +69,7 @@ def upsert_comment(
 
     resp = request("POST", create_url(), json_body=payload)
     if resp.status_code >= 400:
-        err = f"{create_label}: HTTP {resp.status_code}: {resp.text[:200]}"
+        err = f"{create_label}: HTTP {resp.status_code}: {format_http_error_body(resp.text)}"
         errors.append(err)
         return SummaryResult(comment_id=None, created=False, updated=False, error=err)
     data = resp.json() or {}
@@ -109,6 +110,6 @@ def advance_sha_marker(
         return False
     resp = request(update_verb, item_url(keep_id), json_body=make_payload(new_body))
     if resp.status_code >= 400:
-        errors.append(f"advance_sha: HTTP {resp.status_code}: {resp.text[:200]}")
+        errors.append(f"advance_sha: HTTP {resp.status_code}: {format_http_error_body(resp.text)}")
         return False
     return True

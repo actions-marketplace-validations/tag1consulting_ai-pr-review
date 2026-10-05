@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from ai_pr_review.findings.models import Finding, Severity
+from ai_pr_review.vcs._body import format_http_error_body
 from ai_pr_review.vcs._finding_ids import fingerprint
 from ai_pr_review.vcs.http import RecordingClient
 
@@ -252,7 +253,7 @@ def post_code_insights(
         return CodeInsightsResult(
             error=(
                 f"code insights DELETE report: HTTP {del_resp.status_code}: "
-                f"{del_resp.text[:200]}"
+                f"{format_http_error_body(del_resp.text)}"
             ),
         )
 
@@ -263,7 +264,7 @@ def post_code_insights(
         return CodeInsightsResult(
             error=(
                 f"code insights PUT report: HTTP {put_resp.status_code}: "
-                f"{put_resp.text[:200]}"
+                f"{format_http_error_body(put_resp.text)}"
             ),
         )
 
@@ -291,7 +292,7 @@ def post_code_insights(
                 posted_findings=tuple(posted),
                 error=(
                     f"code insights POST annotations: HTTP {resp.status_code}: "
-                    f"{resp.text[:200]}"
+                    f"{format_http_error_body(resp.text)}"
                 ),
             )
         posted.extend(f for f, _payload in chunk)

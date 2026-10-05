@@ -542,3 +542,76 @@ def test_github_review_body_links_slash_commands_before_footer() -> None:
 
     clean = _render_review_body(event="APPROVE", **{**common, "findings": []})  # type: ignore[arg-type]
     assert SLASH_COMMANDS_DOC_URL not in clean
+
+
+# --- format_http_error_body (#990) --------------------------------------------
+
+_SCOPE_BODY = (
+    '{"type": "error", "error": {"message": "Your credentials lack one or more '
+    'required privilege scopes.", "detail": {"required": ["read:pullrequest:bitbucket"], '
+    '"granted": ["read:user:bitbucket", "read:repository:bitbucket", '
+    '"write:repository:bitbucket", "read:account"]}}}'
+)
+
+
+def test_format_http_error_body_keeps_both_scope_lists() -> None:
+    from ai_pr_review.vcs._body import format_http_error_body
+
+    out = format_http_error_body(_SCOPE_BODY)
+    assert "Your credentials lack one or more required privilege scopes." in out
+    assert "required scopes: read:pullrequest:bitbucket" in out
+    assert "granted scopes: read:user:bitbucket, read:repository:bitbucket" in out
+    assert "read:account" in out  # the last granted scope survives, unlike a 200-char cut
+    assert len(_SCOPE_BODY) > 200
+
+
+def test_format_http_error_body_scope_list_longer_than_limit_is_not_cut() -> None:
+    import json
+
+    from ai_pr_review.vcs._body import format_http_error_body
+
+    granted = [f"scope-number-{i}:bitbucket" for i in range(40)]
+    body = json.dumps({"error": {"message": "m", "detail": {"required": ["r"], "granted": granted}}})
+    out = format_http_error_body(body)
+    assert "scope-number-39:bitbucket" in out
+
+
+def test_format_http_error_body_other_bodies_are_bounded() -> None:
+    from ai_pr_review.vcs._body import format_http_error_body
+
+    assert format_http_error_body("x" * 2000) == "x" * 500
+    assert format_http_error_body("short") == "short"
+    assert format_http_error_body("x" * 30, limit=10) == "x" * 10
+
+
+def test_format_http_error_body_non_scope_json_falls_back_to_text() -> None:
+    from ai_pr_review.vcs._body import format_http_error_body
+
+    for text in (
+        '{"error": {"message": "not found"}}',
+        '{"error": {"detail": {"required": "x", "granted": []}}}',
+        '{"error": "boom"}',
+        "[1, 2]",
+        "",
+    ):
+        assert format_http_error_body(text) == text
+
+
+def test_format_http_error_body_survives_deeply_nested_json() -> None:
+    from ai_pr_review.vcs._body import format_http_error_body
+
+    text = "[" * 100_000
+    assert format_http_error_body(text) == text[:500]
+
+
+def test_format_http_error_body_caps_an_enormous_scope_list() -> None:
+    import json
+
+    from ai_pr_review.vcs._body import format_http_error_body
+
+    granted = [f"scope-{i}:bitbucket" for i in range(5000)]
+    body = json.dumps({"error": {"message": "m", "detail": {"required": ["r"], "granted": granted}}})
+    out = format_http_error_body(body)
+    assert out.startswith("m (required scopes: r. granted scopes: scope-0:bitbucket")
+    assert out.endswith(" ...)")
+    assert len(out) < 2200

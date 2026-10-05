@@ -68,6 +68,12 @@ jobs:
 
 That's it — reviews start firing on the next PR.
 
+## What's new in v2.18.3
+
+**Bitbucket error messages are clearer.** A failed Bitbucket call now shows the scopes the token has, so a missing-scope error is easy to fix. The warning for a failed account lookup depends on the HTTP status. A 401 means the credentials were rejected or the token has no scopes, and a 403 means the Account:Read scope is missing. The dismiss help line is no longer shown when that lookup failed, because verdict commands are off for that run.
+
+See [Version History → v2.18.3](version-history/v2.18.3) for details.
+
 ## What's new in v2.18.2
 
 **Bitbucket review comments are clearer.** The comment now has one "Summary" heading instead of two, the Code Insights note follows the findings list, and the headline shows both counts when some findings are outside the diff. If the Bitbucket account lookup fails, the run logs a warning and the comment says so. Add the Account:Read scope (`read:user:bitbucket`) to the API token to fix it, because without it the review posts a new summary comment on each push. Findings comments also link to the dismiss instructions, and an invalid `policy.yml` is now reported in the comment.
@@ -81,12 +87,6 @@ See [Version History → v2.18.2](version-history/v2.18.2) for details.
 **The `ai-pr-review/policy-gate` check no longer flips back to `action_required` after `/ai-pr-review review-full` satisfied it.** A slower automatic review on the same commit could finish last and overwrite the `success`. It now keeps the gate satisfied for that commit.
 
 See [Version History → v2.18.1](version-history/v2.18.1) for details.
-
-## What's new in v2.18.0
-
-**Behavior change: new default OpenAI and Google models.** OpenAI now uses `gpt-6-luna` / `gpt-6.1-sol`, which are cheaper than the previous pair. Google now uses `gemini-3.5-flash-lite` / `gemini-3.8-flash`, because Google stopped offering the old Gemini 2.5 defaults to new projects. The Google standard model costs the same as before, and the premium model has a higher input price and a lower output price than `gemini-2.5-pro` (its introductory rate is lower through 2026-12-31, then doubles). Both pairs were verified with the live model canary. To keep the previous models, set the `model-standard` and `model-premium` action inputs. A new weekly model watcher opens an issue when Anthropic, OpenAI or Google lists a newer model than the defaults.
-
-See [Version History → v2.18.0](version-history/v2.18.0) for details.
 
 ## Learn more
 

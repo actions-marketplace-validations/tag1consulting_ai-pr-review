@@ -798,3 +798,39 @@ def test_load_policy_file_missing_leaves_problems_empty(git_repo: Path) -> None:
     problems: list[str] = []
     assert load_policy_file(str(git_repo), "main", problems=problems) is None
     assert problems == []
+
+
+# ---------------------------------------------------------------------------
+# This repo's own policy file (release branches get a full review)
+# ---------------------------------------------------------------------------
+
+
+def _repo_policy() -> PolicyFile:
+    import yaml
+
+    path = Path(__file__).resolve().parents[2] / ".github" / "ai-pr-review" / "policy.yml"
+    return _parse_policy_file(yaml.safe_load(path.read_text(encoding="utf-8")))
+
+
+def test_repo_policy_routes_release_head_branch_to_full_review() -> None:
+    pf = _repo_policy()
+    route = match_route(pf, ["ai_pr_review/cli.py", "docs/index.md"], "main", "release/v2.18.4")
+    assert route is not None
+    assert route.policy == "deep"
+    assert route.require == "deep"
+    assert resolve_policy(pf, route.policy).review_mode == "full"
+
+
+def test_repo_policy_keeps_feature_prs_into_release_branch_on_the_default() -> None:
+    pf = _repo_policy()
+    # A feature PR that targets release/vX.Y.Z has a feature/* head, so the
+    # release route does not match and nothing else does for a code change.
+    assert match_route(pf, ["ai_pr_review/cli.py"], "release/v2.18.4", "feature/x") is None
+    assert pf.default is None
+
+
+def test_repo_policy_still_routes_docs_only_prs_to_the_content_tier() -> None:
+    pf = _repo_policy()
+    route = match_route(pf, ["docs/index.md"], "main", "feature/x")
+    assert route is not None
+    assert route.policy == "content"
