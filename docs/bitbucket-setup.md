@@ -363,13 +363,22 @@ The API token exists but the user does not have write access to comments.
 Check **Workspace settings → Members** and **Repository settings → User and
 group access**.
 
-### `WARNING ... could not resolve the bot account (GET /2.0/user -> HTTP 403)`
+### `WARNING ... could not resolve the bot account (GET /2.0/user -> HTTP ...)`
 
-The token lacks the Account:Read scope (`read:user:bitbucket`), or the
-credentials are wrong (401). The review fails closed: it does not trust any
-existing summary comment, so it posts a new summary on every push and
-reviews the full diff each time. Add the scope to the token and re-run. The
-summary comment also carries a note when this happens.
+The review calls `GET /2.0/user` to learn which account it runs as. When the
+call fails, the review fails closed: it does not trust any existing summary
+comment, so it posts a new summary on every push and reviews the full diff
+each time. The summary comment also carries a note when this happens. The
+warning and the note depend on the HTTP status:
+
+- **HTTP 401:** Bitbucket rejected the credentials, or the token has no scopes
+  at all (the body says `API Token provided has no Bitbucket scopes.`). Check
+  `BITBUCKET_EMAIL` and the token, and that the token was created with scopes.
+- **HTTP 403:** the token works but lacks the Account:Read scope
+  (`read:user:bitbucket`). The warning lists the required and the granted
+  scopes when Bitbucket sends them. Add the missing scope and re-run.
+- **Any other status, or a reply without an `account_id`:** the warning gives
+  the status and the start of the body. Check the token and its scopes.
 
 ### `ERROR: git diff against 'origin/<ref>...<sha>' failed`
 

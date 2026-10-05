@@ -136,6 +136,7 @@ def _provider(
     verdicts: bool = False,
     post_response: httpx.Response | None = None,
     existing_comments: bool = True,
+    user_response: httpx.Response | None = None,
 ) -> tuple[BitbucketProvider, dict]:
     captured: dict = {}
     created: dict = {}
@@ -148,6 +149,8 @@ def _provider(
     def handler(req: httpx.Request) -> httpx.Response:
         path = req.url.path.rstrip("/")
         if req.method == "GET" and path.endswith("/user"):
+            if user_response is not None:
+                return user_response
             if user_status >= 400:
                 return httpx.Response(user_status, text="forbidden")
             return httpx.Response(200, json={"account_id": _BOT})
@@ -260,3 +263,87 @@ def test_post_summary_scope_error_keeps_required_and_granted_scopes() -> None:
     assert "HTTP 403" in (result.error or "")
     assert "required scopes: read:pullrequest:bitbucket" in (result.error or "")
     assert "granted scopes: read:user:bitbucket, read:repository:bitbucket" in (result.error or "")
+
+
+# --- #991: the identity warning and notice depend on the response -------------
+
+_NO_SCOPES = {"type": "error", "error": {"message": "API Token provided has no Bitbucket scopes."}}
+_BAD_EMAIL = {"type": "error", "error": {"message": "API token must be used with an atlassian registered email"}}
+_SCOPE_403 = {
+    "type": "error",
+    "error": {
+        "message": "Your credentials lack one or more required privilege scopes.",
+        "detail": {"required": ["read:user:bitbucket"], "granted": ["read:repository:bitbucket"]},
+    },
+}
+
+
+def _post_findings_with_user(user_response: httpx.Response) -> tuple[list[str], str]:
+    """Run post_summary then post_findings and return (warnings, comment body)."""
+    import logging as _logging
+
+    records: list[str] = []
+
+    class _Capture(_logging.Handler):
+        def emit(self, record: _logging.LogRecord) -> None:
+            records.append(record.getMessage())
+
+    prov, captured = _provider(user_response=user_response, existing_comments=False)
+    handler = _Capture(level=_logging.WARNING)
+    log = _logging.getLogger("ai_pr_review.vcs.bitbucket")
+    log.addHandler(handler)
+    try:
+        summary = prov.post_summary("Adds foo.", _HEAD)
+        prov.post_findings(
+            [_finding()], DiffContext(diff_text=_DIFF, head_sha=_HEAD), event="COMMENT",
+            summary_comment_id=summary.comment_id,
+        )
+    finally:
+        log.removeHandler(handler)
+    warnings = [r for r in records if "could not resolve the bot" in r]
+    return warnings, captured.get("body", "")
+
+
+@pytest.mark.parametrize("body", [_NO_SCOPES, _BAD_EMAIL])
+def test_identity_401_says_credentials_rejected_not_account_read(body: dict) -> None:
+    warnings, comment = _post_findings_with_user(httpx.Response(401, json=body))
+    assert len(warnings) == 1
+    assert "HTTP 401" in warnings[0]
+    assert body["error"]["message"] in warnings[0]
+    assert "rejected the credentials" in warnings[0]
+    assert "lacks the Account:Read" not in warnings[0]
+    assert "Bot account not verified" in comment
+    assert "rejected the credentials (HTTP 401)" in comment
+    assert "lacks the Account:Read" not in comment
+
+
+def test_identity_403_names_account_read_and_shows_scope_lists() -> None:
+    warnings, comment = _post_findings_with_user(httpx.Response(403, json=_SCOPE_403))
+    assert "HTTP 403" in warnings[0]
+    assert "lacks the Account:Read scope" in warnings[0]
+    assert "required scopes: read:user:bitbucket" in warnings[0]
+    assert "granted scopes: read:repository:bitbucket" in warnings[0]
+    assert "lacks the Account:Read scope" in comment
+
+
+def test_identity_500_has_neither_scope_advice() -> None:
+    warnings, comment = _post_findings_with_user(httpx.Response(500, text="upstream down"))
+    assert "HTTP 500" in warnings[0]
+    assert "upstream down" in warnings[0]
+    assert "cause is not clear" in warnings[0]
+    assert "Account:Read" not in warnings[0]
+    assert "cause is not clear" in comment
+
+
+@pytest.mark.parametrize(
+    ("response", "needle"),
+    [
+        (httpx.Response(200, text="<html>not json</html>"), "returned non-JSON"),
+        (httpx.Response(200, json={"nickname": "bot"}), "had no account_id"),
+    ],
+)
+def test_identity_bad_success_body_uses_generic_advice(response: httpx.Response, needle: str) -> None:
+    warnings, comment = _post_findings_with_user(response)
+    assert needle in warnings[0]
+    assert "cause is not clear" in warnings[0]
+    assert "Bot account not verified" in comment
