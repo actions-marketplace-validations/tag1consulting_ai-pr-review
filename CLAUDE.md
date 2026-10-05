@@ -150,10 +150,27 @@ For detailed implementation internals (findings pipeline, parallel execution, ca
 
 For contributor how-tos (adding an analyzer, agent, language profile, or VCS provider), see [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Branching model
+
+Work lands on a long-lived release branch first, and the release branch then merges into `main`. This makes the release PR carry the whole code diff since the last release, so the one full review of a release looks at real code and not only at the release docs.
+
+1. **Start a release cycle**: create `release/vX.Y.Z` from `main` in a worktree and push it. Use the planned next version number.
+2. **Feature and issue PRs target the release branch**: `gh pr create --base release/vX.Y.Z`. They get the default quick review and the normal CI checks.
+3. **Cut the release**: when the work is ready, merge `main` into the release branch if `main` moved (for example a Renovate PR). Add the release commit (version bump, changelog, version history, homepage) to the release branch. Open a PR from `release/vX.Y.Z` into `main`.
+4. **The release PR gets a full review**: `.github/ai-pr-review/policy.yml` routes every `release/*` head branch to the `deep` policy, which is full mode, on each push. `main` is the last release, so the PR diff is the full code diff since the last release. The `e2e-gate` check runs on the same PR.
+
+Rules for this model:
+
+- **Close issues in the release PR**: GitHub closes an issue from a closing keyword only when the PR targets the default branch. List every issue the release fixes as `Fixes #N` in the release PR description.
+- **Dependency PRs**: Renovate PRs still target `main`. Merge `main` into the release branch before the release PR.
+- **The `:dev` image** is built from `main`, so changes on a release branch reach `:dev` when the release PR merges. The release PR's e2e run builds the image from the release branch.
+- **Hotfix**: create `release/vX.Y.Z` from the last release tag, apply the fix, and open the release PR into `main`.
+- **Policy file source**: the policy file is read from the PR's base branch. A release branch must contain the current `.github/ai-pr-review/policy.yml`, so create it from an up-to-date `main`.
+
 ## Release process
 
 1. **Run `/comprehensive-review`** on the release branch before tagging.
-2. **The `e2e-gate` GitHub Actions check must pass** on the release PR (`.github/workflows/e2e.yml`, which runs the deterministic e2e harness at `tests/e2e/`, see its README, against all three test platforms). This check is required on `main` (made required 2026-09-28, after two consecutive green `workflow_dispatch` runs with verified cleanup). On a non-draft, same-repo `release/*` PR every push runs the live legs on that SHA (a newer push cancels the in-flight run, so only the newest SHA finishes and bills), and only that automatic run reports the required `e2e-gate` context. `workflow_dispatch` and scheduled runs report `e2e-gate (manual)` instead, so a manual run is for troubleshooting and cannot satisfy the required check. If a run fails for an infrastructure reason, re-run the failed workflow. Draft `release/*` PRs and all other PRs get an immediate pass.
+2. **The `e2e-gate` GitHub Actions check must pass** on the release PR (`.github/workflows/e2e.yml`, which runs the deterministic e2e harness at `tests/e2e/`, see its README, against all three test platforms). This check is required on `main` (made required 2026-09-28, after two consecutive green `workflow_dispatch` runs with verified cleanup). On a non-draft, same-repo `release/*` PR (opened last, when the release branch is ready to merge into `main`) every push runs the live legs on that SHA (a newer push cancels the in-flight run, so only the newest SHA finishes and bills), and only that automatic run reports the required `e2e-gate` context. `workflow_dispatch` and scheduled runs report `e2e-gate (manual)` instead, so a manual run is for troubleshooting and cannot satisfy the required check. If a run fails for an infrastructure reason, re-run the failed workflow. Draft `release/*` PRs and all other PRs get an immediate pass.
 3. **Tag and push**: `publish-image.yml` rebuilds the image from the tagged source for both `amd64` and `arm64` and pushes `:X.Y.Z`, `:X.Y`, `:X` and `:latest` (the image tags have no `v` prefix, unlike the git tag). It does not simply promote the existing `:dev` image.
 4. **Publish the draft release**: pushing the tag also runs `draft-release.yml`, which creates a *draft* GitHub release with notes taken from `docs/version-history/<tag>.md` (built by `scripts/release_notes.py`). Publishing to the GitHub Marketplace is a checkbox in the release web form only, with no API or `gh` option, so open the draft, tick **Publish this release to the GitHub Marketplace**, choose the categories, and publish. The workflow leaves a release that already exists alone, so a release created by hand is not overwritten.
 

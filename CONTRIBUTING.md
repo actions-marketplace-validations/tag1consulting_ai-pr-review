@@ -178,6 +178,10 @@ See [docs/architecture-internals.md](docs/architecture-internals.md#multi-provid
 
 Unit tests for the harness's pure verification logic (`tests/e2e/verify.py`) live in `tests/python/e2e_harness/` and run as part of the normal `python -m pytest tests/python` suite (module invocation, so `tests.e2e.*` imports resolve): no network calls, no cost.
 
+## Which branch to target
+
+Feature and issue PRs target the current release branch (`release/vX.Y.Z`), not `main`. Ask a maintainer for the branch name if none is open. Dependency PRs from Renovate still target `main`. See the "Branching model" section in `CLAUDE.md` for why and for how a release is cut.
+
 ## Pre-PR checklist
 
 Before opening a pull request:
