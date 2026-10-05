@@ -116,6 +116,10 @@ class ReviewRuntime:
     # True when the pre-flight cost check itself raised (fail-soft) with a
     # ceiling set, so the run went ahead with no ceiling check at all.
     cost_ceiling_check_failed: bool = False
+    # Set when policy.yml existed but failed to parse or validate, so the
+    # review ran on defaults. cli.py shows it in the posted comment: the
+    # stderr WARNING alone let a misnamed policy go unnoticed.
+    policy_ignored_reason: str | None = None
 
 
 def _merge_allowlist(
@@ -368,7 +372,15 @@ async def build_review_runtime(
     # repos not adopting a policy file. Must run before the DispatchContext
     # below, which captures config.review_mode.
     from ai_pr_review.policy import load_policy_file, match_route, resolve_policy
-    _policy_file = load_policy_file(workspace=".", base_ref=base_ref, source=config.policy_source)
+    _policy_problems: list[str] = []
+    _policy_file = load_policy_file(
+        workspace=".", base_ref=base_ref, source=config.policy_source,
+        problems=_policy_problems,
+    )
+    # One line, bounded: the text lands in a PR comment.
+    policy_ignored_reason = (
+        " ".join(_policy_problems[0].split())[:300] if _policy_problems else None
+    )
     _resolved_policy = None
     _matched_route = None
     _policy_name: str | None = None
@@ -771,4 +783,5 @@ async def build_review_runtime(
         cost_ceiling_unenforced_models=cost_ceiling_unenforced_models,
         cost_ceiling_pricing_missing=cost_ceiling_pricing_missing,
         cost_ceiling_check_failed=cost_ceiling_check_failed,
+        policy_ignored_reason=policy_ignored_reason,
     )

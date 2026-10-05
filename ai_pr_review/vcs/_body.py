@@ -43,6 +43,29 @@ def severity_icon(severity: str) -> str:
     return _SEVERITY_ICONS.get(severity.lower(), "🔵")
 
 
+# Published docs site (docs/_config.yml). Lives here, not in slash/handlers.py,
+# so vcs/ renderers can link to it without importing slash/.
+SLASH_COMMANDS_DOC_URL: Final[str] = (
+    "https://tag1consulting.github.io/ai-pr-review/slash-commands"
+)
+
+_LEADING_SUMMARY_HEADING_RE: Final[re.Pattern[str]] = re.compile(
+    r"\A\s*#{1,6}[ \t]*\**[ \t]*summary[ \t]*:?[ \t]*\**[ \t]*#*[ \t]*(?:\n|\Z)",
+    re.IGNORECASE,
+)
+
+
+def strip_leading_summary_heading(text: str) -> str:
+    """Drop one leading ``Summary`` heading line (any level) from ``text``.
+
+    The pr-summarizer prompt makes the model open with ``## Summary``, and
+    the renderers wrap that text under their own ``### Summary`` heading, so
+    the comment would show two. Strips at most one heading, only when it is
+    the first non-blank line and its text is exactly "Summary".
+    """
+    return _LEADING_SUMMARY_HEADING_RE.sub("", text, count=1).lstrip("\n")
+
+
 @dataclass(frozen=True)
 class Headline:
     """Review-body headline: the "Overall Risk | Findings: N" line's inputs.

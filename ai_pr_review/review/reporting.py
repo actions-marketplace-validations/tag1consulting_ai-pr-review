@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 
 import click
 
+from ai_pr_review.vcs._body import strip_leading_summary_heading
+
 if TYPE_CHECKING:
     from ai_pr_review.orchestrate import ReviewResult
     from ai_pr_review.pricing import TokenEntry, TokenTotals
@@ -675,7 +677,7 @@ def write_step_summary(
         if token_section:
             lines.append(token_section)
         if summary_text.strip():
-            lines += ["### Summary", "", summary_text.strip(), ""]
+            lines += ["### Summary", "", strip_leading_summary_heading(summary_text.strip()), ""]
 
         content = "\n".join(lines)
         with open(step_summary_path, "a", encoding="utf-8") as fh:

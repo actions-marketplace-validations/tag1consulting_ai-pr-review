@@ -446,6 +446,12 @@ async def _run_review_async(config: ReviewConfig) -> int:
         its job, so it is shown in every display mode.
         """
         parts = [
+            (
+                f"> **policy.yml ignored:** {runtime.policy_ignored_reason}. "
+                "This review used the default settings."
+                if runtime.policy_ignored_reason
+                else ""
+            ),
             _build_cost_ceiling_notice(
                 runtime.cost_ceiling_unenforced_models,
                 pricing_missing=runtime.cost_ceiling_pricing_missing,

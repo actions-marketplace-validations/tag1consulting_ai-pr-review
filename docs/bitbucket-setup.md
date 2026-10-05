@@ -208,6 +208,12 @@ user must have at least:
 
 - **Repository:Read** on the repo being reviewed
 - **Pull request:Write** on the repo (to create and update comments)
+- **Account:Read** (`read:user:bitbucket` on a scoped API token). The review
+  calls `GET /2.0/user` to learn which account it runs as, and trusts only
+  summary comments written by that account (anti-spoofing). Without this
+  scope the lookup fails, the run logs a WARNING, and incremental review,
+  in-place summary update, and verdict polling are all off for that run.
+  The result is a new summary comment on every push.
 
 **If `AI_FEEDBACK_LOOP=true`**, the token also needs **Repository:Write**.
 Read this before granting it: Bitbucket has no way to scope a token's
@@ -330,7 +336,8 @@ Mitigations:
 
 ### `BITBUCKET_API_TOKEN` scope
 
-Use the minimum scope required (Repository:Read + Pull request:Write). If the
+Use the minimum scope required (Repository:Read + Pull request:Write +
+Account:Read). If the
 bot user has broader Workspace or Project admin rights, a token compromise has
 a much larger blast radius.
 
@@ -355,6 +362,14 @@ management** for the bot user.
 The API token exists but the user does not have write access to comments.
 Check **Workspace settings → Members** and **Repository settings → User and
 group access**.
+
+### `WARNING ... could not resolve the bot account (GET /2.0/user -> HTTP 403)`
+
+The token lacks the Account:Read scope (`read:user:bitbucket`), or the
+credentials are wrong (401). The review fails closed: it does not trust any
+existing summary comment, so it posts a new summary on every push and
+reviews the full diff each time. Add the scope to the token and re-run. The
+summary comment also carries a note when this happens.
 
 ### `ERROR: git diff against 'origin/<ref>...<sha>' failed`
 
