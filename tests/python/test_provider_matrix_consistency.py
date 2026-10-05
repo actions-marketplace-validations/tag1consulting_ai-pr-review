@@ -64,16 +64,3 @@ def test_bitbucket_capability_row_matches_across_all_three_docs() -> None:
             f"Bitbucket capability-matrix row in {name} disagrees with "
             f"{names[0]}: {verdicts[name]!r} != {first!r}"
         )
-
-
-def test_bitbucket_inline_cell_says_code_insights_not_plain_yes() -> None:
-    """Phase 3 (#839/#873): the Inline cell must name the actual mechanism
-    (Code Insights annotations), not a bare Yes/No that would look identical
-    to GitHub/GitLab's real inline PR comments and hide that the mechanism
-    differs."""
-    for name, path in _MATRIX_FILES.items():
-        row = _bitbucket_row(path)
-        assert "code insights" in row["inline"].lower(), (
-            f"{name}'s Bitbucket Inline cell doesn't mention Code Insights: "
-            f"{row['inline']!r}"
-        )

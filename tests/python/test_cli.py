@@ -1892,6 +1892,18 @@ class TestEmitTelemetryThinkingTokens:
         assert agent_usage["stop_reason"] == ""
 
 
+def _fake_load_policy_file(problem: str | None):  # type: ignore[no-untyped-def]
+    """Stand-in for policy.load_policy_file: reports ``problem`` the way the
+    real loader does for an invalid policy.yml, and returns None (no policy)."""
+
+    def _load(*_args: object, problems: list[str] | None = None, **_kw: object) -> None:
+        if problem is not None and problems is not None:
+            problems.append(problem)
+        return None
+
+    return _load
+
+
 class TestTokenUsageDisplayModeSelection:
     """#758: _run_review_async's _token_renderer/_usage_warning_renderer
     closures must select the right payload shape per rc.token_usage_display,
@@ -1908,6 +1920,7 @@ class TestTokenUsageDisplayModeSelection:
         *,
         token_usage_display: str,
         token_usage_warn_usd: float = 1.00,
+        policy_problem: str | None = None,
         **config_kwargs: object,
     ) -> dict[str, object]:
         import anyio
@@ -1961,6 +1974,10 @@ class TestTokenUsageDisplayModeSelection:
             patch("ai_pr_review.agents.gates.evaluate_gates", return_value={}),
             patch("ai_pr_review.agents.roster.AGENTS", []),
             patch("ai_pr_review.cli._run_summarizer", return_value=""),
+            patch(
+                "ai_pr_review.policy.load_policy_file",
+                side_effect=_fake_load_policy_file(policy_problem),
+            ),
         ):
             from ai_pr_review.cli import _run_review_async
 
@@ -2074,3 +2091,47 @@ class TestTokenUsageDisplayModeSelection:
         self._run_and_capture(tmp_path, token_usage_display="off")
         captured = capsys.readouterr()
         assert "Token usage by agent:" not in captured.err
+
+    # --- policy.yml ignored note: shares the usage_warning slot, so it reaches
+    # every provider's posted comment. Drives the real closure.
+
+    def test_invalid_policy_note_shown_in_usage_warning(self, tmp_path: Path) -> None:
+        out = self._run_and_capture(
+            tmp_path, token_usage_display="compact",
+            policy_problem="policy name 'quick' collides with a built-in base",
+        )
+        warning = str(out["usage_warning"])
+        assert "policy.yml ignored:" in warning
+        assert "policy name 'quick' collides with a built-in base" in warning
+        assert "default settings" in warning
+
+    def test_invalid_policy_note_shown_even_when_token_usage_display_is_off(
+        self, tmp_path: Path,
+    ) -> None:
+        out = self._run_and_capture(
+            tmp_path, token_usage_display="off", policy_problem="is not valid YAML",
+        )
+        assert "policy.yml ignored:** is not valid YAML" in str(out["usage_warning"])
+
+    def test_no_policy_note_when_policy_loads_or_is_absent(self, tmp_path: Path) -> None:
+        out = self._run_and_capture(tmp_path, token_usage_display="compact")
+        assert "policy.yml ignored" not in str(out["usage_warning"])
+
+    def test_invalid_policy_reason_is_one_bounded_line(self, tmp_path: Path) -> None:
+        out = self._run_and_capture(
+            tmp_path, token_usage_display="off",
+            policy_problem="line one\nline two\n" + "x" * 1000,
+        )
+        note = str(out["usage_warning"])
+        assert "line one line two" in note
+        assert "\n" not in note.split("policy.yml ignored:", 1)[1].split(". This review")[0]
+        assert len(note) < 500
+
+    def test_invalid_policy_note_precedes_other_warnings(self, tmp_path: Path) -> None:
+        out = self._run_and_capture(
+            tmp_path, token_usage_display="compact", token_usage_warn_usd=0.0001,
+            policy_problem="bad", model_standard="not-a-priced-model", max_cost_usd=5.0,
+        )
+        warning = str(out["usage_warning"])
+        assert warning.index("policy.yml ignored") < warning.index("Cost ceiling not enforced")
+        assert warning.index("Cost ceiling not enforced") < warning.index("High token usage")
