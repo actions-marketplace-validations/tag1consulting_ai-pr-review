@@ -49,6 +49,63 @@ SLASH_COMMANDS_DOC_URL: Final[str] = (
     "https://tag1consulting.github.io/ai-pr-review/slash-commands"
 )
 
+_ERROR_BODY_LIMIT: Final[int] = 500
+# A scope list is kept whole up to this many characters, so an odd body cannot
+# make one error string unbounded.
+_SCOPE_LIST_LIMIT: Final[int] = 2000
+
+
+def _join_scopes(scopes: list[str]) -> str:
+    joined = ", ".join(scopes) or "none"
+    if len(joined) > _SCOPE_LIST_LIMIT:
+        return joined[:_SCOPE_LIST_LIMIT] + " ..."
+    return joined
+
+
+def _scope_lists(body: object) -> tuple[list[str], list[str]] | None:
+    """Pull ``(required, granted)`` scope lists out of a Bitbucket error body.
+
+    Bitbucket answers a call that lacks a scope with
+    ``{"error": {"message": ..., "detail": {"required": [...], "granted": [...]}}}``.
+    Returns None for any other shape.
+    """
+    if not isinstance(body, dict):
+        return None
+    error = body.get("error")
+    detail = error.get("detail") if isinstance(error, dict) else None
+    if not isinstance(detail, dict):
+        return None
+    required, granted = detail.get("required"), detail.get("granted")
+    if not isinstance(required, list) or not isinstance(granted, list):
+        return None
+    return [str(x) for x in required], [str(x) for x in granted]
+
+
+def format_http_error_body(text: str, *, limit: int = _ERROR_BODY_LIMIT) -> str:
+    """Format an HTTP error response body for an error message or log line.
+
+    A Bitbucket scope error lists the scopes the call needed and the scopes the
+    token has. A fixed-length cut used to drop the second list, which is the one
+    an operator needs. This puts the message and both lists first and keeps them
+    whole. Any other body is cut at ``limit`` characters.
+    """
+    try:
+        body = json.loads(text)
+    except (ValueError, RecursionError):
+        # RecursionError: a body that is nested deeper than the parser allows.
+        body = None
+    scopes = _scope_lists(body)
+    if scopes is not None:
+        required, granted = scopes
+        error = body["error"]  # _scope_lists proved this is a dict
+        message = str(error.get("message") or "missing scopes")
+        return (
+            f"{message[:limit]} (required scopes: {_join_scopes(required)}. "
+            f"granted scopes: {_join_scopes(granted)})"
+        )
+    return text[:limit]
+
+
 _LEADING_SUMMARY_HEADING_RE: Final[re.Pattern[str]] = re.compile(
     r"\A\s*#{1,6}[ \t]*\**[ \t]*summary[ \t]*:?[ \t]*\**[ \t]*#*[ \t]*(?:\n|\Z)",
     re.IGNORECASE,

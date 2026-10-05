@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Bitbucket error messages keep the granted scopes (#990).** The error text for a failed Bitbucket call was cut at 200 characters, which dropped the `granted` list from a missing-scope 403. `format_http_error_body()` in `vcs/_body.py` now puts the message and both scope lists first and keeps them whole, and cuts any other body at 500 characters. It is used in `vcs/bitbucket.py`, `vcs/_upsert.py` and `vcs/_code_insights.py`. The shared `_upsert.py` helper uses it too, so summary-comment errors on GitHub and GitLab now allow 500 characters. Other GitHub and GitLab error messages keep their 200-character cut.
+- **The Bitbucket account lookup warning no longer blames the Account:Read scope for every failure (#991).** The log WARNING and the comment notice said the token "likely lacks the Account:Read scope" for any failed `GET /2.0/user`, including a 401 where the token had no scopes at all. A 401 now says the credentials were rejected or the token has no scopes, a 403 names the Account:Read scope and shows the required and granted lists, and any other failure says the cause is not clear. An HTTP error also shows the start of the response body in the log. The troubleshooting section of `docs/bitbucket-setup.md` covers the three cases.
+- **The Bitbucket dismiss help line is no longer shown when the account lookup failed (#992).** Verdict polling is off for that run, so a command a reader posted would not take effect. The "Bot account not verified" notice still shows. The line is unchanged when the lookup works and `AI_BITBUCKET_VERDICTS` is on.
+
 ## [2.18.2] - 2026-10-05
 
 ### Fixed

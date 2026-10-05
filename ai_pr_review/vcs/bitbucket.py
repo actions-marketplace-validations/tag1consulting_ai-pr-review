@@ -44,6 +44,7 @@ from ai_pr_review.vcs._bitbucket_verdicts import apply_pending_verdicts
 from ai_pr_review.vcs._body import (
     compute_headline,
     format_body_finding,
+    format_http_error_body,
     join_findings,
     render_skip_findings_section,
     sanitize_display_text,
@@ -93,13 +94,35 @@ _MAX_BITBUCKET_BODY_SIZE: Final[int] = 32_000
 # body down to nothing -- if it would, drop the marker for this cycle instead
 # (F-ID stability degrades gracefully rather than the review going blank).
 _MIN_BODY_BYTES: Final[int] = 4_096
-_IDENTITY_NOTICE: Final[str] = (
-    "> **Bot account not verified:** the lookup of this token's account "
-    "(`GET /2.0/user`) failed, so incremental review and in-place summary "
-    "update are off for this run and a new summary comment may appear on "
-    "each push. The API token likely needs the Account:Read scope "
-    "(`read:user:bitbucket`). See the Bitbucket setup guide, section 3."
-)
+
+
+def _identity_failure_advice(status: int | None) -> str:
+    """One sentence on the likely cause of a failed ``GET /2.0/user``.
+
+    A 401 means Bitbucket rejected the credentials, or the token carries no
+    scopes at all. A 403 means the token works but lacks the Account:Read
+    scope. Anything else (a bad body, no ``account_id``) has no known cause.
+    """
+    if status == 401:
+        return (
+            "Bitbucket rejected the credentials (HTTP 401). Check BITBUCKET_EMAIL "
+            "and the API token, and that the token was created with scopes."
+        )
+    if status == 403:
+        return "The API token lacks the Account:Read scope (`read:user:bitbucket`)."
+    return "The cause is not clear from the response. Check the API token and its scopes."
+
+
+def _identity_notice(status: int | None) -> str:
+    """The comment notice for a failed bot account lookup."""
+    return (
+        "> **Bot account not verified:** the lookup of this token's account "
+        "(`GET /2.0/user`) failed, so incremental review and in-place summary "
+        "update are off for this run and a new summary comment may appear on "
+        f"each push. {_identity_failure_advice(status)} "
+        "See the Bitbucket setup guide, section 3."
+    )
+
 
 _DISMISS_HELP_LINE: Final[str] = (
     "To dismiss a finding, post a top-level comment such as "
@@ -225,6 +248,7 @@ class BitbucketProvider:
     # a notice in the comment so the failure is visible on the PR, not only
     # in the CI log.
     identity_unresolved: bool = field(default=False, init=False, repr=False)
+    identity_failure_status: int | None = field(default=None, init=False, repr=False)
     # Lazily built (issue #906): most runs never persist a verdict, so
     # there's no reason to construct a store up front. _UNRESOLVED
     # (sentinel, not None) distinguishes "not built yet" from "feedback
@@ -311,7 +335,7 @@ class BitbucketProvider:
             resp = self.client.request("GET", url, params=params)
             if resp.status_code >= 400:
                 self._errors.append(
-                    f"fetch_comments: HTTP {resp.status_code}: {resp.text[:200]}"
+                    f"fetch_comments: HTTP {resp.status_code}: {format_http_error_body(resp.text)}"
                 )
                 return results
             try:
@@ -409,9 +433,13 @@ class BitbucketProvider:
         resp = self.client.request("GET", "/user")
         if resp.status_code >= 400:
             self._errors.append(
-                f"_bot_account_id: HTTP {resp.status_code}: {resp.text[:200]}"
+                f"_bot_account_id: HTTP {resp.status_code}: {format_http_error_body(resp.text)}"
             )
-            self._warn_identity_unresolved(f"GET /2.0/user -> HTTP {resp.status_code}")
+            self._warn_identity_unresolved(
+                f"GET /2.0/user -> HTTP {resp.status_code}: "
+                f"{format_http_error_body(resp.text)}",
+                status=resp.status_code,
+            )
             return None
         try:
             data = resp.json() or {}
@@ -429,20 +457,21 @@ class BitbucketProvider:
         self._bot_account_id_cache = account_id
         return account_id
 
-    def _warn_identity_unresolved(self, detail: str) -> None:
+    def _warn_identity_unresolved(self, detail: str, *, status: int | None = None) -> None:
         """Log why the bot identity lookup failed, once per run.
 
         ``_bot_account_id`` caches its result, so this fires at most once. The
-        most common cause is an API token without the Account:Read scope.
+        advice depends on the HTTP status: a 401 and a 403 have different causes.
         """
         self.identity_unresolved = True
+        self.identity_failure_status = status
         _log.warning(
-            "bitbucket: could not resolve the bot account (%s). Incremental "
+            "bitbucket: could not resolve the bot account (%s). %s Incremental "
             "review, in-place summary update, and verdict polling are OFF "
-            "for this run, so a new summary comment may be posted. The API "
-            "token likely lacks the Account:Read scope (read:user:bitbucket). "
+            "for this run, so a new summary comment may be posted. "
             "See docs/bitbucket-setup.md section 3.",
             detail,
+            _identity_failure_advice(status),
         )
 
     def _write_request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
@@ -489,7 +518,7 @@ class BitbucketProvider:
         resp = self.client.request("GET", self._pull_request_url())
         if resp.status_code >= 400:
             self._errors.append(
-                f"get_pr_description: HTTP {resp.status_code}: {resp.text[:200]}"
+                f"get_pr_description: HTTP {resp.status_code}: {format_http_error_body(resp.text)}"
             )
             return None
         try:
@@ -560,7 +589,8 @@ class BitbucketProvider:
         existing = self._list_summary_comments()
         if self.identity_unresolved:
             usage_warning = (
-                _IDENTITY_NOTICE + ("\n\n" + usage_warning if usage_warning else "")
+                _identity_notice(self.identity_failure_status)
+                + ("\n\n" + usage_warning if usage_warning else "")
             )
         if not existing and summary_comment_id is not None:
             # #930: `_list_summary_comments()` is a list-and-filter query,
@@ -772,13 +802,13 @@ class BitbucketProvider:
                                 "failed for %s/%s PR #%s: HTTP %d: %s",
                                 comment_id, self.config.workspace,
                                 self.config.repo_slug, self.config.pr_id,
-                                reply_resp.status_code, reply_resp.text[:200],
+                                reply_resp.status_code, format_http_error_body(reply_resp.text),
                             )
                             self._errors.append(
                                 "post_findings: verdict ack reply to comment "
                                 f"{comment_id} failed: HTTP "
                                 f"{reply_resp.status_code}: "
-                                f"{reply_resp.text[:200]}"
+                                f"{format_http_error_body(reply_resp.text)}"
                             )
                     acks_marker_ids = extract_acks(existing_body) | frozenset(
                         cid
@@ -1257,9 +1287,13 @@ class BitbucketProvider:
         body = body.rstrip("\n") + "\n\n" + usage_block_marked.rstrip("\n")
         if usage_warning:
             body = body.rstrip("\n") + "\n\n" + usage_warning
-        if self.config.verdicts:
+        if self.config.verdicts and not self.identity_unresolved:
             # Slash commands are not wired up on Bitbucket, so the verdict
             # reply flow (dismissing findings) is the only help to point at.
+            # Left out when the bot account lookup failed: verdict polling is
+            # off for that run (see _warn_identity_unresolved), so a command a
+            # reader posts would not take effect, and the notice above already
+            # says so (#992).
             # Deliberately NOT part of _FOOTER: _extract_walkthrough splits
             # on "\n---\n*AI Review" and _canonical matches the footer text.
             body = body.rstrip("\n") + "\n\n" + _DISMISS_HELP_LINE
@@ -1285,7 +1319,7 @@ class BitbucketProvider:
             "PUT", self._comment_url(keep_id), json_body={"content": {"raw": body}}
         )
         if resp.status_code >= 400:
-            err = f"post_findings PUT: HTTP {resp.status_code}: {resp.text[:200]}"
+            err = f"post_findings PUT: HTTP {resp.status_code}: {format_http_error_body(resp.text)}"
             self._errors.append(err)
             return FindingsResult(
                 review_id=keep_id,
@@ -1347,7 +1381,7 @@ class BitbucketProvider:
                     "bitbucket: clearing prior review state failed for "
                     "%s/%s PR #%s (DELETE %s): HTTP %s: %s",
                     self.config.workspace, self.config.repo_slug,
-                    self.config.pr_id, url, resp.status_code, resp.text[:200],
+                    self.config.pr_id, url, resp.status_code, format_http_error_body(resp.text),
                 )
                 self._errors.append(
                     f"_set_review_state DELETE {url}: HTTP {resp.status_code}"
@@ -1370,7 +1404,7 @@ class BitbucketProvider:
                     "bitbucket: setting review state failed for %s/%s "
                     "PR #%s (POST %s): HTTP %s: %s",
                     self.config.workspace, self.config.repo_slug,
-                    self.config.pr_id, url, resp.status_code, resp.text[:200],
+                    self.config.pr_id, url, resp.status_code, format_http_error_body(resp.text),
                 )
                 self._errors.append(
                     f"_set_review_state POST {url}: HTTP {resp.status_code}"
@@ -1423,7 +1457,7 @@ class BitbucketProvider:
             else:
                 errors.append(
                     f"delete dup #{dup_id}: HTTP {resp.status_code}: "
-                    f"{resp.text[:200]}"
+                    f"{format_http_error_body(resp.text)}"
                 )
         del kept  # explicitly retained, never deleted
         return StaleResult(
@@ -1926,7 +1960,7 @@ def _list_skip_comments_bb(provider: BitbucketProvider) -> list[dict[str, Any]]:
         resp = provider.client.request("GET", url, params=params)
         if resp.status_code >= 400:
             provider._errors.append(
-                f"list_skip_comments: HTTP {resp.status_code}: {resp.text[:200]}"
+                f"list_skip_comments: HTTP {resp.status_code}: {format_http_error_body(resp.text)}"
             )
             return results
         data = resp.json() or {}
