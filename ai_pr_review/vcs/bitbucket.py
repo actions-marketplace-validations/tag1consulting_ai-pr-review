@@ -1287,9 +1287,13 @@ class BitbucketProvider:
         body = body.rstrip("\n") + "\n\n" + usage_block_marked.rstrip("\n")
         if usage_warning:
             body = body.rstrip("\n") + "\n\n" + usage_warning
-        if self.config.verdicts:
+        if self.config.verdicts and not self.identity_unresolved:
             # Slash commands are not wired up on Bitbucket, so the verdict
             # reply flow (dismissing findings) is the only help to point at.
+            # Left out when the bot account lookup failed: verdict polling is
+            # off for that run (see _warn_identity_unresolved), so a command a
+            # reader posts would not take effect, and the notice above already
+            # says so (#992).
             # Deliberately NOT part of _FOOTER: _extract_walkthrough splits
             # on "\n---\n*AI Review" and _canonical matches the footer text.
             body = body.rstrip("\n") + "\n\n" + _DISMISS_HELP_LINE

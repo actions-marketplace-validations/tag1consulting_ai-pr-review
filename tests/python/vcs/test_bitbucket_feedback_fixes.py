@@ -347,3 +347,30 @@ def test_identity_bad_success_body_uses_generic_advice(response: httpx.Response,
     assert needle in warnings[0]
     assert "cause is not clear" in warnings[0]
     assert "Bot account not verified" in comment
+
+
+# --- #992: no dismiss help line when verdict polling is off -------------------
+
+
+def test_dismiss_help_line_hidden_when_identity_unresolved() -> None:
+    prov, captured = _provider(
+        verdicts=True, user_response=httpx.Response(403, json=_SCOPE_403), existing_comments=False
+    )
+    summary = prov.post_summary("Adds foo.", _HEAD)
+    prov.post_findings(
+        [_finding()], DiffContext(diff_text=_DIFF, head_sha=_HEAD), event="COMMENT",
+        summary_comment_id=summary.comment_id,
+    )
+    body = captured["body"]
+    assert "Bot account not verified" in body
+    assert "dismissing-findings" not in body
+    assert "false-positive F<n>" not in body
+
+
+def test_dismiss_help_line_still_shown_when_identity_resolved_and_verdicts_on() -> None:
+    prov, captured = _provider(verdicts=True)
+    prov.post_findings(
+        [_finding()], DiffContext(diff_text=_DIFF, head_sha=_HEAD), event="COMMENT"
+    )
+    assert "dismissing-findings" in captured["body"]
+    assert "Bot account not verified" not in captured["body"]
