@@ -53,7 +53,7 @@ and GitLab. Select the provider via the `VCS_PROVIDER` env var (default: `github
 | Provider | `VCS_PROVIDER` | Summary | Inline | Suggestions | Approval |
 |----------|---------------|---------|--------|-------------|----------|
 | GitHub | `github` (default) | ✅ | ✅ | ✅ | ✅ |
-| Bitbucket Cloud | `bitbucket` | ✅ | ✅ (Code Insights annotations) | ❌ | ✅ |
+| Bitbucket Cloud | `bitbucket` | ✅ | ✅ | ❌ | ✅ |
 | GitLab | `gitlab` | ✅ | ✅ | ✅ | ✅ |
 
 See [docs/bitbucket-setup.md](docs/bitbucket-setup.md) for Bitbucket Pipelines
