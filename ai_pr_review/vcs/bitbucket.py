@@ -44,6 +44,7 @@ from ai_pr_review.vcs._bitbucket_verdicts import apply_pending_verdicts
 from ai_pr_review.vcs._body import (
     compute_headline,
     format_body_finding,
+    format_http_error_body,
     join_findings,
     render_skip_findings_section,
     sanitize_display_text,
@@ -311,7 +312,7 @@ class BitbucketProvider:
             resp = self.client.request("GET", url, params=params)
             if resp.status_code >= 400:
                 self._errors.append(
-                    f"fetch_comments: HTTP {resp.status_code}: {resp.text[:200]}"
+                    f"fetch_comments: HTTP {resp.status_code}: {format_http_error_body(resp.text)}"
                 )
                 return results
             try:
@@ -409,7 +410,7 @@ class BitbucketProvider:
         resp = self.client.request("GET", "/user")
         if resp.status_code >= 400:
             self._errors.append(
-                f"_bot_account_id: HTTP {resp.status_code}: {resp.text[:200]}"
+                f"_bot_account_id: HTTP {resp.status_code}: {format_http_error_body(resp.text)}"
             )
             self._warn_identity_unresolved(f"GET /2.0/user -> HTTP {resp.status_code}")
             return None
@@ -489,7 +490,7 @@ class BitbucketProvider:
         resp = self.client.request("GET", self._pull_request_url())
         if resp.status_code >= 400:
             self._errors.append(
-                f"get_pr_description: HTTP {resp.status_code}: {resp.text[:200]}"
+                f"get_pr_description: HTTP {resp.status_code}: {format_http_error_body(resp.text)}"
             )
             return None
         try:
@@ -772,13 +773,13 @@ class BitbucketProvider:
                                 "failed for %s/%s PR #%s: HTTP %d: %s",
                                 comment_id, self.config.workspace,
                                 self.config.repo_slug, self.config.pr_id,
-                                reply_resp.status_code, reply_resp.text[:200],
+                                reply_resp.status_code, format_http_error_body(reply_resp.text),
                             )
                             self._errors.append(
                                 "post_findings: verdict ack reply to comment "
                                 f"{comment_id} failed: HTTP "
                                 f"{reply_resp.status_code}: "
-                                f"{reply_resp.text[:200]}"
+                                f"{format_http_error_body(reply_resp.text)}"
                             )
                     acks_marker_ids = extract_acks(existing_body) | frozenset(
                         cid
@@ -1285,7 +1286,7 @@ class BitbucketProvider:
             "PUT", self._comment_url(keep_id), json_body={"content": {"raw": body}}
         )
         if resp.status_code >= 400:
-            err = f"post_findings PUT: HTTP {resp.status_code}: {resp.text[:200]}"
+            err = f"post_findings PUT: HTTP {resp.status_code}: {format_http_error_body(resp.text)}"
             self._errors.append(err)
             return FindingsResult(
                 review_id=keep_id,
@@ -1347,7 +1348,7 @@ class BitbucketProvider:
                     "bitbucket: clearing prior review state failed for "
                     "%s/%s PR #%s (DELETE %s): HTTP %s: %s",
                     self.config.workspace, self.config.repo_slug,
-                    self.config.pr_id, url, resp.status_code, resp.text[:200],
+                    self.config.pr_id, url, resp.status_code, format_http_error_body(resp.text),
                 )
                 self._errors.append(
                     f"_set_review_state DELETE {url}: HTTP {resp.status_code}"
@@ -1370,7 +1371,7 @@ class BitbucketProvider:
                     "bitbucket: setting review state failed for %s/%s "
                     "PR #%s (POST %s): HTTP %s: %s",
                     self.config.workspace, self.config.repo_slug,
-                    self.config.pr_id, url, resp.status_code, resp.text[:200],
+                    self.config.pr_id, url, resp.status_code, format_http_error_body(resp.text),
                 )
                 self._errors.append(
                     f"_set_review_state POST {url}: HTTP {resp.status_code}"
@@ -1423,7 +1424,7 @@ class BitbucketProvider:
             else:
                 errors.append(
                     f"delete dup #{dup_id}: HTTP {resp.status_code}: "
-                    f"{resp.text[:200]}"
+                    f"{format_http_error_body(resp.text)}"
                 )
         del kept  # explicitly retained, never deleted
         return StaleResult(
@@ -1926,7 +1927,7 @@ def _list_skip_comments_bb(provider: BitbucketProvider) -> list[dict[str, Any]]:
         resp = provider.client.request("GET", url, params=params)
         if resp.status_code >= 400:
             provider._errors.append(
-                f"list_skip_comments: HTTP {resp.status_code}: {resp.text[:200]}"
+                f"list_skip_comments: HTTP {resp.status_code}: {format_http_error_body(resp.text)}"
             )
             return results
         data = resp.json() or {}

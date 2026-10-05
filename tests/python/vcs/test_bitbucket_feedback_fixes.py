@@ -130,7 +130,13 @@ def test_headline_plain_count_without_out_of_diff() -> None:
 # --- Fix 4 and 5: provider-level --------------------------------------------
 
 
-def _provider(*, user_status: int = 200, verdicts: bool = False) -> tuple[BitbucketProvider, dict]:
+def _provider(
+    *,
+    user_status: int = 200,
+    verdicts: bool = False,
+    post_response: httpx.Response | None = None,
+    existing_comments: bool = True,
+) -> tuple[BitbucketProvider, dict]:
     captured: dict = {}
     created: dict = {}
     existing = {
@@ -148,7 +154,9 @@ def _provider(*, user_status: int = 200, verdicts: bool = False) -> tuple[Bitbuc
         if req.method == "GET" and path.endswith("/comments/101"):
             return httpx.Response(200, json=created)
         if req.method == "GET":
-            return httpx.Response(200, json={"values": [existing]})
+            return httpx.Response(200, json={"values": [existing] if existing_comments else []})
+        if req.method == "POST" and path.endswith("/comments") and post_response is not None:
+            return post_response
         if req.method == "POST" and path.endswith("/comments"):
             # Fail-closed identity => no existing summary => a new comment.
             created.update(
@@ -230,3 +238,25 @@ def test_slash_doc_url_lives_in_vcs_body_and_handlers_reuse_it() -> None:
 
     assert handlers.SLASH_COMMANDS_DOC_URL == SLASH_COMMANDS_DOC_URL
     assert SLASH_COMMANDS_DOC_URL.endswith("/slash-commands")
+
+
+# --- #990: scope errors keep the granted list ---------------------------------
+
+
+def test_post_summary_scope_error_keeps_required_and_granted_scopes() -> None:
+    body = {
+        "type": "error",
+        "error": {
+            "message": "Your credentials lack one or more required privilege scopes.",
+            "detail": {
+                "required": ["read:pullrequest:bitbucket"],
+                "granted": ["read:user:bitbucket", "read:repository:bitbucket"],
+            },
+        },
+    }
+    prov, _ = _provider(post_response=httpx.Response(403, json=body), existing_comments=False)
+    result = prov.post_summary("## Summary\n\nAdds foo.", _HEAD)
+    assert not result.ok
+    assert "HTTP 403" in (result.error or "")
+    assert "required scopes: read:pullrequest:bitbucket" in (result.error or "")
+    assert "granted scopes: read:user:bitbucket, read:repository:bitbucket" in (result.error or "")
