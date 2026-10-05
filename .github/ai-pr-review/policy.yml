@@ -19,8 +19,8 @@ policies:
     agents: []
     analyzers: []
 
-  # Full review, run manually via `/ai-pr-review review-full` — never
-  # routed to automatically, only referenced by `require` below.
+  # Full review. Routed to automatically for release/* PRs below, and also
+  # what `/ai-pr-review review-full` runs on any PR.
   deep:
     extends: full
 
@@ -29,16 +29,18 @@ routes:
   # PR that happens to touch docs/** (e.g. CHANGELOG-style updates) doesn't
   # match the docs route instead — the any-file-matches-any-glob semantics
   # above would otherwise let a docs change on a release branch skip this
-  # entirely. Automatic pushes stay at 'quick' (cheap, iterate freely); the
-  # 'deep' full-mode pass required before merge must be kicked off
-  # manually with `/ai-pr-review review-full` — this is the actual gate,
-  # not a decoration: an automatic push here does NOT satisfy `require`
-  # (quick mode's review_mode is 'quick', not 'full'), so it posts
-  # 'action_required' until someone runs review-full. Pair with a required
-  # branch-protection check (ai-pr-review/policy-gate) on main to actually
-  # enforce this — not yet added, see rollout plan.
+  # entirely.
+  #
+  # Release PRs get a full-mode review on every push. Work lands on a
+  # long-lived release/vX.Y.Z branch first (see CLAUDE.md's release process),
+  # so the release PR into main carries the whole code diff since the last
+  # release, and this is the one review that looks at all of it. Feature and
+  # issue PRs into release/* keep the default quick review. Because the
+  # policy is `deep`, an automatic push satisfies `require: deep` and the
+  # ai-pr-review/policy-gate check passes without a manual
+  # `/ai-pr-review review-full`.
   - when: {head-branch: 'release/*'}
-    policy: quick
+    policy: deep
     require: deep
 
   # Doc-only PRs get the near-zero-cost tier.

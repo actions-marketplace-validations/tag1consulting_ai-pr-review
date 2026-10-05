@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Release PRs now get a full-mode review on every push, and work lands on a release branch first.** `.github/ai-pr-review/policy.yml` routes every `release/*` head branch to the `deep` policy (full mode) instead of `quick`. Feature and issue PRs now target a long-lived `release/vX.Y.Z` branch, so the release PR into `main` carries the whole code diff since the last release and the full review covers real code. Feature PRs keep the default quick review. `CLAUDE.md` has a new "Branching model" section and `CONTRIBUTING.md` says which branch to target. No engine or workflow change.
+
 ## [2.18.3] - 2026-10-05
 
 ### Fixed
