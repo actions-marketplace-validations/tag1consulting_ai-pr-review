@@ -502,7 +502,7 @@ def test_all_findings_annotated_gets_shortened_bullet_and_pointer_text() -> None
     body = captured["body"]
     assert "sql injection" in body
     assert "**Remediation:**" not in body
-    assert "1 of the finding above is also shown as inline Code Insights annotations" in body
+    assert "1 of the findings listed here is also shown as inline Code Insights annotations" in body
 
 
 def test_annotated_finding_bullet_shortened_unannotated_bullet_full() -> None:

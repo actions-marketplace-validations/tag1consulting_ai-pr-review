@@ -8,7 +8,12 @@
 #                                    depending on AI_PROVIDER.
 #   BITBUCKET_EMAIL     (plain)    — Atlassian account email for the bot user.
 #   BITBUCKET_API_TOKEN (secured)  — Atlassian API token with
-#                                    Repository:Read + PR:Write scopes.
+#                                    Repository:Read + PR:Write +
+#                                    Account:Read (read:user:bitbucket)
+#                                    scopes. Without Account:Read the bot
+#                                    cannot prove which comments are its
+#                                    own, so it posts a NEW summary on every
+#                                    push and skips incremental review.
 #                                    Add Repository:Write if you also set
 #                                    AI_FEEDBACK_LOOP=true below -- see the
 #                                    security note where that variable is

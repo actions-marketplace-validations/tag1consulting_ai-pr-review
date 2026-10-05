@@ -28,13 +28,9 @@ from typing import Any
 from ai_pr_review.feedback.models import FeedbackEntry
 from ai_pr_review.feedback.store import FeedbackStore
 from ai_pr_review.slash.parser import ParseError, SlashCommand
+from ai_pr_review.vcs._body import SLASH_COMMANDS_DOC_URL
 
 logger = logging.getLogger(__name__)
-
-# Published docs site (docs/_config.yml); README.md links to the same host
-# for external-facing doc references.
-_SLASH_COMMANDS_DOC_URL = "https://tag1consulting.github.io/ai-pr-review/slash-commands"
-
 
 def build_entry(
     command: SlashCommand,
@@ -366,6 +362,6 @@ def parse_error_reply(error: ParseError) -> str:
     token = error.unknown_token or "that"
     return (
         f"**AI Review**: I didn't recognize `{token}` as a command. See "
-        f"{_SLASH_COMMANDS_DOC_URL} for the supported commands, or reply "
+        f"{SLASH_COMMANDS_DOC_URL} for the supported commands, or reply "
         "with `/ai-pr-review help` for a quick summary."
     )

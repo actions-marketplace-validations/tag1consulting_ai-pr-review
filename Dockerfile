@@ -33,12 +33,12 @@ FROM ghcr.io/stackrox/kube-linter:v0.8.3@sha256:f2bfce7879206d32f69ab6572c376f91
 # hadolint ignore=DL3029
 FROM ghcr.io/terraform-linters/tflint:v0.64.0@sha256:1c595f42d794c32c45a6ea8b58655fd66433d4ca3b1bc631c574a48d120bd19f AS tflint
 # hadolint ignore=DL3029
-FROM ghcr.io/astral-sh/ruff:0.16.9@sha256:fd4a00e8f586c07495822a1c93702737b9a98d826b76d460caa514df7794f259 AS ruff
+FROM ghcr.io/astral-sh/ruff:0.16.10@sha256:e1675e92fe4d38ce10ab6cabaf4ab20f209b84433b789cfd1b683c028aa391e2 AS ruff
 
 # ==============================================================================
 # Builder stage — pip packages, composer packages, gh CLI, semgrep rulesets
 # ==============================================================================
-FROM ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78 AS builder
+FROM ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7 AS builder
 
 ARG TARGETARCH
 
@@ -150,7 +150,7 @@ RUN curl -fsSL -o /usr/local/bin/composer \
 # ==============================================================================
 # Final stage
 # ==============================================================================
-FROM ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78
+FROM ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7
 
 # ARG must be re-declared in this stage; multi-stage Dockerfiles do not share
 # ARG scope. Default must match the builder stage above.
