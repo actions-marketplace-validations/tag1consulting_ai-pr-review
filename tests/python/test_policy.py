@@ -767,3 +767,34 @@ def test_load_policy_file_neither_path_present_returns_none_silently(
     assert load_policy_file(str(git_repo), "main") is None
     assert load_policy_file(str(git_repo), "main", source="workspace") is None
     assert capsys.readouterr().err == ""
+
+
+def test_collision_error_suggests_rename_with_extends() -> None:
+    with pytest.raises(ValueError) as excinfo:
+        _parse_policy_file({"policies": {"quick": {}}, "routes": []})
+    msg = str(excinfo.value)
+    assert "Rename it" in msg
+    assert "'my-quick'" in msg
+    assert "extends: quick" in msg
+
+
+def test_load_policy_file_reports_invalid_policy_in_problems(git_repo: Path) -> None:
+    policy_dir = git_repo / ".github" / "ai-pr-review"
+    policy_dir.mkdir(parents=True)
+    (policy_dir / "policy.yml").write_text(
+        "version: 1\npolicies:\n  quick:\n    agents: []\nroutes: []\n"
+    )
+    _git("add", ".", cwd=git_repo)
+    _git("commit", "-q", "-m", "bad policy", cwd=git_repo)
+    _git("push", "-q", "origin", "main", cwd=git_repo)
+
+    problems: list[str] = []
+    assert load_policy_file(str(git_repo), "main", problems=problems) is None
+    assert len(problems) == 1
+    assert "collides with a built-in base" in problems[0]
+
+
+def test_load_policy_file_missing_leaves_problems_empty(git_repo: Path) -> None:
+    problems: list[str] = []
+    assert load_policy_file(str(git_repo), "main", problems=problems) is None
+    assert problems == []

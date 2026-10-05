@@ -714,6 +714,20 @@ class TestWriteStepSummary:
         assert "**Findings:** 1" in content
         assert "PR summary text" in content
 
+    def test_step_summary_has_single_summary_heading(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from ai_pr_review.review.reporting import write_step_summary as _write_step_summary
+
+        summary_path = tmp_path / "step_summary.md"
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
+        _write_step_summary(
+            self._make_result(), self._make_runtime(tmp_path), "## Summary\n\nAdds foo."
+        )
+        content = summary_path.read_text()
+        assert content.count("Summary") == 1
+        assert "### Summary\n\nAdds foo." in content
+
     def test_cost_ceiling_notice_shown_when_a_model_is_unpriced(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:

@@ -137,7 +137,11 @@ class ResolvedPolicy:
 
 
 def load_policy_file(
-    workspace: str, base_ref: str, *, source: str = "base-ref"
+    workspace: str,
+    base_ref: str,
+    *,
+    source: str = "base-ref",
+    problems: list[str] | None = None,
 ) -> PolicyFile | None:
     """Load and parse policy.yml. None on absence or error.
 
@@ -154,6 +158,10 @@ def load_policy_file(
     A missing file is the common case (no policy adopted) and is silent in
     both modes. Any parse/validation failure prints one WARNING and returns
     None so the review proceeds with hardcoded defaults.
+
+    When ``problems`` is given, each such failure also appends a short
+    reason to it, so the caller can show the reader that the file was
+    ignored (the stderr WARNING alone is easy to miss).
     """
     if source not in ("base-ref", "workspace"):
         print(
@@ -175,14 +183,20 @@ def load_policy_file(
         raw = yaml.safe_load(raw_text)
     except yaml.YAMLError as exc:
         print(f"WARNING: {path_used} is not valid YAML: {exc}", file=sys.stderr)
+        if problems is not None:
+            problems.append("is not valid YAML")
         return None
     if not isinstance(raw, dict):
         print(f"WARNING: {path_used} must be a YAML mapping; ignoring", file=sys.stderr)
+        if problems is not None:
+            problems.append("must be a YAML mapping")
         return None
     try:
         return _parse_policy_file(raw)
     except ValueError as exc:
         print(f"WARNING: {path_used} is invalid; ignoring: {exc}", file=sys.stderr)
+        if problems is not None:
+            problems.append(str(exc))
         return None
 
 
@@ -408,7 +422,9 @@ def _parse_policy_file(raw: dict[object, object]) -> PolicyFile:
             raise ValueError(f"policy name must be a non-empty string, got {name!r}")
         if name in _BUILTIN_BASES:
             raise ValueError(
-                f"policy name {name!r} collides with a built-in base ('quick'/'full')"
+                f"policy name {name!r} collides with a built-in base ('quick'/'full'). "
+                f"Rename it (for example 'my-{name}') and add 'extends: {name}' "
+                "to keep the built-in behavior as its starting point"
             )
         if not isinstance(body, dict):
             raise ValueError(f"policies.{name} must be a mapping")

@@ -66,7 +66,7 @@ By default, the policy file is read via `git show origin/{base-ref}:.ai-pr-revie
 
 Set `policy-source: workspace` (`AI_POLICY_SOURCE`, default `base-ref`) if your workflow is head-controlled (plain `pull_request`) and you'd rather have a policy.yml change apply immediately than pay for protection your trigger doesn't provide anyway. **Never set `policy-source: workspace` under `pull_request_target`** — that reopens exactly the gap the base-ref read exists to close, letting a PR silently weaken its own review via its own `policy.yml`.
 
-A malformed or invalid `policy.yml` (bad YAML, an unknown agent/analyzer name, a cyclic `extends` chain, an unconstrained route) never blocks a review — it prints one warning to the run log and the review proceeds using the engine's hard-coded defaults, as if no policy file existed. Same for an invalid `policy-source` value (anything other than `base-ref`/`workspace`): one warning, falls back to `base-ref`.
+A malformed or invalid `policy.yml` (bad YAML, an unknown agent/analyzer name, a cyclic `extends` chain, an unconstrained route) never blocks a review — it prints one warning to the run log and the review proceeds using the engine's hard-coded defaults, as if no policy file existed. The posted review comment also carries a short `policy.yml ignored: <reason>` note, so a misnamed policy is visible on the PR. Same for an invalid `policy-source` value (anything other than `base-ref`/`workspace`): one warning, falls back to `base-ref`.
 
 ## Release-branch escalation (replacing a hand-rolled workflow expression)
 
