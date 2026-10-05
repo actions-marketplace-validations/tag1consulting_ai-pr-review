@@ -394,6 +394,39 @@ class TestSummarizerCollapseWalkthroughGate:
 
         return AsyncMock(side_effect=_fake)
 
+    def _run_and_capture_summarizer_kwargs(self, **config_kwargs: object) -> dict[str, object]:
+        import anyio
+
+        summarizer_mock = AsyncMock(return_value="")
+        with (
+            patch("ai_pr_review.diff.compute.compute_diff", return_value=_make_diff_result()),
+            patch(
+                "ai_pr_review.review.runtime.provider_from_env",
+                return_value=self._make_provider_mock(),
+            ),
+            patch("ai_pr_review.orchestrate.run_review", new=self._fake_run_review_factory()),
+            patch("ai_pr_review.agents.gates.evaluate_gates", return_value={}),
+            patch("ai_pr_review.agents.roster.AGENTS", []),
+            patch("ai_pr_review.cli._run_summarizer", new=summarizer_mock),
+        ):
+            from ai_pr_review.cli import _run_review_async
+
+            anyio.run(_run_review_async, _make_config(**config_kwargs))
+
+        assert summarizer_mock.await_args is not None, "_run_summarizer was not called"
+        return dict(summarizer_mock.await_args.kwargs)
+
+    def test_suppress_walkthrough_defaults_off(self) -> None:
+        kwargs = self._run_and_capture_summarizer_kwargs(vcs_provider="bitbucket")
+        assert kwargs["suppress_walkthrough"] is False
+
+    def test_suppress_walkthrough_is_passed_through(self) -> None:
+        for provider in ("github", "gitlab", "bitbucket"):
+            kwargs = self._run_and_capture_summarizer_kwargs(
+                vcs_provider=provider, suppress_walkthrough=True
+            )
+            assert kwargs["suppress_walkthrough"] is True, provider
+
     def _run_and_capture_collapse_flag(self, *, vcs_provider: str) -> bool | None:
         import anyio
 

@@ -1162,3 +1162,22 @@ def test_cost_ceiling_unpriced_is_a_known_ai_var(
     monkeypatch.setenv("AI_COST_CEILING_UNPRICED", "block")
     ReviewConfig.from_env()
     assert "AI_COST_CEILING_UNPRICED" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(None, False), ("false", False), ("", False), ("no", False), ("true", True), ("1", True), ("YES", True)],
+)
+def test_suppress_walkthrough_from_env(
+    monkeypatch: pytest.MonkeyPatch, value: str | None, expected: bool
+) -> None:
+    monkeypatch.delenv("AI_SUPPRESS_WALKTHROUGH", raising=False)
+    if value is not None:
+        monkeypatch.setenv("AI_SUPPRESS_WALKTHROUGH", value)
+    assert ReviewConfig.from_env().suppress_walkthrough is expected
+
+
+def test_suppress_walkthrough_is_a_known_ai_var() -> None:
+    from ai_pr_review.config import _KNOWN_AI_VARS
+
+    assert "AI_SUPPRESS_WALKTHROUGH" in _KNOWN_AI_VARS

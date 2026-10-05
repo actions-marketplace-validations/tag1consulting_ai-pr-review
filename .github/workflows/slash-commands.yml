@@ -192,6 +192,14 @@ on:
         type: string
         required: false
         default: 'false'
+      suppress-walkthrough:
+        description: >
+          'true' leaves the Walkthrough section out of the summary comment
+          (forwarded to container-action's suppress-walkthrough). Omit to
+          inherit container-action's own default ('false').
+        type: string
+        required: false
+        default: 'false'
       token-usage-display:
         description: >
           Token-usage table rendering mode. Omit to inherit
@@ -690,6 +698,7 @@ jobs:
           approval-ceiling: ${{ inputs.approval-ceiling }}
           feedback-loop: ${{ inputs.feedback-loop }}
           token-usage-display: ${{ inputs.token-usage-display }}
+          suppress-walkthrough: ${{ inputs.suppress-walkthrough }}
           token-usage-warn-usd: ${{ inputs.token-usage-warn-usd }}
           max-cost-usd: ${{ inputs.max-cost-usd }}
           fail-on-cost-ceiling: ${{ inputs.fail-on-cost-ceiling }}

@@ -374,3 +374,36 @@ def test_dismiss_help_line_still_shown_when_identity_resolved_and_verdicts_on() 
     )
     assert "dismissing-findings" in captured["body"]
     assert "Bot account not verified" not in captured["body"]
+
+
+# --- #997: AI_SUPPRESS_WALKTHROUGH heals an already posted walkthrough ---------
+
+_POSTED_WITH_TABLE = (
+    f"{build_summary_marker('abc', hidden=True)}\n## AI Review Findings\n\n"
+    "**Findings:** 1\n\n### Findings\n- x\n\n### Summary\n"
+    "Adds foo.\n\n**Type:** feature\n**Effort:** 2/5\n\n"
+    "## Walkthrough\n\n| File | Change | Summary |\n|--|--|--|\n| a.py | Added | x |\n"
+)
+
+
+def test_suppress_walkthrough_removes_a_posted_table_on_the_next_run() -> None:
+    body = _render(existing_body=_POSTED_WITH_TABLE, suppress_walkthrough=True)
+    assert "### Summary\nAdds foo." in body
+    assert "**Type:** feature" in body
+    assert "Walkthrough" not in body
+    assert "| a.py |" not in body
+
+
+def test_walkthrough_stays_when_suppress_is_off() -> None:
+    body = _render(existing_body=_POSTED_WITH_TABLE)
+    assert "## Walkthrough" in body
+    assert "| a.py | Added | x |" in body
+
+
+def test_suppress_walkthrough_with_no_table_changes_nothing() -> None:
+    no_table = _POSTED_WITH_TABLE.split("## Walkthrough")[0].rstrip() + "\n"
+    body = _render(existing_body=no_table, suppress_walkthrough=True)
+    assert body == _render(existing_body=no_table)
+    assert "### Summary\nAdds foo." in body
+    assert "**Type:** feature" in body
+    assert "Walkthrough" not in body
