@@ -50,6 +50,16 @@ SLASH_COMMANDS_DOC_URL: Final[str] = (
 )
 
 _ERROR_BODY_LIMIT: Final[int] = 500
+# A scope list is kept whole up to this many characters, so an odd body cannot
+# make one error string unbounded.
+_SCOPE_LIST_LIMIT: Final[int] = 2000
+
+
+def _join_scopes(scopes: list[str]) -> str:
+    joined = ", ".join(scopes) or "none"
+    if len(joined) > _SCOPE_LIST_LIMIT:
+        return joined[:_SCOPE_LIST_LIMIT] + " ..."
+    return joined
 
 
 def _scope_lists(body: object) -> tuple[list[str], list[str]] | None:
@@ -81,7 +91,8 @@ def format_http_error_body(text: str, *, limit: int = _ERROR_BODY_LIMIT) -> str:
     """
     try:
         body = json.loads(text)
-    except ValueError:
+    except (ValueError, RecursionError):
+        # RecursionError: a body that is nested deeper than the parser allows.
         body = None
     scopes = _scope_lists(body)
     if scopes is not None:
@@ -89,8 +100,8 @@ def format_http_error_body(text: str, *, limit: int = _ERROR_BODY_LIMIT) -> str:
         error = body["error"]  # _scope_lists proved this is a dict
         message = str(error.get("message") or "missing scopes")
         return (
-            f"{message[:limit]} (required scopes: {', '.join(required) or 'none'}. "
-            f"granted scopes: {', '.join(granted) or 'none'})"
+            f"{message[:limit]} (required scopes: {_join_scopes(required)}. "
+            f"granted scopes: {_join_scopes(granted)})"
         )
     return text[:limit]
 

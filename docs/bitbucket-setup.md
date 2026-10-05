@@ -377,8 +377,10 @@ warning and the note depend on the HTTP status:
 - **HTTP 403:** the token works but lacks the Account:Read scope
   (`read:user:bitbucket`). The warning lists the required and the granted
   scopes when Bitbucket sends them. Add the missing scope and re-run.
-- **Any other status, or a reply without an `account_id`:** the warning gives
-  the status and the start of the body. Check the token and its scopes.
+- **Any other HTTP error:** the warning gives the status and the start of the
+  body. Check the token and its scopes.
+- **A 200 reply that is not JSON or has no `account_id`:** the warning says so,
+  without a body excerpt. Check that the request reached the Bitbucket API.
 
 ### `ERROR: git diff against 'origin/<ref>...<sha>' failed`
 

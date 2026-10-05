@@ -595,3 +595,23 @@ def test_format_http_error_body_non_scope_json_falls_back_to_text() -> None:
         "",
     ):
         assert format_http_error_body(text) == text
+
+
+def test_format_http_error_body_survives_deeply_nested_json() -> None:
+    from ai_pr_review.vcs._body import format_http_error_body
+
+    text = "[" * 100_000
+    assert format_http_error_body(text) == text[:500]
+
+
+def test_format_http_error_body_caps_an_enormous_scope_list() -> None:
+    import json
+
+    from ai_pr_review.vcs._body import format_http_error_body
+
+    granted = [f"scope-{i}:bitbucket" for i in range(5000)]
+    body = json.dumps({"error": {"message": "m", "detail": {"required": ["r"], "granted": granted}}})
+    out = format_http_error_body(body)
+    assert out.startswith("m (required scopes: r. granted scopes: scope-0:bitbucket")
+    assert out.endswith(" ...)")
+    assert len(out) < 2200
