@@ -54,7 +54,7 @@ def extract_findings(
     """Parse json-findings block(s) from agent output text.
 
     Returns a (possibly empty) list of validated Finding instances.
-    Logs warnings to stderr on malformed input (matching bash behaviour).
+    Logs warnings to stderr on malformed input.
     """
     match = _FENCE_RE.search(agent_output)
     if not match:

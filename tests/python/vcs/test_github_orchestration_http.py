@@ -5,7 +5,7 @@ Follows the `_make_provider(handler)` harness from `test_github_stale.py`.
 Covers the #555 bug class specifically: a GraphQL 200-with-errors body and a
 malformed/non-JSON body must surface in `DismissResult.errors` with no PUT
 dismiss issued, proving the Python path cannot silently treat an error
-response as valid data the way the bash `gh api --jq` call did.
+response as valid data the way the earlier inline `gh api --jq` call did.
 """
 
 from __future__ import annotations
@@ -1070,11 +1070,11 @@ def test_resolve_only_thread_not_found() -> None:
     assert any("could not locate" in e for e in errors)
 
 
-def test_resolve_only_ignores_ownership_matches_bash_behavior() -> None:
-    """Bash's resolve-on-success step resolves the thread containing
+def test_resolve_only_ignores_ownership_like_the_workflow_step() -> None:
+    """The workflow's resolve-on-success step resolves the thread containing
     PARENT_COMMENT_ID unconditionally — no marker/author gate — because the
     slash command was already validated upstream as a reply to one of our
-    comments. resolve_only must not silently add an ownership check bash
+    comments. resolve_only must not silently add an ownership check that step
     never had."""
     nodes = [_inline_thread("T1", resolved=False, body="not our marker at all", comment_db_id=77, review_db_id=None)]
 
@@ -1186,8 +1186,8 @@ def test_context_from_parent_comment_no_parent_id_short_circuits() -> None:
 
 def test_context_from_parent_comment_unparseable_header_still_sets_file() -> None:
     """Bot-authored comment fetched fine, but the header doesn't match the
-    rendered format (e.g. a manually-edited comment) — matches bash's
-    behavior of still exporting file= before giving up on source/rule_id."""
+    rendered format (e.g. a manually-edited comment) — matches the earlier
+    inline step's behavior of still exporting file= before giving up on source/rule_id."""
     def handler(req: httpx.Request) -> httpx.Response:
         if req.method == "GET" and "/pulls/comments/123" in str(req.url):
             return httpx.Response(

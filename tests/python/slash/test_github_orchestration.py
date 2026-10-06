@@ -656,7 +656,7 @@ def test_context_from_body_finding_id_body_bucket() -> None:
 
 
 def test_context_from_body_finding_id_inline_sets_notice_not_missing_reason() -> None:
-    """Matches bash's `inline)` branch: an advisory notice, never a warning —
+    """An inline finding yields an advisory notice, never a warning —
     the finding IS found, it's just in the wrong bucket for this lookup."""
     id_map = {"security-reviewer|api.py|10|abc123456789": 4}
     body = "Some review body.\n" + build_id_map_marker(id_map)
@@ -690,7 +690,7 @@ def test_context_from_body_finding_id_moved_to_inline_returns_notice() -> None:
 
 
 def test_context_from_body_finding_id_not_found_is_silent() -> None:
-    """Matches bash's `not_found)` branch: completely empty, no notice or
+    """An unknown finding yields a completely empty context, no notice or
     warning — a plain miss is not noteworthy."""
     context = context_from_body_finding_id(["no findings here"], 999)
 

@@ -430,8 +430,8 @@ def _check_deprecated_review_target(value: str) -> None:
     """Warn when REVIEW_TARGET=standalone is set.
 
     Standalone mode was documented as posting findings to a GitHub/GitLab
-    Issue, but that behavior was never ported from the bash engine (removed
-    in v2.0.0) to the Python engine. The only remaining effect is disabling
+    Issue, but that behavior was never ported from the removed bash engine
+    (v2.0.0) to the Python engine. The only remaining effect is disabling
     merge-commit filtering in diff/compute.py. See #623.
     """
     if value == "standalone":
@@ -1007,7 +1007,7 @@ class ReviewConfig(BaseModel):
                     f"Set AI_MODEL_STANDARD and AI_MODEL_PREMIUM. Valid built-in providers: {valid}."
                 )
 
-        # AI_PARALLEL=true → 4 concurrent calls (bash default); false → 1 (serial).
+        # AI_PARALLEL=true → 4 concurrent calls; false → 1 (serial).
         concurrency = 4 if self.parallel else 1
         # Mirror: parallel=false also serializes analyzer subprocesses.
         analyzer_concurrency = 1 if not self.parallel else self.analyzer_concurrency

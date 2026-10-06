@@ -219,7 +219,7 @@ def emit_token_table(
     profile_tokens: int = 0,
     sarif_elapsed_s: float | None = None,
 ) -> str:
-    """Render the token-usage markdown table. Matches bash emit_token_table output."""
+    """Render the token-usage markdown table."""
     any_cache = any(
         e.cache_creation_tokens > 0 or e.cache_read_tokens > 0
         for e in token_log
@@ -334,7 +334,7 @@ def emit_token_table(
 
 
 def parse_token_log_entry(entry: str) -> TokenEntry:
-    """Parse a bash TOKEN_LOG entry string into a TokenEntry."""
+    """Parse a TOKEN_LOG entry string into a TokenEntry."""
 
     def _extract(pattern: str, text: str, default: int = 0) -> int:
         m = re.search(pattern, text)

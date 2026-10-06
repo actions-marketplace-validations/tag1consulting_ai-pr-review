@@ -1,10 +1,9 @@
 """Language-profile loader.
 
-Mirrors lib/diff.sh:297-306: for each detected language label, reads the
-corresponding markdown file from <script_dir>/language-profiles/<lower>.md and
-concatenates the contents.  Files that do not exist are silently skipped,
-matching the bash engine's behaviour.  The '+' character in labels (e.g.
-"C++") is preserved through lowercasing so "c++.md" resolves correctly.
+For each detected language label, reads the corresponding markdown file from
+<script_dir>/language-profiles/<lower>.md and concatenates the contents.
+Files that do not exist are silently skipped. The '+' character in labels
+(e.g. "C++") is preserved through lowercasing so "c++.md" resolves correctly.
 """
 
 from __future__ import annotations

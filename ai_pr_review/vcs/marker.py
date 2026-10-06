@@ -5,8 +5,8 @@ implementations MUST only resolve/dismiss comments whose body contains
 INLINE_MARKER, protecting other bots' reviews and threads from being touched
 by our cleanup paths.
 
-The summary marker format matches the bash engine so comments posted by bash
-are still recognized by the Python engine.
+The summary marker format is unchanged from the removed bash engine, so
+comments posted by that engine are still recognized.
 """
 
 from __future__ import annotations

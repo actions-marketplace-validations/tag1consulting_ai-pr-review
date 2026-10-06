@@ -1,8 +1,8 @@
 """Findings deduplication and merging.
 
-Ports the proximity-based dedup from lib/findings.sh and review.sh:
-findings in the same file within PROXIMITY_LINES of each other are
-clustered; the highest-severity finding survives with a union of sources.
+Proximity-based dedup: findings in the same file within PROXIMITY_LINES of
+each other are clustered; the highest-severity finding survives with a union
+of sources.
 
 Closes #185 (dedup preserves distinct nearby findings; merges exact
 cross-source duplicates).
@@ -25,7 +25,7 @@ _SEVERITY_ORDER: dict[Severity, int] = {
 }
 
 # Findings within this many lines of each other in the same file are
-# candidates for dedup (mirrors the bash implementation).
+# candidates for dedup.
 PROXIMITY_LINES = 3
 
 

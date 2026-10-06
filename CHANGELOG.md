@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.20.0] - 2026-10-06
+
+### Added
+
+- **`/ai-pr-review full` is now an alias for `/ai-pr-review review-full` (#995).** Both spellings start the same full-mode run and get the same reaction and reply. `parse_command_gate_lines()` in `slash/handlers.py` maps the alias through the new `WORKFLOW_COMMAND_ALIASES` table in `slash/parser.py` and prints the canonical name, so no condition in `slash-commands.yml` changes. The command is not case-sensitive, and text after it is ignored, as it is for `review-full`. A token that is not an exact alias or command name still gets the "did not recognize" reply. The `help` reply, the workflow header comment, and the docs list the alias.
+
+### Fixed
+
+- **A Critical finding that an agent and an analyzer both reported could get no inline comment or annotation (#1000).** `rollup_repeated_findings()` in `findings/scope.py` rebuilt the severity-sorted list with every non-analyzer finding first, and a finding with any analyzer source counted as an analyzer finding. The inline cap (`max_inline`, 25 by default) fills from the front of the list, so on a review with many findings the corroborated Critical finding fell past the cap. On Bitbucket it got no Code Insights annotation, which failed the `e2e-gate` check on the v2.19.0 release PR. The rollup now keeps the input order: a finding that is not collapsed stays in place, and a collapsed group takes the slot of its first member. This changes which findings get inline comments on GitHub and GitLab and annotations on Bitbucket. The most severe findings now come first, as `merge_findings()` already promised. Finding IDs do not change for findings that a prior review already numbered, because `assemble_id_map()` keeps the ID of each known fingerprint. More than 25 findings of the same severity can still push one past the cap.
+
+### Changed
+
+- **The command tables in `slash/parser.py` are renamed.** `BASH_ONLY_COMMANDS` is now `WORKFLOW_COMMANDS`. The old name described how the commands were first implemented, not what they are. The slash commands workflow routes them, and they never become a `SlashCommand`. The module is not part of the documented API, and nothing in this repository uses the old name.
+- **Stale references to the removed bash engine are gone from comments, docstrings, and three docs lines (#995).** One comment was wrong: `review/runtime.py` said `review.sh` exports `AI_PR_REVIEW_SCRIPT_DIR`, but the Dockerfile and `action.yml` set it. Two `click` help strings in `cli.py` now say "shell" and "workflow job" and not "bash". No behavior changes.
+- **Dependency update.** `trufflesecurity/trufflehog` image tag 3.98.1 (#1001).
+
 ## [2.19.0] - 2026-10-05
 
 ### Added

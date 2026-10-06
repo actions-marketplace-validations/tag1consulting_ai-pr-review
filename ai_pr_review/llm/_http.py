@@ -1,8 +1,8 @@
 """Shared httpx retry helper for all LLM providers.
 
-Mirrors retry_curl() in llm-call.sh: exponential back-off with jitter on
-transient HTTP codes (408, 429, 500, 502, 503, 504, 520–524) and transient
-httpx exceptions (ConnectError, TimeoutException, NetworkError).
+Retries with exponential back-off and jitter on transient HTTP codes (408, 429,
+500, 502, 503, 504, 520–524) and transient httpx exceptions (ConnectError,
+TimeoutException, NetworkError).
 """
 
 from __future__ import annotations

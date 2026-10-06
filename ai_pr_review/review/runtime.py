@@ -337,8 +337,9 @@ async def build_review_runtime(
         )
 
     # 6. Resolve script_dir / diff_path from env conventions.
-    # AI_PR_REVIEW_SCRIPT_DIR is exported by review.sh so the Python engine
-    # can locate prompts/language-profiles when installed as a pip package.
+    # AI_PR_REVIEW_SCRIPT_DIR is set by the container image (Dockerfile ENV) and
+    # by action.yml so the Python engine can locate prompts/language-profiles
+    # when installed as a pip package.
     _env_script_dir = os.environ.get("AI_PR_REVIEW_SCRIPT_DIR")
     script_dir = (
         Path(_env_script_dir) if _env_script_dir
