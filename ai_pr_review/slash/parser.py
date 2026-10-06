@@ -69,8 +69,8 @@ KNOWN_COMMANDS: frozenset[str] = frozenset(
 # `parse_command`/`parse_commands` below. These four never produce a
 # `SlashCommand`: they don't write a `FeedbackEntry`, carry a reason, or take
 # an `F<n>` argument -- they're plain triggers (force a rescan, switch review
-# mode, add a label, print help) handled entirely in bash/YAML, not by the
-# Python engine's slash-command pipeline. Kept here (rather than duplicated
+# mode, add a label, print help) handled entirely by the slash-commands workflow, not by the
+# Python slash-command pipeline. Kept here (rather than duplicated
 # across the workflow file and its own test) so there is exactly one place
 # that enumerates "every command name `/ai-pr-review` recognizes at all".
 WORKFLOW_COMMANDS: frozenset[str] = frozenset(

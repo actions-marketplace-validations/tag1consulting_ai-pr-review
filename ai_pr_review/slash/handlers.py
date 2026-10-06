@@ -212,10 +212,10 @@ def parse_command_gate_lines(comment_body: str) -> list[str]:
         # Defense-in-depth, not a reachability guarantee either way. The
         # concretely known trigger: parser.py's F<n> regex (_FID_RE) has no
         # digit-count cap, unlike the length-capped regex ([0-9]{1,6}) the
-        # three bash steps this replaces used for the same extraction. An
+        # three shell steps this replaces used for the same extraction. An
         # absurdly long numeral in the F-ID position (thousands of digits)
         # exceeds Python's int-string conversion limit and raises ValueError
-        # from int() deep inside parse_command(). The bash steps never
+        # from int() deep inside parse_command(). The shell steps never
         # crashed on such input -- the capped regex just failed to match and
         # the digits fell through as ordinary reason text. Replicating that
         # exact fallback would mean reaching inside parse_command() a second

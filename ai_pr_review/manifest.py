@@ -1,7 +1,7 @@
 """File manifest construction — ports lib/diff.sh build_file_manifest.
 
 Produces a typed ChangedFiles categorization and a text MANIFEST string
-matching the bash output format consumed by agents.
+in the format consumed by agents.
 """
 
 from __future__ import annotations

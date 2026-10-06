@@ -66,7 +66,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# GitLab MR notes have a ~1MB limit but huge comments are bad UX. Match bash.
+# GitLab MR notes have a ~1MB limit but huge comments are bad UX.
 _MAX_GITLAB_BODY_SIZE: Final[int] = 250_000
 
 # Sentinel returned by _get_bot_username when a 4xx response indicates the
@@ -187,7 +187,7 @@ class GitLabProvider:
         """Return all MR notes whose body contains SUMMARY_MARKER_PREFIX.
 
         Iterates pages until a partial page is returned. Order: most recent
-        first (sort=desc, order_by=updated_at) — same as bash.
+        first (sort=desc, order_by=updated_at).
         """
         results: list[dict[str, Any]] = []
         page = 1
@@ -589,7 +589,7 @@ class GitLabProvider:
                     self._kept_alive_discussion_ids.add(new_disc_id)
             else:
                 # 400 commonly means position invalid for line not in MR diff.
-                # Fall back to body — gl_api equivalent in bash did the same.
+                # Fall back to body.
                 self._errors.append(
                     f"discussion {f.file}:{f.line}: HTTP {resp.status_code}: "
                     f"{resp.text[:200]}"

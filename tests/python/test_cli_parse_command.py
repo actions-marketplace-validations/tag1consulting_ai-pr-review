@@ -4,7 +4,7 @@ Job-routing parse shared by all three "Parse command" steps in
 slash-commands.yml (handle-command, dismiss-finding, feedback-command) --
 see ai_pr_review/cli.py's parse_command_gate docstring for the full output
 contract and the deliberate case-insensitivity normalization relative to the
-three bash `case` statements it replaces.
+three shell `case` statements it replaces.
 """
 
 from __future__ import annotations
@@ -106,7 +106,7 @@ def test_bare_prefix_with_nothing_after_is_unrecognized_with_no_command() -> Non
 
 
 def test_mixed_case_command_is_normalized_and_recognized() -> None:
-    # Deliberate normalization vs. the three bash `case` statements this
+    # Deliberate normalization vs. the three shell `case` statements this
     # replaces (see parse_command_gate's docstring): SlashCommand.name is
     # always lowercased, so a mixed-case command is now recognized instead
     # of silently misrouting to the unrecognized-command path.
@@ -117,7 +117,7 @@ def test_mixed_case_command_is_normalized_and_recognized() -> None:
 
 def test_every_known_command_and_workflow_command_is_covered() -> None:
     # Issue #772's original intent, preserved: every name in KNOWN_COMMANDS
-    # (plus the bash-only vocabulary KNOWN_COMMANDS doesn't cover) must never
+    # (plus the workflow-only vocabulary KNOWN_COMMANDS doesn't cover) must never
     # fall into the unrecognized path.
     for command in sorted(KNOWN_COMMANDS | WORKFLOW_COMMANDS):
         out = _run(f"/ai-pr-review {command} F1 reason")
@@ -126,7 +126,7 @@ def test_every_known_command_and_workflow_command_is_covered() -> None:
 
 def test_absurdly_long_finding_id_digit_string_does_not_crash() -> None:
     # Defense-in-depth: parser.py's F<n> regex has no digit-count cap, unlike
-    # the bash steps' capped [0-9]{1,6}. A numeral long enough to exceed
+    # the earlier shell steps' capped [0-9]{1,6}. A numeral long enough to exceed
     # Python's int-string conversion limit must not crash this step.
     out = _run(f"/ai-pr-review dismiss F{'9' * 5000} reason")
     assert out["valid"] == "false"

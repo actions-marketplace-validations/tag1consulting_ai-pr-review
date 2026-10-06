@@ -25,7 +25,7 @@ _SEVERITY_ORDER: dict[Severity, int] = {
 }
 
 # Findings within this many lines of each other in the same file are
-# candidates for dedup (mirrors the bash implementation).
+# candidates for dedup.
 PROXIMITY_LINES = 3
 
 

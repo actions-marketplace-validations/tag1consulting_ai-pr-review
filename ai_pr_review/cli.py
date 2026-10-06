@@ -864,7 +864,7 @@ def list_commands(comment_body: str, families: str) -> None:
 def parse_command_gate(comment_body: str) -> None:
     """Job-routing parse for slash-commands.yml (issue #821).
 
-    Replaces three previously-independent bash `case`/`awk` "Parse command"
+    Replaces three previously-independent shell `case`/`awk` "Parse command"
     steps (`handle-command`, `dismiss-finding`, `feedback-command`) with one
     shared entry point built on `ai_pr_review.slash.parser`'s
     `KNOWN_COMMANDS`/`parse_command` -- the same grammar the `slash`,
@@ -901,10 +901,10 @@ def parse_command_gate(comment_body: str) -> None:
                        except 'feedback'; empty when absent. Bracket-form and
                        case handling match `parse_command`'s own `_FID_RE`.
 
-    One normalization is deliberate relative to the three bash steps this
+    One normalization is deliberate relative to the three shell steps this
     replaces: `parse_command` lowercases the command token (`SlashCommand.
     name`), so e.g. "/ai-pr-review Dismiss" is now recognized the same as
-    "/ai-pr-review dismiss". The old bash `case` statements were
+    "/ai-pr-review dismiss". The old shell `case` statements were
     case-sensitive, so a mixed-case command previously either silently
     misrouted (handle-command's `*)` catch-all) or was forwarded verbatim to
     a downstream `click.Choice` (`ai-pr-review dismiss`/`dismiss-inline`'s
@@ -975,7 +975,7 @@ def _build_github_provider_or_exit(command_label: str) -> GitHubProvider:
     help="Raw top-level comment body, used to extract the feedback reason "
     "and (for `fixed`) the optional commit SHA (defaults to "
     "SLASH_COMMENT_BODY env var). Re-parsed here with parse_command() rather "
-    "than adding SHA extraction to the workflow's bash `awk` parser -- "
+    "than adding SHA extraction to the workflow's shell `awk` parser -- "
     "slash-commands.yml has no test coverage; this does.",
 )
 @click.option(
@@ -1156,7 +1156,7 @@ def dismiss(
     default=None,
     type=int,
     help="databaseId of the review owning the parent comment (defaults to "
-    "SLASH_REVIEW_ID env var), matching the bash job's REVIEW_ID (the "
+    "SLASH_REVIEW_ID env var), matching the workflow job's REVIEW_ID (the "
     "parent comment's pull_request_review_id). If omitted, "
     "dismiss_inline_reply falls back to the review id recorded on the "
     "resolved thread itself.",
@@ -1419,7 +1419,7 @@ def feedback_context(
 
     Prints `key=value` lines to stdout only (safe for `>> $GITHUB_OUTPUT`);
     all diagnostics go to stderr. Never exits non-zero — context extraction
-    is always best-effort, mirroring the two bash steps it replaces.
+    is always best-effort, as the two shell steps it replaces were.
     """
     from ai_pr_review.slash.github_ops import resolve_feedback_context
 
@@ -1457,7 +1457,7 @@ def feedback_context(
         click.echo(f"rule_id={_single_line(context.rule_id)}")
     # context_missing_reason is only consumed downstream for the
     # review-comment path (prepending a transparency note to the in-thread
-    # reply); the body-context path has no equivalent consumer in bash.
+    # reply); the body-context path has no equivalent consumer.
     if is_review_comment and context.missing_reason:
         click.echo(f"context_missing_reason={_single_line(context.missing_reason)}")
 
@@ -1486,7 +1486,7 @@ def resolve_thread_command(parent_comment_id: int, pr_number: int) -> None:
     `ai-pr-review slash` has already persisted the FeedbackEntry and posted a
     reply — this is a pure best-effort side effect. Always exits 0; every
     failure mode is logged as a `::warning::` rather than failing the step,
-    matching the bash job's "feedback already persisted, thread resolution
+    matching the earlier workflow job's "feedback already persisted, thread resolution
     is best-effort" contract.
     """
     from ai_pr_review.slash.github_ops import resolve_only

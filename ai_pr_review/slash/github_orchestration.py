@@ -24,13 +24,13 @@ dependency on `github_ops.py`; the dependency runs one way, `github_ops.py`
 
 GitHub-only: GitLab and Bitbucket have no F-ID / id-map system.
 
-Ports (and fixes) logic that previously lived only as untested inline bash in
-`.github/workflows/slash-commands.yml`. Three bugs were found in that bash
-during issue #550's fix (PR #553): a body-scan filter that dropped
+Ports (and fixes) logic that previously lived only as untested inline shell in
+`.github/workflows/slash-commands.yml`. Three bugs were found in that shell
+code during issue #550's fix (PR #553): a body-scan filter that dropped
 out-of-diff-only reviews, a `jq`-fed `while read` loop that couldn't track
 multi-line section state, and a source-tag extraction bug. A fourth (#555)
 surfaced during live-e2e verification: a `gh api --jq` call returned an HTTP
-error body on stdout with exit code 0, defeating the bash null/empty guard.
+error body on stdout with exit code 0, defeating the shell null/empty guard.
 Moving this logic into Python makes HTTP errors explicit and the classifier
 pytest-verifiable instead of live-PR-verifiable only.
 """
@@ -82,7 +82,7 @@ class ClassifiedFinding:
 class FeedbackContext:
     """Source/file/rule_id context for a `feedback-command` FeedbackEntry.
 
-    Mirrors the two bash extraction steps' combined output contract
+    Ports the two earlier inline extraction steps' combined output contract
     (`source`/`file`/`rule_id`/`context_missing_reason` GITHUB_OUTPUT keys)
     plus their differing severities for a lookup miss:
 
@@ -93,8 +93,8 @@ class FeedbackContext:
     - `notice`: the informational "this is an inline finding, reply to the
       thread instead" hint — surfaced as `::notice::`, never as a warning.
     - Neither set: a plain "not found" (no F<n> token in the comment, or the
-      token doesn't match any known finding) — silent, matching bash's
-      `not_found)` branch, which emits nothing at all.
+      token doesn't match any known finding) — silent, matching the earlier
+      inline `not_found)` branch, which emitted nothing at all.
     """
 
     source: str = ""
@@ -304,12 +304,11 @@ def context_from_body_finding_id(bodies: Sequence[str], finding_id: int) -> Feed
     """Look up FeedbackEntry context from an F<n> token in an `issue_comment`
     (top-level PR comment) slash command.
 
-    Mirrors `feedback-command`'s "Extract finding context from review body"
-    bash+Python-heredoc step, built on the same `classify_finding` used by
-    `dismiss_by_finding_id`. Matches bash's three-way severity split: BODY
-    populates context, INLINE sets `notice` only (bash's `inline)` branch
-    emits an advisory `::notice::`, never a warning), and UNKNOWN
-    (bash's `not_found)` branch) returns an all-empty context — silent,
+    Ports `feedback-command`'s "Extract finding context from review body"
+    earlier inline step, built on the same `classify_finding` used by
+    `dismiss_by_finding_id`. Uses a three-way severity split: BODY
+    populates context, INLINE sets `notice` only (an advisory `::notice::`,
+    never a warning), and UNKNOWN returns an all-empty context — silent,
     not even a notice.
     """
     classified = classify_finding(bodies, finding_id)

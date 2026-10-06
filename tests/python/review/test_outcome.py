@@ -98,7 +98,7 @@ def test_low_only_approves() -> None:
 # ---------------------------------------------------------------------------
 
 def test_medium_with_failed_agent_downgrades_to_comment() -> None:
-    # BUG WE'RE FIXING: bash used to APPROVE here. Now we MUST NOT.
+    # BUG WE'RE FIXING: the removed bash engine used to APPROVE here. Now we MUST NOT.
     outcome = classify_review_outcome([_medium()], ["silent-failure-hunter"], mode="full")
     assert outcome.risk == "Medium"
     assert outcome.event == "COMMENT"
@@ -166,7 +166,7 @@ def test_unknown_severity_does_not_escalate() -> None:
     )
     assert outcome.finding_total == 2
     # No recognised severity → treated like "Low" since findings exist but none
-    # match Critical/High/Medium. This mirrors the bash fall-through into `else`.
+    # match Critical/High/Medium. Unrecognized severities fall through to Low.
     assert outcome.risk == "Low"
     assert outcome.event == "APPROVE"
 

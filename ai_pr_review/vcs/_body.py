@@ -399,8 +399,8 @@ TOKEN_TABLE_OPEN_MARKER: Final[str] = "<details>\n<summary>Token usage by agent<
 def truncate_body(body: str, limit: int = GITHUB_MAX_BODY_SIZE) -> str:
     """Truncate body at byte boundary, append marker. UTF-8 safe.
 
-    Mirrors the bash `truncate_body`: cuts at `limit` bytes, then drops trailing
-    partial UTF-8 by decoding with errors='ignore'.
+    Cuts at `limit` bytes, then drops trailing partial UTF-8 by decoding with
+    errors='ignore'.
     """
     encoded = body.encode("utf-8")
     if len(encoded) <= limit:

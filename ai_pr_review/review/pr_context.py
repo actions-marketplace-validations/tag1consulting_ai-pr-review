@@ -1,7 +1,7 @@
 """Shared run-context block: PR title/description + file manifest, built once
 per run and sent to every finding agent except blind-hunter (#813, closing
 the remaining gap in #177 -- the Python engine never carried the PR
-description over from the bash engine).
+description over from the removed bash engine).
 
 Fetched via `VcsProvider.get_pr_description()`, which is itself fail-soft
 (returns None rather than raising); this module is a pure formatter that

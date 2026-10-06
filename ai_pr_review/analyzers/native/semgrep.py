@@ -143,7 +143,7 @@ def _resolve_config() -> list[str]:
         if yml_files:
             args: list[str] = []
             for yf in yml_files:
-                # Use relative path (relative to CWD) consistent with bash wrapper.
+                # Use a path relative to the CWD.
                 try:
                     rel = yf.relative_to(Path.cwd())
                     args += ["--config", str(rel)]

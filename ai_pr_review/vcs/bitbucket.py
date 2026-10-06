@@ -375,8 +375,8 @@ class BitbucketProvider:
         Security-critical (#894, the root-cause follow-up to #874's
         narrower verdicts-only fix): Bitbucket exposes no server-side "is
         this comment mine" filter and comments carry no privileged/
-        verified-author flag, so a marker-substring match alone (the bash
-        version's original behavior, kept client-side here defensively --
+        verified-author flag, so a marker-substring match alone (the removed
+        bash engine's original behavior, kept client-side here defensively --
         Bitbucket sometimes ignores its own `q=` filter on rich-text
         fields) can be satisfied by ANY PR commenter, not just this bot.
         Every caller of this method -- SHA-watermark (`get_last_reviewed_
@@ -1577,7 +1577,7 @@ def _render_combined_body(
     findings above are also shown as inline annotations.
 
     Bitbucket has no <details> rendering, so remediation is rendered as a
-    flat sub-bullet (per bash post-review-bitbucket.sh:281), and (unlike
+    flat sub-bullet, and (unlike
     GitHub) all findings — including genuine out_of_diff analyzer findings —
     render in the flat findings_block below since there is no collapsed
     section to redirect them to. The headline risk/count, however, use the
