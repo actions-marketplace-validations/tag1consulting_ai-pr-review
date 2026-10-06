@@ -870,7 +870,7 @@ def parse_command_gate(comment_body: str) -> None:
     `KNOWN_COMMANDS`/`parse_command` -- the same grammar the `slash`,
     `list-commands`, `dismiss`, and `dismiss-inline` subcommands already use.
     This is a job-routing classification, not the full slash-command grammar:
-    it also recognizes `ai_pr_review.slash.parser.BASH_ONLY_COMMANDS`
+    it also recognizes `ai_pr_review.slash.parser.WORKFLOW_COMMANDS`
     (rescan/review-full/skip/help), a vocabulary the Python engine's
     feedback/dismiss pipeline never sees at all.
 
@@ -883,17 +883,19 @@ def parse_command_gate(comment_body: str) -> None:
       command      -- the command token (lowercased, matching
                        SlashCommand.name's normalization), whenever the first
                        line has one at all -- whether or not it's recognized.
+                       An alias in `WORKFLOW_COMMAND_ALIASES` (`full`, issue #995)
+                       is printed as its canonical name (`review-full`).
                        Every consumer of this key compares it against
                        specific literal command names, so an unrecognized or
                        job-irrelevant value here is inert.
       valid         -- 'true' for a command this step's caller can act on
-                       directly (BASH_ONLY_COMMANDS, or any KNOWN_COMMANDS
+                       directly (WORKFLOW_COMMANDS, or any KNOWN_COMMANDS
                        entry other than 'feedback'); 'false' for 'feedback'
                        (a real command, but owned entirely by the
                        feedback-command job -- see KNOWN_COMMANDS's
                        docstring) and for anything unrecognized.
       unrecognized  -- 'true' only when the token is neither
-                       BASH_ONLY_COMMANDS nor a KNOWN_COMMANDS entry.
+                       WORKFLOW_COMMANDS nor a KNOWN_COMMANDS entry.
       finding_id    -- the numeric F<n> (or "[F<n>]") token immediately
                        following the command, for every KNOWN_COMMANDS entry
                        except 'feedback'; empty when absent. Bracket-form and

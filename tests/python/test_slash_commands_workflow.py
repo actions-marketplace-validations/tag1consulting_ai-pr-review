@@ -28,7 +28,7 @@ from typing import Any
 
 import yaml
 
-from ai_pr_review.slash.parser import BASH_ONLY_COMMANDS
+from ai_pr_review.slash.parser import WORKFLOW_COMMANDS
 
 _WORKFLOW_PATH = (
     Path(__file__).resolve().parents[2] / ".github" / "workflows" / "slash-commands.yml"
@@ -39,7 +39,7 @@ _WORKFLOW_PATH = (
 # help are a bash-only vocabulary this job fully owns. Issue #821: imported
 # from parser.py (single source of truth) rather than duplicated here, same
 # as KNOWN_COMMANDS above.
-_BASH_ONLY_COMMANDS = BASH_ONLY_COMMANDS
+_WORKFLOW_COMMANDS = WORKFLOW_COMMANDS
 
 # `dismiss`/canonical `false-positive` are the same family everywhere in this
 # repo (ai_pr_review/slash/parser.py's SlashCommand.canonical_name); normalize

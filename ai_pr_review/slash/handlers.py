@@ -199,7 +199,12 @@ def parse_command_gate_lines(comment_body: str) -> list[str]:
     the pre-move implementation (one line per list element, in the same
     order the original function's individual ``click.echo`` calls produced).
     """
-    from ai_pr_review.slash.parser import BASH_ONLY_COMMANDS, ParseError, parse_command
+    from ai_pr_review.slash.parser import (
+        WORKFLOW_COMMAND_ALIASES,
+        WORKFLOW_COMMANDS,
+        ParseError,
+        parse_command,
+    )
 
     try:
         result = parse_command(comment_body)
@@ -236,8 +241,11 @@ def parse_command_gate_lines(comment_body: str) -> list[str]:
 
     if isinstance(result, ParseError):
         token = result.unknown_token
-        if token in BASH_ONLY_COMMANDS:
-            return [f"command={token}", "valid=true"]
+        # An alias (issue #995) is reported under its canonical name, so the
+        # workflow only ever compares against the canonical spelling.
+        canonical = WORKFLOW_COMMAND_ALIASES.get(token, token)
+        if canonical in WORKFLOW_COMMANDS:
+            return [f"command={canonical}", "valid=true"]
         lines = [f"command={token}"] if token else []
         lines += ["valid=false", "unrecognized=true"]
         return lines
