@@ -20,6 +20,13 @@ Supported commands:
   fixed [F<n>] [sha] [reason]     — mark finding as fixed (not a suppression verdict; does NOT store feedback);
                                      optional commit SHA is echoed in the reply, not validated
 
+Workflow-only commands (handled by slash-commands.yml, never parsed into a
+``SlashCommand`` — see ``WORKFLOW_COMMANDS``):
+  rescan                          — force a full-diff re-review
+  review-full                     — run all agents (full mode); alias: ``full``
+  skip                            — add the ``skip-ai-review`` label
+  help                            — post the command list
+
 ``F<n>`` tokens also accept the bracketed form ``[F<n>]`` shown in review
 bodies (e.g. ``**[F1]**``) — see ``_FID_RE``.
 
@@ -62,11 +69,11 @@ KNOWN_COMMANDS: frozenset[str] = frozenset(
 # `parse_command`/`parse_commands` below. These four never produce a
 # `SlashCommand`: they don't write a `FeedbackEntry`, carry a reason, or take
 # an `F<n>` argument -- they're plain triggers (force a rescan, switch review
-# mode, add a label, print help) handled entirely in bash/YAML, not by the
-# Python engine's slash-command pipeline. Kept here (rather than duplicated
+# mode, add a label, print help) handled entirely by the slash-commands workflow, not by the
+# Python slash-command pipeline. Kept here (rather than duplicated
 # across the workflow file and its own test) so there is exactly one place
 # that enumerates "every command name `/ai-pr-review` recognizes at all".
-BASH_ONLY_COMMANDS: frozenset[str] = frozenset(
+WORKFLOW_COMMANDS: frozenset[str] = frozenset(
     {
         "rescan",
         "review-full",
@@ -74,6 +81,15 @@ BASH_ONLY_COMMANDS: frozenset[str] = frozenset(
         "help",
     }
 )
+
+# Alternate spellings of a WORKFLOW_COMMANDS entry (issue #995). The
+# job-routing parse (`parse_command_gate_lines`) prints the canonical name for
+# an alias, so every `steps.cmd.outputs.command == 'review-full'` condition in
+# slash-commands.yml sees one spelling and needs no change. Kept out of
+# WORKFLOW_COMMANDS itself so that set stays "every canonical command name".
+WORKFLOW_COMMAND_ALIASES: dict[str, str] = {
+    "full": "review-full",
+}
 
 # Matches a bare commit SHA (short or full, lowercase or upper). Same shape
 # as vcs.marker's _SHA_PATTERN, duplicated here rather than imported to keep

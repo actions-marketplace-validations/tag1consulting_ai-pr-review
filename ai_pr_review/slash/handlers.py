@@ -199,7 +199,12 @@ def parse_command_gate_lines(comment_body: str) -> list[str]:
     the pre-move implementation (one line per list element, in the same
     order the original function's individual ``click.echo`` calls produced).
     """
-    from ai_pr_review.slash.parser import BASH_ONLY_COMMANDS, ParseError, parse_command
+    from ai_pr_review.slash.parser import (
+        WORKFLOW_COMMAND_ALIASES,
+        WORKFLOW_COMMANDS,
+        ParseError,
+        parse_command,
+    )
 
     try:
         result = parse_command(comment_body)
@@ -207,10 +212,10 @@ def parse_command_gate_lines(comment_body: str) -> list[str]:
         # Defense-in-depth, not a reachability guarantee either way. The
         # concretely known trigger: parser.py's F<n> regex (_FID_RE) has no
         # digit-count cap, unlike the length-capped regex ([0-9]{1,6}) the
-        # three bash steps this replaces used for the same extraction. An
+        # three shell steps this replaces used for the same extraction. An
         # absurdly long numeral in the F-ID position (thousands of digits)
         # exceeds Python's int-string conversion limit and raises ValueError
-        # from int() deep inside parse_command(). The bash steps never
+        # from int() deep inside parse_command(). The shell steps never
         # crashed on such input -- the capped regex just failed to match and
         # the digits fell through as ordinary reason text. Replicating that
         # exact fallback would mean reaching inside parse_command() a second
@@ -236,8 +241,11 @@ def parse_command_gate_lines(comment_body: str) -> list[str]:
 
     if isinstance(result, ParseError):
         token = result.unknown_token
-        if token in BASH_ONLY_COMMANDS:
-            return [f"command={token}", "valid=true"]
+        # An alias (issue #995) is reported under its canonical name, so the
+        # workflow only ever compares against the canonical spelling.
+        canonical = WORKFLOW_COMMAND_ALIASES.get(token, token)
+        if canonical in WORKFLOW_COMMANDS:
+            return [f"command={canonical}", "valid=true"]
         lines = [f"command={token}"] if token else []
         lines += ["valid=false", "unrecognized=true"]
         return lines

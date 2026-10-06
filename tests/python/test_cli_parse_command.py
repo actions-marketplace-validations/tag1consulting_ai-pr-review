@@ -4,7 +4,7 @@ Job-routing parse shared by all three "Parse command" steps in
 slash-commands.yml (handle-command, dismiss-finding, feedback-command) --
 see ai_pr_review/cli.py's parse_command_gate docstring for the full output
 contract and the deliberate case-insensitivity normalization relative to the
-three bash `case` statements it replaces.
+three shell `case` statements it replaces.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 from click.testing import CliRunner
 
 from ai_pr_review.cli import cli
-from ai_pr_review.slash.parser import BASH_ONLY_COMMANDS, KNOWN_COMMANDS
+from ai_pr_review.slash.parser import KNOWN_COMMANDS, WORKFLOW_COMMAND_ALIASES, WORKFLOW_COMMANDS
 
 
 def _run(comment_body: str) -> dict[str, str]:
@@ -28,10 +28,37 @@ def _run(comment_body: str) -> dict[str, str]:
     return parsed
 
 
-def test_bash_only_commands_are_recognized_and_valid() -> None:
-    for command in sorted(BASH_ONLY_COMMANDS):
+def test_workflow_commands_are_recognized_and_valid() -> None:
+    for command in sorted(WORKFLOW_COMMANDS):
         out = _run(f"/ai-pr-review {command}")
         assert out == {"command": command, "valid": "true"}, out
+
+
+def test_full_alias_is_routed_as_review_full() -> None:
+    # Issue #995: the workflow only compares against the canonical name, so
+    # the alias has to be reported as `review-full`, not as `full`.
+    for body in (
+        "/ai-pr-review full",
+        "/ai-pr-review Full",
+        "/ai-pr-review FULL",
+        "/ai-pr-review full please run everything",
+    ):
+        assert _run(body) == {"command": "review-full", "valid": "true"}, body
+
+
+def test_every_alias_routes_exactly_like_its_target() -> None:
+    for alias, target in WORKFLOW_COMMAND_ALIASES.items():
+        assert _run(f"/ai-pr-review {alias}") == _run(f"/ai-pr-review {target}"), alias
+
+
+def test_near_misses_of_the_alias_stay_unrecognized() -> None:
+    # The unknown-command reply must still fire for anything that is not an
+    # exact alias or command name.
+    for token in ("fulll", "ful", "full-review", "fullscan", "review_full"):
+        out = _run(f"/ai-pr-review {token}")
+        assert out.get("unrecognized") == "true", token
+        assert out.get("valid") == "false", token
+        assert out.get("command") == token, token
 
 
 def test_feedback_is_recognized_but_not_valid_here() -> None:
@@ -79,7 +106,7 @@ def test_bare_prefix_with_nothing_after_is_unrecognized_with_no_command() -> Non
 
 
 def test_mixed_case_command_is_normalized_and_recognized() -> None:
-    # Deliberate normalization vs. the three bash `case` statements this
+    # Deliberate normalization vs. the three shell `case` statements this
     # replaces (see parse_command_gate's docstring): SlashCommand.name is
     # always lowercased, so a mixed-case command is now recognized instead
     # of silently misrouting to the unrecognized-command path.
@@ -88,18 +115,18 @@ def test_mixed_case_command_is_normalized_and_recognized() -> None:
     assert out["valid"] == "true"
 
 
-def test_every_known_command_and_bash_only_command_is_covered() -> None:
+def test_every_known_command_and_workflow_command_is_covered() -> None:
     # Issue #772's original intent, preserved: every name in KNOWN_COMMANDS
-    # (plus the bash-only vocabulary KNOWN_COMMANDS doesn't cover) must never
+    # (plus the workflow-only vocabulary KNOWN_COMMANDS doesn't cover) must never
     # fall into the unrecognized path.
-    for command in sorted(KNOWN_COMMANDS | BASH_ONLY_COMMANDS):
+    for command in sorted(KNOWN_COMMANDS | WORKFLOW_COMMANDS):
         out = _run(f"/ai-pr-review {command} F1 reason")
         assert "unrecognized" not in out, f"{command!r} was incorrectly treated as unrecognized"
 
 
 def test_absurdly_long_finding_id_digit_string_does_not_crash() -> None:
     # Defense-in-depth: parser.py's F<n> regex has no digit-count cap, unlike
-    # the bash steps' capped [0-9]{1,6}. A numeral long enough to exceed
+    # the earlier shell steps' capped [0-9]{1,6}. A numeral long enough to exceed
     # Python's int-string conversion limit must not crash this step.
     out = _run(f"/ai-pr-review dismiss F{'9' * 5000} reason")
     assert out["valid"] == "false"

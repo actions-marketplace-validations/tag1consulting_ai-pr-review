@@ -218,7 +218,7 @@ Once `ai-pr-review.yml` is merged to your default branch, users with write acces
 | Command | Effect |
 |---|---|
 | `/ai-pr-review rescan` | Force full-diff re-review |
-| `/ai-pr-review review-full` | Run all agents (full mode) |
+| `/ai-pr-review review-full` | Run all agents (full mode). `/ai-pr-review full` is an alias |
 | `/ai-pr-review skip` | Add `skip-ai-review` label |
 | `/ai-pr-review help` | Post command list as reply |
 | `/ai-pr-review dismiss [F<n>]` | Mark a finding a false positive. Reply on the inline comment thread, **or** post `dismiss F<n>` as a top-level comment using the `[F<n>]` ID shown on either an inline or body-level finding. Either way the matching inline thread is resolved, and the `CHANGES_REQUESTED` review is dismissed once every thread is resolved. If that clears the last active finding PR-wide and the actor is OWNER/MEMBER, the PR is also approved — see [Auto-approve on clear](docs/slash-commands.md#auto-approve-on-clear). |

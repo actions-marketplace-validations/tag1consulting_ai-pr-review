@@ -193,10 +193,9 @@ def _thread_by_comment_id(
 ) -> dict[str, Any] | None:
     """Find the thread containing a comment with the given REST databaseId.
 
-    Mirrors `dismiss-finding`'s bash correlation
-    (`comments.nodes[].databaseId == parent_comment_id`) — a reply-to-a-reply's
-    parent may not be the thread's first comment, so all comments in the
-    thread are checked, not just `_first_comment`.
+    Matches on `comments.nodes[].databaseId == parent_comment_id`. A
+    reply-to-a-reply's parent may not be the thread's first comment, so all
+    comments in the thread are checked, not just `_first_comment`.
     """
     for t in threads:
         comments = ((t.get("comments") or {}).get("nodes")) or []
@@ -448,7 +447,7 @@ def _dismiss_if_all_resolved(
     """Dismiss target_review_id iff none of its own threads remain unresolved
     AND the review is currently `CHANGES_REQUESTED`.
 
-    The state check (issue #562) matches the original bash job's
+    The state check (issue #562) matches the earlier inline workflow job's
     `if review_state != CHANGES_REQUESTED: skip` guard, ported here rather
     than at either call site so both `dismiss_by_finding_id` (story 13-2) and
     `dismiss_inline_reply` (story 13-3) get the fix from one place. Without
@@ -462,7 +461,7 @@ def _dismiss_if_all_resolved(
 
     Count scope is always per-review (databaseId == target_review_id), never
     PR-wide, per the canonical semantics chosen in Epic 13's design (the 4
-    existing bash copies disagreed on this).
+    earlier inline workflow copies disagreed on this).
 
     Deliberately passes `bot_login=None` to `is_owned_by_us` (author-login
     check skipped, marker is the sole gate) for GraphQL-sourced author logins
@@ -495,7 +494,7 @@ def _dismiss_if_all_resolved(
         return False, errors
     if state != "CHANGES_REQUESTED":
         # Not an error: the review is already dismissed/approved/commented,
-        # so there is nothing to do. Silent, matching the bash guard this
+        # so there is nothing to do. Silent, matching the earlier inline workflow guard this
         # ports — a skip here is the correct, expected outcome.
         return False, errors
 
@@ -676,7 +675,7 @@ def dismiss_by_finding_id(
     # Snapshot before any sub-call writes to provider._errors (e.g. an HTTP
     # error or a GraphQL-200-with-errors body — the #555 failure class); all
     # new entries are drained via provider._errors[errors_before:] below so
-    # they cannot be silently lost the way the bash `gh api --jq` call lost
+    # they cannot be silently lost the way the earlier inline `gh api --jq` call lost
     # them.
     errors_before = len(provider._errors)
     errors: list[str] = []
@@ -913,8 +912,8 @@ def context_from_parent_comment(provider: GitHubProvider, parent_comment_id: int
     `pull_request_review_comment`-event slash command (the AI finding being
     replied to).
 
-    Mirrors `feedback-command`'s "Extract finding context from parent
-    comment" bash step: fetch the comment, validate its author is our bot,
+    Ports `feedback-command`'s "Extract finding context from parent
+    comment" workflow step: fetch the comment, validate its author is our bot,
     then parse `source`/`rule_id` from the rendered header via
     `parse_inline_comment_header`. `file` comes from the comment's own
     `path` field (not header parsing) — the header carries no file/line
@@ -939,7 +938,8 @@ def context_from_parent_comment(provider: GitHubProvider, parent_comment_id: int
     parsed = parse_inline_comment_header(comment["body"])
     if not parsed.source:
         # Path is still useful even when the header didn't parse — matches
-        # the bash step, which exports file= before exiting on this path.
+        # the earlier inline workflow step, which exports file= before exiting on
+        # this path.
         return FeedbackContext(
             file=comment["path"],
             missing_reason="could not parse source tag from parent comment header",
@@ -958,7 +958,7 @@ def resolve_only(
     Used by `feedback-command`'s "resolve on success" step: `ai-pr-review
     slash` has already persisted the FeedbackEntry and posted a reply by the
     time this runs, so this is a pure best-effort side effect — no reply text,
-    no ownership gate (the bash step it replaces resolves the thread
+    no ownership gate (the earlier inline workflow step it replaces resolves the thread
     containing `parent_comment_id` unconditionally, since the slash command
     itself was already validated as posted in reply to one of our comments
     upstream in the workflow's "Validate parent comment is from the bot" gate).
@@ -1008,7 +1008,7 @@ def dismiss_inline_reply(
 
     The review targeted for dismissal is the one owning the resolved thread
     (`pullRequestReview.databaseId` of that thread's first comment) — this
-    matches the more precise of the two disagreeing bash copies rather than
+    matches the more precise of the two disagreeing earlier inline workflow copies rather than
     scoping PR-wide.
 
     `approve_allowed` (issue #590's tighter trust gate, decided by the caller
@@ -1296,7 +1296,7 @@ def resolve_feedback_context(
     """Look up source/file/rule_id context for a `feedback-command`
     FeedbackEntry, backing `ai_pr_review.cli`'s `feedback-context` command.
 
-    Two paths, matching the two bash steps this replaces: `is_review_comment`
+    Two paths, matching the two earlier inline workflow steps this replaces: `is_review_comment`
     looks up context from the parent inline comment being replied to;
     otherwise an F<n> token (accepting the bracketed `[F<n>]` form -- issue
     #735) is extracted from the third whitespace-separated token of the
@@ -1306,8 +1306,8 @@ def resolve_feedback_context(
     Returns a default (empty) `FeedbackContext` whenever `provider` is
     `None` (provider construction already failed and was reported by the
     caller) or no `F<n>` token is found in the non-review-comment path --
-    both silent "not found" cases, matching the two bash steps' own
-    `not_found)` branch, which emits nothing at all.
+    both silent "not found" cases, matching the two earlier inline workflow steps' own
+    `not_found)` branch, which emitted nothing at all.
     """
     if provider is None:
         return FeedbackContext()

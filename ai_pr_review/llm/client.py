@@ -1,4 +1,4 @@
-"""Multi-provider LLM router — Python port of llm-call.sh dispatch section.
+"""Multi-provider LLM router.
 
 Usage:
     response = asyncio.run(call_llm(request))
@@ -18,7 +18,7 @@ from .base import LLMRequest, LLMResponse
 async def call_llm(req: LLMRequest, provider: str) -> LLMResponse:
     """Dispatch to the correct provider and return an LLMResponse.
 
-    Exit codes matching llm-call.sh:
+    Exit codes:
       SystemExit(1) — permanent error
       SystemExit(2) — transient (retries exhausted)
       SystemExit(3) — content filter

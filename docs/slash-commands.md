@@ -101,6 +101,8 @@ Forces a full-diff re-review of the PR, bypassing the SHA watermark. Use this wh
 
 Triggers a full-mode review using all agents, including architecture-reviewer, security-reviewer, blind-hunter, edge-case-hunter, and adversarial-general. This takes longer and costs more than the default quick mode.
 
+`/ai-pr-review full` is an alias for `review-full`. Both start the same run and get the same reaction and reply.
+
 ### `/ai-pr-review skip`
 
 Adds the `skip-ai-review` label to the PR, suppressing the next automated review trigger. Remove the label manually to re-enable automatic reviews.

@@ -217,14 +217,14 @@ class TestScanFile:
 
 
 # ---------------------------------------------------------------------------
-# Bridge integration — native_fn dispatched instead of bash script
+# Bridge integration — native_fn dispatched
 # ---------------------------------------------------------------------------
 
 
 class TestBridgeIntegration:
     @pytest.mark.anyio
     async def test_shellcheck_uses_native_fn(self, tmp_path: Path) -> None:
-        """run_analyzers dispatches to native_fn when set, not bash script."""
+        """run_analyzers dispatches to native_fn when set."""
         from ai_pr_review.analyzers import bridge
         from ai_pr_review.analyzers.bridge import run_analyzers
 

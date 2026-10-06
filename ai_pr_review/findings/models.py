@@ -50,7 +50,7 @@ class Finding(BaseModel):
     remediation: str = ""
     suggested_code: str = ""
     sources: list[str] = Field(default_factory=list)
-    # cve-check only: "dependency-check" tag required for parity with bash output.
+    # cve-check only: "dependency-check" tag required in the output.
     agent: str = ""
     # Set by apply_diff_scope when a native-analyzer finding falls outside the
     # changed-line set.  Findings with out_of_diff=True are capped to Low
@@ -121,7 +121,7 @@ class Finding(BaseModel):
         return self
 
     def to_dict(self) -> dict[str, object]:
-        """Return a JSON-serialisable dict matching the bash schema."""
+        """Return a JSON-serialisable dict of the finding fields."""
         d: dict[str, object] = {
             "severity": self.severity,
             "confidence": self.confidence,

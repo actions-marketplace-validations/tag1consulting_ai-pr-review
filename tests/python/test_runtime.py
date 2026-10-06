@@ -833,7 +833,7 @@ class TestSarifRoutedViaExtraFindings:
         assert runtime.sarif_elapsed_s is None
 
 
-class TestExplicitConfigNoBashDefaults:
+class TestExplicitConfigIgnoresProviderDefaults:
     """Explicit model fields are not overridden by provider defaults (#319 regression guard)."""
 
     @pytest.mark.anyio

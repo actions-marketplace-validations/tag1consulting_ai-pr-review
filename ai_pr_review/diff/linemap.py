@@ -1,6 +1,6 @@
 """Diff hunk → per-provider line positions.
 
-Ports parse_valid_lines and parse_diff_new_lines from vcs/common.sh.
+Added-line and new-file-line sets for each hunk, used to anchor inline comments.
 """
 
 from __future__ import annotations
@@ -24,8 +24,7 @@ class LineRef:
 def parse_added_lines(diff_text: str) -> set[LineRef]:
     """Return LineRefs for every ADDED line (+) in the unified diff.
 
-    Mirrors vcs/common.sh parse_valid_lines: only + lines are eligible
-    anchors for inline review comments.
+    Only + lines are eligible anchors for inline review comments.
     """
     return _parse_diff(diff_text, include_context=False)
 
@@ -33,8 +32,8 @@ def parse_added_lines(diff_text: str) -> set[LineRef]:
 def parse_new_file_lines(diff_text: str) -> set[LineRef]:
     """Return LineRefs for every line present in the new file (+  and context).
 
-    Mirrors vcs/common.sh parse_diff_new_lines: used for suggestion-range
-    validation where context lines are acceptable anchors.
+    Used for suggestion-range validation where context lines are acceptable
+    anchors.
     """
     return _parse_diff(diff_text, include_context=True)
 

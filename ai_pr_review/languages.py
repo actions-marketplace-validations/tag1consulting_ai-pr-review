@@ -48,7 +48,7 @@ _EXT_MAP: dict[str, str] = {
     "pm": "Perl",
 }
 
-# Patterns for test-file classification (mirrors lib/languages.sh is_test_file).
+# Patterns for test-file classification.
 _TEST_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"_test\.go$"),
     re.compile(r"(^|/)test_[^/]+\.py$"),

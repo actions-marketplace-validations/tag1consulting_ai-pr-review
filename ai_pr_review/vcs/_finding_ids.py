@@ -336,7 +336,7 @@ def _parse_existing_ids(bodies: Sequence[str]) -> dict[str, int]:
         # the out-of-diff "<details>...Out-of-diff analyzer
         # findings...</details>" block (no ### heading of its own, so it
         # needs its own start/end markers — issue #550; same fix already
-        # applied to the workflow's bash/Python body scanners and to
+        # applied to the workflow's earlier shell and Python body scanners and to
         # _list_prior_bot_review_bodies), and the APPROVE-path "### Findings
         # (informational)" heading (issue #645).
         in_body_section = False
