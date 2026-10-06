@@ -79,6 +79,8 @@ _KNOWN_AI_VARS: frozenset[str] = frozenset(
         "AI_FEEDBACK_MAX_TOKENS",
         "AI_FEEDBACK_RETENTION_COUNT",
         "AI_FEEDBACK_RETENTION_AGE_DAYS",
+        # --- Summary ---
+        "AI_SUPPRESS_WALKTHROUGH",
         # --- Judge pass ---
         "AI_JUDGE_PASS",
         # --- Fail-on-findings ---
@@ -201,6 +203,20 @@ _DEPRECATED_NOOP_ENV_VARS: dict[str, str] = {
     # #623). The field itself was removed in #824.
     "STANDALONE_DEPTH": "reserved for standalone review mode, never implemented (#623)",
 }
+
+
+def _bool_env(key: str, default: bool = False) -> bool:
+    """Parse a boolean env var: only true/1/yes (any case) are true.
+
+    Module-level so `ReviewConfig.from_env()` and the VCS provider factory
+    (`vcs/__init__.py`) parse a flag the same way. A flag read in both places,
+    like `AI_SUPPRESS_WALKTHROUGH`, must not be able to drift between them.
+    """
+    return os.environ.get(key, "true" if default else "false").strip().lower() in (
+        "true",
+        "1",
+        "yes",
+    )
 
 
 def _int_env(key: str, default: int) -> int:
@@ -525,6 +541,11 @@ class ReviewConfig(BaseModel):
     # "off"  -- pass through unchanged (full-file linting behaviour).
     analyzer_diff_scope: str = "cap"
 
+    # --- Summary ---
+    # When true, the pr-summarizer's `## Walkthrough` table is left out of the
+    # posted summary (Summary, Type and Effort stay). Off by default.
+    suppress_walkthrough: bool = False
+
     # --- Judge pass ---
     # On by default per explicit decision (session 2026-06-22). Adds one cheap-model
     # LLM call per review. Set AI_JUDGE_PASS=false to disable.
@@ -833,12 +854,7 @@ class ReviewConfig(BaseModel):
         review_target = os.environ.get("REVIEW_TARGET", "pr").strip().lower()
         _check_deprecated_review_target(review_target)
 
-        def _bool(key: str, default: bool = False) -> bool:
-            return os.environ.get(key, "true" if default else "false").lower() in (
-                "true",
-                "1",
-                "yes",
-            )
+        _bool = _bool_env
 
         _int = _int_env
 
@@ -916,6 +932,7 @@ class ReviewConfig(BaseModel):
                 if p.strip()
             ),
             analyzer_diff_scope=os.environ.get("AI_ANALYZER_DIFF_SCOPE", "cap"),
+            suppress_walkthrough=_bool("AI_SUPPRESS_WALKTHROUGH"),
             enable_judge_pass=_bool("AI_JUDGE_PASS", True),
             fail_on_findings=_bool("AI_FAIL_ON_FINDINGS"),
             approval_ceiling=os.environ.get("AI_APPROVAL_CEILING", "approve").strip() or "approve",

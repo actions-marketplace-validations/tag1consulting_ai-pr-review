@@ -68,6 +68,12 @@ jobs:
 
 That's it — reviews start firing on the next PR.
 
+## What's new in v2.19.0
+
+**You can now leave the Walkthrough table out of the summary comment.** Set `suppress-walkthrough: 'true'` (the `AI_SUPPRESS_WALKTHROUGH` environment variable on Bitbucket and GitLab). The Summary text, Type and Effort stay. This is most useful on Bitbucket, which cannot collapse the table the way GitHub and GitLab do. The default is `false`, so nothing changes unless you set it. On Bitbucket a summary comment that already has a table loses it on the next run.
+
+See [Version History → v2.19.0](version-history/v2.19.0) for details.
+
 ## What's new in v2.18.3
 
 **Bitbucket error messages are clearer.** A failed Bitbucket call now shows the scopes the token has, so a missing-scope error is easy to fix. The warning for a failed account lookup depends on the HTTP status. A 401 means the credentials were rejected or the token has no scopes, and a 403 means the Account:Read scope is missing. The dismiss help line is no longer shown when that lookup failed, because verdict commands are off for that run.
@@ -79,14 +85,6 @@ See [Version History → v2.18.3](version-history/v2.18.3) for details.
 **Bitbucket review comments are clearer.** The comment now has one "Summary" heading instead of two, the Code Insights note follows the findings list, and the headline shows both counts when some findings are outside the diff. If the Bitbucket account lookup fails, the run logs a warning and the comment says so. Add the Account:Read scope (`read:user:bitbucket`) to the API token to fix it, because without it the review posts a new summary comment on each push. Findings comments also link to the dismiss instructions, and an invalid `policy.yml` is now reported in the comment.
 
 See [Version History → v2.18.2](version-history/v2.18.2) for details.
-
-## What's new in v2.18.1
-
-**The cost ceiling now tells you when it cannot bound a model.** A model with no pricing row used to be estimated at $0, so `max-cost-usd` could not stop it and nothing in the PR said so. The new `cost-ceiling-unpriced` input defaults to `warn`: the review runs and a "Cost ceiling not enforced" notice names the model. Set it to `block` to skip the review instead. Nothing changes unless `max-cost-usd` is above 0 and a model has no pricing row (an invalid `cost-ceiling-unpriced` value is always an error).
-
-**The `ai-pr-review/policy-gate` check no longer flips back to `action_required` after `/ai-pr-review review-full` satisfied it.** A slower automatic review on the same commit could finish last and overwrite the `success`. It now keeps the gate satisfied for that commit.
-
-See [Version History → v2.18.1](version-history/v2.18.1) for details.
 
 ## Learn more
 
