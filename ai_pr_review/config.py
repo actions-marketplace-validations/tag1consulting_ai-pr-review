@@ -205,6 +205,20 @@ _DEPRECATED_NOOP_ENV_VARS: dict[str, str] = {
 }
 
 
+def _bool_env(key: str, default: bool = False) -> bool:
+    """Parse a boolean env var: only true/1/yes (any case) are true.
+
+    Module-level so `ReviewConfig.from_env()` and the VCS provider factory
+    (`vcs/__init__.py`) parse a flag the same way. A flag read in both places,
+    like `AI_SUPPRESS_WALKTHROUGH`, must not be able to drift between them.
+    """
+    return os.environ.get(key, "true" if default else "false").strip().lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+
+
 def _int_env(key: str, default: int) -> int:
     """Parse an integer env var, warning to stderr and falling back to `default` on a bad value.
 
@@ -840,12 +854,7 @@ class ReviewConfig(BaseModel):
         review_target = os.environ.get("REVIEW_TARGET", "pr").strip().lower()
         _check_deprecated_review_target(review_target)
 
-        def _bool(key: str, default: bool = False) -> bool:
-            return os.environ.get(key, "true" if default else "false").lower() in (
-                "true",
-                "1",
-                "yes",
-            )
+        _bool = _bool_env
 
         _int = _int_env
 

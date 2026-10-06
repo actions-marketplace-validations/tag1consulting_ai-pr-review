@@ -638,3 +638,29 @@ def test_bitbucket_suppress_walkthrough_env_wiring(
 
     assert isinstance(provider, BitbucketProvider)
     assert provider.config.suppress_walkthrough is expected
+
+
+@pytest.mark.parametrize(
+    "value", ["true", "TRUE", " true ", "1", "yes", "on", "false", "0", "no", "", "maybe"]
+)
+def test_suppress_walkthrough_parses_the_same_in_config_and_bitbucket_provider(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    """The summarizer strip (ReviewConfig) and the Bitbucket carried-forward
+    strip (BitbucketConfig) read one env var. They must never disagree (#999
+    review finding F1), whatever the value."""
+    from ai_pr_review.config import ReviewConfig
+
+    _clear_provider_envs(monkeypatch)
+    monkeypatch.setenv("VCS_PROVIDER", "bitbucket")
+    monkeypatch.setenv("BITBUCKET_EMAIL", "x@y")
+    monkeypatch.setenv("BITBUCKET_API_TOKEN", "tok")
+    monkeypatch.setenv("BITBUCKET_WORKSPACE", "ws")
+    monkeypatch.setenv("BITBUCKET_REPO_SLUG", "repo")
+    monkeypatch.setenv("PR_NUMBER", "42")
+    monkeypatch.setenv("AI_SUPPRESS_WALKTHROUGH", value)
+
+    provider = provider_from_env()
+
+    assert isinstance(provider, BitbucketProvider)
+    assert provider.config.suppress_walkthrough is ReviewConfig.from_env().suppress_walkthrough

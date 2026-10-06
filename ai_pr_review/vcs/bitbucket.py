@@ -40,6 +40,7 @@ if TYPE_CHECKING:
 
 from ai_pr_review.diff.linemap import parse_diff_sets
 from ai_pr_review.findings.models import Finding, Severity
+from ai_pr_review.markdown_sections import strip_walkthrough_section
 from ai_pr_review.vcs._bitbucket_verdicts import apply_pending_verdicts
 from ai_pr_review.vcs._body import (
     compute_headline,
@@ -1749,11 +1750,6 @@ def _render_combined_body(
     marker_line = head_lines[0] if head_lines else ""
     original_summary_text = _extract_walkthrough(existing_body)
     if suppress_walkthrough:
-        # Local import: agents.summarizer imports vcs._body, and importing
-        # `ai_pr_review.vcs` loads this module, so a module-level import here
-        # is circular.
-        from ai_pr_review.agents.summarizer import strip_walkthrough_section
-
         original_summary_text = strip_walkthrough_section(original_summary_text).strip()
 
     pr_summary_block = f"\n### Summary\n{original_summary_text}\n" if original_summary_text else ""

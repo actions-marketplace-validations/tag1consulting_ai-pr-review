@@ -124,10 +124,10 @@ async def run_summarizer(
         build_summarizer_system_prompt,
         build_summarizer_user_message,
         parse_summarizer_output,
-        strip_walkthrough_section,
         wrap_walkthrough_in_details,
     )
     from ai_pr_review.llm.base import LLMRequest
+    from ai_pr_review.markdown_sections import strip_walkthrough_section
 
     try:
         prompt_path = script_dir / "prompts" / "pr-summarizer.md"

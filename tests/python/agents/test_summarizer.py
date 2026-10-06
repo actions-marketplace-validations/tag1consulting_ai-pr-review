@@ -13,9 +13,9 @@ from ai_pr_review.agents.summarizer import (
     build_summarizer_system_prompt,
     build_summarizer_user_message,
     parse_summarizer_output,
-    strip_walkthrough_section,
     wrap_walkthrough_in_details,
 )
+from ai_pr_review.markdown_sections import strip_walkthrough_section
 
 # ---------------------------------------------------------------------------
 # parse_summarizer_output — happy path

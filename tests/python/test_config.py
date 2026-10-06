@@ -1181,3 +1181,28 @@ def test_suppress_walkthrough_is_a_known_ai_var() -> None:
     from ai_pr_review.config import _KNOWN_AI_VARS
 
     assert "AI_SUPPRESS_WALKTHROUGH" in _KNOWN_AI_VARS
+
+
+@pytest.mark.parametrize(
+    ("value", "default", "expected"),
+    [
+        (None, False, False),
+        (None, True, True),
+        ("true", False, True),
+        (" TRUE ", False, True),
+        ("1", False, True),
+        ("yes", False, True),
+        ("on", False, False),
+        ("false", True, False),
+        ("", True, False),
+    ],
+)
+def test_bool_env(
+    monkeypatch: pytest.MonkeyPatch, value: str | None, default: bool, expected: bool
+) -> None:
+    from ai_pr_review.config import _bool_env
+
+    monkeypatch.delenv("AI_TEST_FLAG", raising=False)
+    if value is not None:
+        monkeypatch.setenv("AI_TEST_FLAG", value)
+    assert _bool_env("AI_TEST_FLAG", default) is expected

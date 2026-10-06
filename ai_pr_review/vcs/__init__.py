@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import os
 
-from ai_pr_review.config import _int_env
+from ai_pr_review.config import _bool_env, _int_env
 from ai_pr_review.vcs.bitbucket import (
     BitbucketConfig,
     BitbucketProvider,
@@ -328,11 +328,9 @@ def _build_bitbucket_from_env() -> BitbucketProvider:
     feedback_retention_count = _int_env("AI_FEEDBACK_RETENTION_COUNT", 500)
     feedback_retention_age_days = _int_env("AI_FEEDBACK_RETENTION_AGE_DAYS", 365)
 
-    # Same parse as config.py's _bool: only true/1/yes turn it on.
-    suppress_walkthrough = (
-        os.environ.get("AI_SUPPRESS_WALKTHROUGH", "false").strip().lower()
-        in ("true", "1", "yes")
-    )
+    # The same parser ReviewConfig.from_env() uses for this flag, so the
+    # summarizer's strip and Bitbucket's carried-forward strip cannot disagree.
+    suppress_walkthrough = _bool_env("AI_SUPPRESS_WALKTHROUGH")
 
     config = BitbucketConfig(
         workspace=workspace,
