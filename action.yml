@@ -371,6 +371,16 @@ inputs:
     required: false
     default: 'false'
 
+  suppress-walkthrough:
+    description: >
+      When true, leave the Walkthrough section (the per-file table) out of the
+      summary comment. The Summary, Type and Effort stay. Useful on Bitbucket,
+      which cannot collapse the table. A summary comment that already has a
+      walkthrough keeps it on GitHub and GitLab until the summarizer next runs.
+      Default 'false'.
+    required: false
+    default: 'false'
+
   judge-pass:
     description: >
       When true (default), run a cheap-model judge pass after findings are
@@ -557,6 +567,7 @@ runs:
         AI_CONTEXT_MAX_QUERIES: ${{ inputs.context-max-queries }}
         AI_FEEDBACK_LOOP: ${{ inputs.feedback-loop }}
         AI_JUDGE_PASS: ${{ inputs.judge-pass }}
+        AI_SUPPRESS_WALKTHROUGH: ${{ inputs.suppress-walkthrough }}
         AI_PROFILE_MAX_TOKENS: ${{ inputs.profile-max-tokens }}
         AI_TOKEN_USAGE_DISPLAY: ${{ inputs.token-usage-display }}
         AI_TOKEN_USAGE_WARN_USD: ${{ inputs.token-usage-warn-usd }}

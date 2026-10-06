@@ -197,6 +197,9 @@ jobs:
           # omit token-usage content from the comment entirely. The full breakdown
           # is always in GITHUB_STEP_SUMMARY and the CI job log regardless.
           token-usage-display: ${{ vars.AI_REVIEW_TOKEN_USAGE_DISPLAY || 'compact' }}
+          # AI_REVIEW_SUPPRESS_WALKTHROUGH: set to 'true' to leave the per-file
+          # Walkthrough table out of the summary comment (default: 'false').
+          suppress-walkthrough: ${{ vars.AI_REVIEW_SUPPRESS_WALKTHROUGH || 'false' }}
           # AI_REVIEW_TOKEN_USAGE_WARN_USD: estimated-cost threshold (USD) above which
           # a high-usage warning line is added to the comment (default: 1.00). Set to
           # 0 to disable.
@@ -330,6 +333,7 @@ jobs:
       fail-on-findings: ${{ vars.AI_REVIEW_FAIL_ON_FINDINGS || 'false' }}
       feedback-loop: ${{ vars.AI_REVIEW_FEEDBACK_LOOP || 'false' }}
       token-usage-display: ${{ vars.AI_REVIEW_TOKEN_USAGE_DISPLAY || 'compact' }}
+      suppress-walkthrough: ${{ vars.AI_REVIEW_SUPPRESS_WALKTHROUGH || 'false' }}
       token-usage-warn-usd: ${{ vars.AI_REVIEW_TOKEN_USAGE_WARN_USD || '1.00' }}
       max-cost-usd: ${{ vars.AI_REVIEW_MAX_COST_USD || '0' }}
       fail-on-cost-ceiling: ${{ vars.AI_REVIEW_FAIL_ON_COST_CEILING || 'false' }}

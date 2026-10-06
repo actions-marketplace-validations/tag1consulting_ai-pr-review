@@ -7,8 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.19.0] - 2026-10-05
+
+### Added
+
+- **`AI_SUPPRESS_WALKTHROUGH` (action input `suppress-walkthrough`) leaves the Walkthrough section out of the summary comment (#997).** The default is `false`, so nothing changes unless you set it. The Summary text, Type and Effort stay. `strip_walkthrough_section()` in the new `markdown_sections.py` (a module with no package imports, so `agents/` and `vcs/` can both use it) removes the `## Walkthrough` section after the model writes it, so the prompt and the summarizer parser are unchanged, and it wins over the collapsed `<details>` form used on GitHub and GitLab. It returns the text unchanged when removing the section would leave nothing, because an empty summary is treated as an incremental run. Bitbucket also removes the section from the summary text it carries forward (`BitbucketConfig.suppress_walkthrough`), so a comment posted before the setting was turned on loses its table on the next run. GitHub and GitLab do not rewrite an existing summary comment on incremental runs, so a comment that already has a walkthrough keeps it until the summarizer next runs. The input is forwarded by `action.yml`, `container-action/action.yml` and `slash-commands.yml`, and the example workflows read it from the `AI_REVIEW_SUPPRESS_WALKTHROUGH` repository variable. Images older than 2.19.0 ignore it.
+
 ### Changed
 
+- **Boolean environment flags ignore surrounding whitespace.** `ReviewConfig.from_env()` and the Bitbucket provider factory now share one parser, `_bool_env()` in `config.py`, so a flag that both read (`AI_SUPPRESS_WALKTHROUGH`) cannot be parsed two ways. `AI_DRY_RUN=" true"` and other flags read through `from_env()` now count as true. Only `true`, `1` and `yes` are true, as before.
 - **Release PRs now get a full-mode review on every push, and work lands on a release branch first.** `.github/ai-pr-review/policy.yml` routes every `release/*` head branch to the `deep` policy (full mode) instead of `quick`. Feature and issue PRs now target a long-lived `release/vX.Y.Z` branch, so the release PR into `main` carries the whole code diff since the last release and the full review covers real code. Feature PRs keep the default quick review. `CLAUDE.md` has a new "Branching model" section and `CONTRIBUTING.md` says which branch to target. No engine or workflow change.
 
 ## [2.18.3] - 2026-10-05

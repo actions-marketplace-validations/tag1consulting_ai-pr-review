@@ -365,6 +365,7 @@ async def _run_review_async(config: ReviewConfig) -> int:
             # Bitbucket Cloud renders no HTML at all (issue #703), so the
             # walkthrough must stay a flat table there.
             collapse_walkthrough=rc.vcs_provider != "bitbucket",
+            suppress_walkthrough=rc.suppress_walkthrough,
             llm_call=_llm_call,
         )
 
