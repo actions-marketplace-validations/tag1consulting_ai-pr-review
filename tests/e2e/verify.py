@@ -428,8 +428,8 @@ def verify_analyzer_findings(
         # path metadata falls back to matching the body, as before. The
         # category lives only in the body.
         if any(
-            exp.category in body and (exp.path_substring in path if path else exp.path_substring in body)
-            for path, body in per_finding_haystacks
+            exp.category in c_body and (exp.path_substring in c_path if c_path else exp.path_substring in c_body)
+            for c_path, c_body in per_finding_haystacks
         ):
             return True
         # Bitbucket's per-finding text lives in each Code Insights
