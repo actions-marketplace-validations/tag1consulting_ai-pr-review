@@ -68,6 +68,14 @@ jobs:
 
 That's it — reviews start firing on the next PR.
 
+## What's new in v2.20.0
+
+**`/ai-pr-review full` now works.** It is an alias for `/ai-pr-review review-full`. Both start the same full-mode review and get the same reply, and the `help` reply lists the alias.
+
+**A Critical finding that two sources reported now gets an inline comment.** On a review with many findings, a Critical finding that an agent and an analyzer both reported could fall past the 25-comment cap and get no inline comment. On Bitbucket that meant no Code Insights annotation. Findings now keep their severity order, so the most severe ones get the inline slots first.
+
+See [Version History → v2.20.0](version-history/v2.20.0) for details.
+
 ## What's new in v2.19.0
 
 **You can now leave the Walkthrough table out of the summary comment.** Set `suppress-walkthrough: 'true'` (the `AI_SUPPRESS_WALKTHROUGH` environment variable on Bitbucket and GitLab). The Summary text, Type and Effort stay. This is most useful on Bitbucket, which cannot collapse the table the way GitHub and GitLab do. The default is `false`, so nothing changes unless you set it. On Bitbucket a summary comment that already has a table loses it on the next run.
@@ -79,12 +87,6 @@ See [Version History → v2.19.0](version-history/v2.19.0) for details.
 **Bitbucket error messages are clearer.** A failed Bitbucket call now shows the scopes the token has, so a missing-scope error is easy to fix. The warning for a failed account lookup depends on the HTTP status. A 401 means the credentials were rejected or the token has no scopes, and a 403 means the Account:Read scope is missing. The dismiss help line is no longer shown when that lookup failed, because verdict commands are off for that run.
 
 See [Version History → v2.18.3](version-history/v2.18.3) for details.
-
-## What's new in v2.18.2
-
-**Bitbucket review comments are clearer.** The comment now has one "Summary" heading instead of two, the Code Insights note follows the findings list, and the headline shows both counts when some findings are outside the diff. If the Bitbucket account lookup fails, the run logs a warning and the comment says so. Add the Account:Read scope (`read:user:bitbucket`) to the API token to fix it, because without it the review posts a new summary comment on each push. Findings comments also link to the dismiss instructions, and an invalid `policy.yml` is now reported in the comment.
-
-See [Version History → v2.18.2](version-history/v2.18.2) for details.
 
 ## Learn more
 
