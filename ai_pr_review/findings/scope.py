@@ -148,6 +148,12 @@ def rollup_repeated_findings(
     so reviewers can see the scope without reading 42 separate entries.
 
     Non-analyzer findings and findings without a file are left unchanged.
+
+    The output keeps the input order.  A finding that is not collapsed stays
+    where it was, and a collapsed group takes the slot of its first member.
+    Callers rely on this: ``merge_findings`` sorts by severity, and the inline
+    cap in ``vcs/_inline.partition_findings`` fills from the front of the list,
+    so reordering here would push a high-severity finding past the cap (#1000).
     """
     def _normalise(text: str) -> str:
         return _WHITESPACE.sub(" ", text.strip().lower())
@@ -158,36 +164,37 @@ def rollup_repeated_findings(
     #   together (a genuine in-diff High could otherwise be demoted to Low).
     # - Findings of the same rule but different severities are kept separate
     #   (important when mode='off' leaves all out_of_diff flags as False).
-    #
-    # Output ordering: passthrough (non-analyzer / no-file) findings come
-    # first, followed by analyzer groups in the order their first member was
-    # encountered.  Callers must not rely on relative ordering between
-    # passthrough and grouped findings.
-    groups: dict[tuple[str, str, str, str, bool], list[Finding]] = defaultdict(list)
-    passthrough: list[Finding] = []
+    GroupKey = tuple[str, str, str, str, bool]
+    groups: dict[GroupKey, list[Finding]] = defaultdict(list)
+    keys: list[GroupKey | None] = []
 
     for f in findings:
         if _is_analyzer(f) and f.file:
             src = f.source or (f.sources[0] if f.sources else "")
-            key = (f.file, src, _normalise(f.finding), f.severity, f.out_of_diff)
-            groups[key].append(f)
+            group_key: GroupKey = (f.file, src, _normalise(f.finding), f.severity, f.out_of_diff)
+            groups[group_key].append(f)
+            keys.append(group_key)
         else:
-            passthrough.append(f)
+            keys.append(None)
 
-    result: list[Finding] = list(passthrough)
-    for group_key, group in groups.items():
-        file = group_key[0]
-        if len(group) <= threshold:
-            result.extend(group)
+    result: list[Finding] = []
+    collapsed: set[GroupKey] = set()
+    for f, key in zip(findings, keys, strict=True):
+        if key is None or len(groups[key]) <= threshold:
+            result.append(f)
             continue
+        if key in collapsed:
+            continue
+        collapsed.add(key)
 
         # Collapse: keep the lowest-line representative, append occurrence summary.
-        rep = min(group, key=lambda f: (f.line or 0))
-        lines = sorted({f.line for f in group if f.line is not None})
+        group = groups[key]
+        rep = min(group, key=lambda g: (g.line or 0))
+        lines = sorted({g.line for g in group if g.line is not None})
         line_preview = ", ".join(str(n) for n in lines[:10])
         if len(lines) > 10:
             line_preview += f" ... (+{len(lines) - 10} more)"
-        summary = f" ({len(group)} occurrences in {file}, lines: {line_preview})"
+        summary = f" ({len(group)} occurrences in {key[0]}, lines: {line_preview})"
         result.append(rep.model_copy(update={"finding": rep.finding + summary}))
 
     return result
