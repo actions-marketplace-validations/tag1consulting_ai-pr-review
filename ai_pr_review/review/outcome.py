@@ -6,8 +6,9 @@ post-review-bitbucket.sh, and vcs/common.sh::classify_risk). Resolves #181
 and #192.
 
 Critical policy change from the removed bash engine: any failed
-finding-producing agent forces may_approve=False and incomplete=True. When this overrides an APPROVE-eligible
-severity (Medium/Low), the event downgrades to COMMENT. Critical/High remain
+finding-producing agent forces may_approve=False and incomplete=True. When this
+overrides an APPROVE-eligible severity (Medium/Low), the event downgrades to
+COMMENT. Critical/High remain
 REQUEST_CHANGES (they were never going to approve anyway).
 
 ``cap_review_outcome`` (#858) is a second, orthogonal stage applied *after*

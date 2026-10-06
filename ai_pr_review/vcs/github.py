@@ -1,4 +1,4 @@
-"""GitHub VCS provider — ports post-review.sh.
+"""GitHub VCS provider.
 
 Implements the VcsProvider protocol for GitHub REST + GraphQL. All stale
 cleanup is marker-gated (closes #183, #184); cleanup runs only after a

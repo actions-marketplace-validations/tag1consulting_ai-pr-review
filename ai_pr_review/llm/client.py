@@ -1,4 +1,4 @@
-"""Multi-provider LLM router — Python port of llm-call.sh dispatch section.
+"""Multi-provider LLM router.
 
 Usage:
     response = asyncio.run(call_llm(request))

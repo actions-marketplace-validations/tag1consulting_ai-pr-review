@@ -1,7 +1,7 @@
 """Declarative agent roster — single source of truth for all LLM review agents.
 
-Each AgentSpec encodes the properties previously scattered across review.sh,
-lib/agents.sh, and lib/diff.sh. Adding a new agent is one list entry here.
+Each AgentSpec encodes the properties of one agent. Adding a new agent is one
+list entry here.
 
 conditional_trigger values (consumed by dispatch/gates layers):
   None                  — always run (within tier/mode constraints)
@@ -81,7 +81,7 @@ class AgentSpec:
 
 
 # ---------------------------------------------------------------------------
-# Agent roster — extracted from review.sh + lib/diff.sh
+# Agent roster
 # ---------------------------------------------------------------------------
 # max_output_tokens uses the per-agent default (32768 for prose agents, 4096 for
 # issue-linker). The dispatch layer may apply a global override via

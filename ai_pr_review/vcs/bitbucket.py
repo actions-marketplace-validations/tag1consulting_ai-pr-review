@@ -1,4 +1,4 @@
-"""Bitbucket Cloud VCS provider — ports post-review-bitbucket.sh.
+"""Bitbucket Cloud VCS provider.
 
 Implements the VcsProvider protocol for Bitbucket Cloud REST 2.0. Marker-gated
 stale cleanup; cleanup runs after a successful post (2.FR-10).

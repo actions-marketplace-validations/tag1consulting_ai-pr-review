@@ -1486,7 +1486,7 @@ def resolve_thread_command(parent_comment_id: int, pr_number: int) -> None:
     `ai-pr-review slash` has already persisted the FeedbackEntry and posted a
     reply — this is a pure best-effort side effect. Always exits 0; every
     failure mode is logged as a `::warning::` rather than failing the step,
-    matching the earlier workflow job's "feedback already persisted, thread resolution
+    matching the workflow job's "feedback already persisted, thread resolution
     is best-effort" contract.
     """
     from ai_pr_review.slash.github_ops import resolve_only

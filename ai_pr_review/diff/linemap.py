@@ -1,6 +1,6 @@
 """Diff hunk → per-provider line positions.
 
-Ports parse_valid_lines and parse_diff_new_lines from vcs/common.sh.
+Added-line and new-file-line sets for each hunk, used to anchor inline comments.
 """
 
 from __future__ import annotations

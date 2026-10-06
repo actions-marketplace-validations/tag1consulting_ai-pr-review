@@ -1,4 +1,4 @@
-"""GitLab VCS provider — ports post-review-gitlab.sh.
+"""GitLab VCS provider.
 
 Implements the VcsProvider protocol for GitLab REST v4. Marker-gated stale
 cleanup (closes the GitLab half of #184); cleanup runs after a successful

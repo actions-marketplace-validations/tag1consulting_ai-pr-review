@@ -1,7 +1,7 @@
 """Body-formatting helpers shared across VCS providers.
 
-Ports severity_icon, classify_risk (display-only), format_source_tag,
-format_body_finding, truncate_body, build_agent_prompt from vcs/common.sh.
+Severity icon, display-only risk, source tag, body finding, body truncation,
+and agent-prompt helpers.
 The review-outcome classification proper lives in
 `ai_pr_review.review.outcome` (E2.S6); this module only formats for display.
 """
@@ -417,8 +417,8 @@ def truncate_body(body: str, limit: int = GITHUB_MAX_BODY_SIZE) -> str:
 def build_agent_prompt(findings: Sequence[Finding]) -> str:
     """Render the collapsible "Prompt for AI agents" block from findings.
 
-    Ports build_agent_prompt from vcs/common.sh. Placed at the end of the
-    review body so users can copy-paste into an AI tool to remediate.
+    Placed at the end of the review body so users can copy-paste into an AI
+    tool to remediate.
     """
     if not findings:
         return ""

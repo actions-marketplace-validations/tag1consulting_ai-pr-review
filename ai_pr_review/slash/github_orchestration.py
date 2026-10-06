@@ -304,9 +304,9 @@ def context_from_body_finding_id(bodies: Sequence[str], finding_id: int) -> Feed
     """Look up FeedbackEntry context from an F<n> token in an `issue_comment`
     (top-level PR comment) slash command.
 
-    Ports `feedback-command`'s "Extract finding context from review body"
-    earlier inline step, built on the same `classify_finding` used by
-    `dismiss_by_finding_id`. Uses a three-way severity split: BODY
+    Ports the "Extract finding context from review body" step that
+    `feedback-command` used to run inline, built on the same
+    `classify_finding` used by `dismiss_by_finding_id`. Uses a three-way severity split: BODY
     populates context, INLINE sets `notice` only (an advisory `::notice::`,
     never a warning), and UNKNOWN returns an all-empty context — silent,
     not even a notice.

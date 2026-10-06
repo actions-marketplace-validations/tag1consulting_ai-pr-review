@@ -23,7 +23,7 @@ Supported commands:
 Workflow-only commands (handled by slash-commands.yml, never parsed into a
 ``SlashCommand`` — see ``WORKFLOW_COMMANDS``):
   rescan                          — force a full-diff re-review
-  review-full                     — run all agents (full mode); ``full`` is an alias (``WORKFLOW_COMMAND_ALIASES``)
+  review-full                     — run all agents (full mode); alias: ``full``
   skip                            — add the ``skip-ai-review`` label
   help                            — post the command list
 

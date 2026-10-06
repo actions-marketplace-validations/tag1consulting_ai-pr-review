@@ -1,4 +1,4 @@
-"""File manifest construction — ports lib/diff.sh build_file_manifest.
+"""File manifest construction.
 
 Produces a typed ChangedFiles categorization and a text MANIFEST string
 in the format consumed by agents.
