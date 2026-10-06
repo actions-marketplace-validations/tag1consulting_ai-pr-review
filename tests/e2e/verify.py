@@ -332,6 +332,32 @@ def verify_posting_surfaces(
     return verdicts
 
 
+def _inline_comment_path(comment: dict[str, Any]) -> str:
+    """The file path a platform attaches to an inline comment as metadata.
+
+    GitHub puts it in `path`, a GitLab DiffNote in `position.new_path` (or
+    `old_path`), and a Bitbucket inline comment in `inline.path`. The finding
+    text in the comment body does not repeat it, so a check that reads only
+    the body can never see which file a comment is on. Returns "" when the
+    comment carries no path.
+    """
+    path = comment.get("path")
+    if isinstance(path, str) and path:
+        return path
+    position = comment.get("position")
+    if isinstance(position, dict):
+        for key in ("new_path", "old_path"):
+            value = position.get(key)
+            if isinstance(value, str) and value:
+                return value
+    inline = comment.get("inline")
+    if isinstance(inline, dict):
+        value = inline.get("path")
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
 def verify_analyzer_findings(
     evidence: RawEvidence, expected: list[ExpectedFinding], *, findings_floor: int,
     per_finding_surface: Literal["inline", "annotations"] = "inline",
@@ -342,6 +368,7 @@ def verify_analyzer_findings(
     """
     body = evidence.summary_body
     inline_bodies = [c.get("body", "") or c.get("content", {}).get("raw", "") for c in evidence.inline_comments]
+    inline_paths = [_inline_comment_path(c) for c in evidence.inline_comments]
     # Each inline_bodies entry is already scoped to one finding, so matching
     # path_substring/category within a single entry means both actually
     # describe the same finding. The summary body is NOT scoped this way --
@@ -350,7 +377,10 @@ def verify_analyzer_findings(
     # an unrelated category's finding satisfy the check by coincidence.
     #
     use_annotations = per_finding_surface == "annotations"
-    per_finding_haystacks = inline_bodies if (not use_annotations and inline_bodies) else []
+    per_finding_haystacks = (
+        list(zip(inline_paths, inline_bodies, strict=True))
+        if (not use_annotations and inline_bodies) else []
+    )
     # A finding that overflows the inline-comment cap (`Config.max_inline`,
     # 25 by default -- true on any fixture producing more findings than
     # that) is rendered as its own Markdown bullet (`ai_pr_review/vcs/
@@ -390,7 +420,17 @@ def verify_analyzer_findings(
                 body_bullets.append(_line)
 
     def _found(exp: ExpectedFinding) -> bool:
-        if any(exp.path_substring in h and exp.category in h for h in per_finding_haystacks):
+        # A comment's own path metadata is the authority on which file it is
+        # on, so when it has one, match the path substring against that and
+        # not against the body. That is the same split the annotation check
+        # below uses, and it stops a comment on a different file from passing
+        # just because its text mentions the expected path. A comment with no
+        # path metadata falls back to matching the body, as before. The
+        # category lives only in the body.
+        if any(
+            exp.category in body and (exp.path_substring in path if path else exp.path_substring in body)
+            for path, body in per_finding_haystacks
+        ):
             return True
         # Bitbucket's per-finding text lives in each Code Insights
         # annotation's `summary` field, with the file path in a separate
