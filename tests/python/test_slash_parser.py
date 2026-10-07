@@ -3,6 +3,8 @@
 
 from ai_pr_review.slash.parser import (
     KNOWN_COMMANDS,
+    WORKFLOW_COMMAND_ALIASES,
+    WORKFLOW_COMMANDS,
     ParseError,
     SlashCommand,
     _sanitize_reason,
@@ -503,3 +505,30 @@ def test_other_commands_do_not_peel_sha() -> None:
     assert cmd.finding_id == 3
     assert cmd.commit_sha == ""
     assert cmd.reason == "abc1234"
+
+
+# ---------------------------------------------------------------------------
+# Workflow-only command aliases (issue #995)
+# ---------------------------------------------------------------------------
+
+def test_workflow_command_aliases_point_at_real_commands() -> None:
+    assert WORKFLOW_COMMAND_ALIASES["full"] == "review-full"
+    for alias, target in WORKFLOW_COMMAND_ALIASES.items():
+        assert target in WORKFLOW_COMMANDS, (alias, target)
+
+
+def test_workflow_command_aliases_do_not_shadow_any_command_name() -> None:
+    # An alias that is also a command name would make the router's lookup
+    # ambiguous. The canonical sets must stay free of every alias spelling.
+    for alias in WORKFLOW_COMMAND_ALIASES:
+        assert alias not in WORKFLOW_COMMANDS
+        assert alias not in KNOWN_COMMANDS
+
+
+def test_parse_command_leaves_workflow_only_aliases_to_the_router() -> None:
+    # parse_command only knows the engine commands. `full` reaches the
+    # workflow through parse_command_gate_lines, which maps it, so here it is
+    # still an unknown token and never becomes a SlashCommand.
+    result = parse_command("/ai-pr-review full")
+    assert isinstance(result, ParseError)
+    assert result.unknown_token == "full"

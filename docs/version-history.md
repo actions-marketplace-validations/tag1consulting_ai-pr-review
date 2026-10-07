@@ -12,6 +12,7 @@ What changed in each release, newest first. Every release from v2.8.0 onward has
 
 | Version | Highlights |
 |---------|-----------|
+| [v2.20.0](version-history/v2.20.0) | `/ai-pr-review full` is an alias for `review-full` (#995), and a Critical finding that an agent and an analyzer both reported no longer falls past the inline comment cap (#1000). Stale bash-engine references are gone from comments and docs, and the trufflehog image is 3.98.1. |
 | [v2.19.0](version-history/v2.19.0) | New `AI_SUPPRESS_WALKTHROUGH` (`suppress-walkthrough`) leaves the per-file Walkthrough table out of the summary comment (useful on Bitbucket), and release PRs of this repository now get a full review of the whole code diff since the last release |
 | [v2.18.3](version-history/v2.18.3) | Bitbucket errors keep the granted scopes, the account lookup warning depends on the HTTP status (a 401 is no longer blamed on Account:Read), and the dismiss help line is hidden when the lookup failed |
 | [v2.18.2](version-history/v2.18.2) | Bitbucket comment fixes (one Summary heading, annotation note after the list, both finding counts), a visible warning when the Bitbucket account lookup fails (needs the Account:Read scope), dismiss help links, and a `policy.yml ignored` note |

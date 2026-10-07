@@ -308,6 +308,80 @@ def test_verify_analyzer_findings_summary_body_match_not_used_when_inline_presen
     assert not verdict.ok
 
 
+# An inline comment carries its file path as metadata, not in its body.
+
+def test_verify_analyzer_findings_inline_match_uses_github_path_metadata():
+    # The shape that failed the GitHub e2e leg on the v2.20.0 release PR: the
+    # semgrep finding is an inline comment whose body has the category word
+    # but never repeats the file path (GitHub keeps it in `path`).
+    evidence = RawEvidence(
+        summary_body="summary",
+        inline_comments=[
+            {
+                "path": "api/user.py",
+                "line": 31,
+                "body": "\U0001f534 **[High]** **[F20]** [ruff, semgrep] python.sqlalchemy.security.sqlalchemy-execute-raw-query",
+            },
+        ],
+    )
+    expected = [ExpectedFinding(path_substring=".py", category="security")]
+    assert verify_analyzer_findings(evidence, expected, findings_floor=1).ok
+
+
+def test_verify_analyzer_findings_inline_match_uses_gitlab_position_path():
+    evidence = RawEvidence(
+        summary_body="summary",
+        inline_comments=[
+            {"position": {"new_path": "api/user.py", "new_line": 31}, "body": "[semgrep] security: raw SQL"},
+        ],
+    )
+    expected = [ExpectedFinding(path_substring="api/user.py", category="security")]
+    assert verify_analyzer_findings(evidence, expected, findings_floor=1).ok
+
+
+def test_verify_analyzer_findings_inline_path_metadata_wins_over_body_text():
+    # A comment on a different file must not satisfy the expectation just
+    # because its text mentions the expected path.
+    evidence = RawEvidence(
+        summary_body="summary",
+        inline_comments=[
+            {"path": "web/auth.js", "body": "security: same pattern as api/user.py"},
+        ],
+    )
+    expected = [ExpectedFinding(path_substring="api/user.py", category="security")]
+    assert not verify_analyzer_findings(evidence, expected, findings_floor=1).ok
+
+
+def test_verify_analyzer_findings_inline_path_matches_but_category_does_not():
+    evidence = RawEvidence(
+        summary_body="summary",
+        inline_comments=[{"path": "api/user.py", "body": "style: rename this variable"}],
+    )
+    expected = [ExpectedFinding(path_substring="api/user.py", category="security")]
+    assert not verify_analyzer_findings(evidence, expected, findings_floor=1).ok
+
+
+def test_verify_analyzer_findings_inline_without_path_metadata_falls_back_to_body():
+    evidence = RawEvidence(
+        summary_body="summary",
+        inline_comments=[{"body": "finding in api/user.py category=security"}],
+    )
+    expected = [ExpectedFinding(path_substring="api/user.py", category="security")]
+    assert verify_analyzer_findings(evidence, expected, findings_floor=1).ok
+
+
+def test_inline_comment_path_reads_each_platform_shape():
+    from tests.e2e.verify import _inline_comment_path
+
+    assert _inline_comment_path({"path": "a.py"}) == "a.py"
+    assert _inline_comment_path({"position": {"new_path": "b.py", "old_path": "x.py"}}) == "b.py"
+    assert _inline_comment_path({"position": {"old_path": "c.py"}}) == "c.py"
+    assert _inline_comment_path({"inline": {"path": "d.py"}}) == "d.py"
+    # GitHub's deprecated integer `position` must not be mistaken for a dict.
+    assert _inline_comment_path({"position": 7, "body": "x"}) == ""
+    assert _inline_comment_path({}) == ""
+
+
 def test_verify_analyzer_findings_below_floor_fails():
     evidence = RawEvidence(summary_body="finding in docs/ category=documentation", inline_comments=[])
     expected = [ExpectedFinding(path_substring="docs/", category="documentation")]

@@ -339,7 +339,7 @@ def test_parse_command_gate_lines_unrecognized() -> None:
     ]
 
 
-def test_parse_command_gate_lines_bash_only_command() -> None:
+def test_parse_command_gate_lines_workflow_command() -> None:
     assert parse_command_gate_lines("/ai-pr-review rescan") == ["command=rescan", "valid=true"]
 
 

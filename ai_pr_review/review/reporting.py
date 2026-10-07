@@ -545,8 +545,8 @@ def write_step_summary(
 ) -> None:
     """Write a concise run summary to GITHUB_STEP_SUMMARY when available.
 
-    Mirrors the bash engine's Phase 4 step-summary block. Fail-soft: any
-    error is logged as WARNING and the review result is unaffected.
+    Fail-soft: any error is logged as WARNING and the review result is
+    unaffected.
 
     ``token_table_md`` should be the pre-built accordion string from
     ``build_token_table_accordion()``. The step summary always shows the

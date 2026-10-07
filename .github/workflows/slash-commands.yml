@@ -6,7 +6,7 @@
 #
 # Supported commands (post as a PR comment):
 #   /ai-pr-review rescan                      — force full diff, re-run review
-#   /ai-pr-review review-full                 — run in full mode (all agents)
+#   /ai-pr-review review-full (alias: full)   — run in full mode (all agents)
 #   /ai-pr-review skip                        — add skip-ai-review label
 #   /ai-pr-review dismiss                     — reply to a finding to mark it as false positive
 #   /ai-pr-review false-positive [reason]     — record finding as false positive (learning loop)
@@ -581,7 +581,7 @@ jobs:
             --body "$(cat <<'HELP'
           **AI PR Review commands:**
           - `/ai-pr-review rescan` — force full diff re-review
-          - `/ai-pr-review review-full` — run all agents (full mode)
+          - `/ai-pr-review review-full` — run all agents (full mode). `/ai-pr-review full` is an alias
           - `/ai-pr-review skip` — suppress the next automated review
           - `/ai-pr-review dismiss` — reply to an **inline** finding to mark it as a false positive (resolves that thread; dismisses the review when all threads are resolved; approves the PR if that clears the last active finding and you are OWNER/MEMBER)
           - `/ai-pr-review dismiss F<n>` — dismiss a **body-level** finding by its stable ID (e.g. `/ai-pr-review dismiss F1`); IDs appear in the **`### Findings not attached to specific lines`** section. IDs are stable across review cycles — `F1` always refers to the same finding on this PR.

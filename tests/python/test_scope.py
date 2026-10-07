@@ -249,6 +249,83 @@ def test_rollup_line_preview_truncated_for_large_sets() -> None:
     assert "more" in text
 
 
+def test_rollup_preserves_input_order() -> None:
+    """Non-collapsed findings stay in place, whatever their source (#1000)."""
+    agent_a = _agent("a.php", 1, text="agent a")
+    analyzer = _phpcs("b.php", 2, text="analyzer b")
+    agent_c = _agent("c.php", 3, text="agent c")
+    result = rollup_repeated_findings([agent_a, analyzer, agent_c], threshold=5)
+    assert [f.finding for f in result] == ["agent a", "analyzer b", "agent c"]
+
+
+def test_rollup_collapsed_group_takes_first_member_slot() -> None:
+    before = _agent("a.php", 1, text="before")
+    repeated = _make_repeated(10, file="b.php")
+    after = _agent("c.php", 3, text="after")
+    result = rollup_repeated_findings([before, *repeated, after], threshold=5)
+    assert [f.file for f in result] == ["a.php", "b.php", "c.php"]
+    assert "occurrences" in result[1].finding
+
+
+def test_rollup_non_contiguous_group_collapses_into_first_member_slot() -> None:
+    reps = _make_repeated(10, file="b.php")
+    agent_x = _agent("x.php", 1, text="agent x")
+    agent_y = _agent("y.php", 2, text="agent y")
+    # Group members are split by an agent finding and followed by another.
+    result = rollup_repeated_findings(
+        [reps[0], agent_x, *reps[1:], agent_y], threshold=5,
+    )
+    assert [f.file for f in result] == ["b.php", "x.php", "y.php"]
+    assert "10 occurrences" in result[0].finding
+
+
+def test_rollup_interleaved_collapsed_groups_ordered_by_first_member() -> None:
+    a = _make_repeated(10, file="a.php", text="Rule A")
+    b = _make_repeated(10, file="b.php", text="Rule B")
+    agent = _agent("m.php", 1, text="agent between")
+    interleaved = [a[0], b[0], agent, *[f for pair in zip(a[1:], b[1:], strict=True) for f in pair]]
+    result = rollup_repeated_findings(interleaved, threshold=5)
+    assert [f.file for f in result] == ["a.php", "b.php", "m.php"]
+
+
+def test_rollup_uncollapsed_group_members_keep_their_own_slots() -> None:
+    p1, p2, p3 = _make_repeated(3, file="b.php")
+    agent_x = _agent("x.php", 1, text="agent x")
+    agent_y = _agent("y.php", 2, text="agent y")
+    result = rollup_repeated_findings([p1, agent_x, p2, agent_y, p3], threshold=5)
+    assert [(f.file, f.line) for f in result] == [
+        ("b.php", 1), ("x.php", 1), ("b.php", 2), ("y.php", 2), ("b.php", 3),
+    ]
+
+
+def test_corroborated_critical_keeps_inline_slot_after_rollup() -> None:
+    """Issue #1000: an agent+analyzer Critical must not fall behind agent-only
+    findings and past the inline cap."""
+    from ai_pr_review.findings.merge import merge_findings
+    from ai_pr_review.vcs._inline import partition_findings
+
+    agent_only = [
+        Finding(
+            severity="Medium", confidence=90, finding=f"agent finding {i}",
+            source="code-reviewer", sources=["code-reviewer"],
+            file=f"src/file{i}.py", line=i + 1, category="bug",
+        )
+        for i in range(30)
+    ]
+    critical = Finding(
+        severity="Critical", confidence=95, finding="SQL injection",
+        source="semgrep", sources=["code-reviewer", "semgrep"],
+        file="api/user.py", line=5, category="injection",
+    )
+    merged = merge_findings([*agent_only, critical])
+    rolled = rollup_repeated_findings(merged)
+    assert rolled[0].file == "api/user.py"
+
+    eligible = {(f.file, f.line) for f in rolled}
+    inline, _body = partition_findings(rolled, eligible_new=eligible, max_inline=25)
+    assert any(f.file == "api/user.py" for f in inline)
+
+
 # Config validation
 
 

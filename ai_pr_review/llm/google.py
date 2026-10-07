@@ -2,7 +2,7 @@
 
 Thinking tokens: Gemini 2.5 models emit thoughtsTokenCount billed at output
 rate. We add them to output_tokens so the cost formula stays consistent, and
-emit a THINKING: stderr line matching llm-call.sh behavior.
+emit a THINKING: stderr line.
 """
 
 from __future__ import annotations

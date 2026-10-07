@@ -87,7 +87,7 @@ Once `pr-review.yml` is merged to your default branch, post these commands in an
 | Command | Effect |
 |---|---|
 | `/ai-pr-review rescan` | Force full-diff re-review of the PR |
-| `/ai-pr-review review-full` | Run all agents (full mode) |
+| `/ai-pr-review review-full` | Run all agents (full mode). `/ai-pr-review full` is an alias |
 | `/ai-pr-review skip` | Add `skip-ai-review` label to suppress the next review |
 | `/ai-pr-review help` | Post the command list as a reply |
 | `/ai-pr-review dismiss` | Reply to an inline review comment to mark that thread a false positive (dispatched via `pull_request_review_comment`, not `issue_comment`) |

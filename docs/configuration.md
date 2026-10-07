@@ -195,7 +195,7 @@ is actually needed.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AI_PR_REVIEW_COMPUTE_OUTPUT` | `''` | **Legacy.** Originally the Python compute phase wrote its payload here and the bash post-review scripts read it back. Since v0.9.0, the Python engine handles posting end-to-end and this handoff is no longer used by the action. Setting this still works for tooling that consumes the JSON directly. See [Compute Output Schema](https://github.com/tag1consulting/ai-pr-review/blob/main/docs/compute-output-schema.md) (maintainer-only reference, not on the Pages site). |
+| `AI_PR_REVIEW_COMPUTE_OUTPUT` | `''` | **Legacy.** Originally the Python compute phase wrote its payload here and a separate posting step read it back. Since v0.9.0, the Python engine handles posting end-to-end and this handoff is no longer used by the action. Setting this still works for tooling that consumes the JSON directly. See [Compute Output Schema](https://github.com/tag1consulting/ai-pr-review/blob/main/docs/compute-output-schema.md) (maintainer-only reference, not on the Pages site). |
 
 ### Opt-in capabilities
 

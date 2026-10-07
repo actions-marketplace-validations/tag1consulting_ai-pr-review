@@ -336,7 +336,7 @@ Tests live in `tests/python/` and use pytest. Key test files:
 | `test_runtime.py` | Assembly boundary: `build_review_runtime()`, `SkipPlan`, SARIF routing, provider factory seam |
 | `test_orchestrate.py` | `run_review()` happy path, skip path, summary/findings failure, token table |
 | `test_cli.py` | `run_compute()`, `compute` command, `parse_changed_files_payload()`, `AI_PR_REVIEW_SCRIPT_DIR` resolution |
-| `test_cli_parse_command.py` | `parse-command` subcommand (#821): the unified Python job-router replacing three bash `case` statements |
+| `test_cli_parse_command.py` | `parse-command` subcommand (#821): the unified Python job-router replacing three inline `case` statements in the workflow |
 | `test_cli_slash.py`, `test_cli_dismiss.py`, `test_cli_dismiss_inline.py`, `test_cli_feedback_context.py` | `slash` subcommand and its dismiss/dismiss-inline/feedback-context CLI paths |
 | `test_cli_policy_gate.py` | `_post_policy_gate_check_run` — the `ai-pr-review/policy-gate` merge-gate check-run (see [docs/policy.md](policy.md)) |
 | `test_config.py` | `ReviewConfig.from_env()`, `resolve_models()`, unknown-var detection, deprecation warnings (`_DEPRECATED_NOOP_AI_VARS`, `_DEPRECATED_NOOP_ENV_VARS`, `_DEPRECATED_ANALYZER_NAMES`) |

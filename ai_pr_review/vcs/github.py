@@ -1,4 +1,4 @@
-"""GitHub VCS provider — ports post-review.sh.
+"""GitHub VCS provider.
 
 Implements the VcsProvider protocol for GitHub REST + GraphQL. All stale
 cleanup is marker-gated (closes #183, #184); cleanup runs only after a
@@ -499,8 +499,8 @@ class GitHubProvider:
         comments = self._list_summary_comments()
         if not comments:
             return None
-        # The bash engine takes `last` (most recent); GitHub returns in created order
-        # ascending by default, so the last entry is the most recent.
+        # GitHub returns comments in created order ascending by default, so the
+        # last entry is the most recent.
         latest = comments[-1]
         return extract_summary_sha(
             latest.get("body") or "",
@@ -2120,7 +2120,7 @@ class GitHubProvider:
         both need to notify on the existing thread without creating a new
         top-level review object. No Python code posted a reply before this;
         the prior implementation of this interaction lived in
-        `.github/workflows/slash-commands.yml` (bash), unrelated to this
+        `.github/workflows/slash-commands.yml` (shell), unrelated to this
         provider's own write paths.
         """
         resp = self.client.request(

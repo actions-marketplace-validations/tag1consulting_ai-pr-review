@@ -7,7 +7,7 @@ This page describes the JSON payload that the Python engine writes when
 
 > **Status (v0.9.0):** The Python engine now handles compute, dispatch,
 > *and* posting end-to-end. The action itself no longer needs
-> the compute → bash handoff this file once enabled. `AI_PR_REVIEW_COMPUTE_OUTPUT`
+> the separate compute handoff this file once enabled. `AI_PR_REVIEW_COMPUTE_OUTPUT`
 > is retained for external tooling that wants to consume the compute
 > payload independently — set the env var to a path and the Python engine
 > will write the JSON shape below.

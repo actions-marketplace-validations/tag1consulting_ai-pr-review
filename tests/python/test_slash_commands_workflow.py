@@ -28,7 +28,7 @@ from typing import Any
 
 import yaml
 
-from ai_pr_review.slash.parser import BASH_ONLY_COMMANDS
+from ai_pr_review.slash.parser import WORKFLOW_COMMAND_ALIASES, WORKFLOW_COMMANDS
 
 _WORKFLOW_PATH = (
     Path(__file__).resolve().parents[2] / ".github" / "workflows" / "slash-commands.yml"
@@ -36,10 +36,10 @@ _WORKFLOW_PATH = (
 
 # Commands handle-command's job-routing parse recognizes that ai_pr_review.
 # slash.parser's KNOWN_COMMANDS never sees at all -- rescan/review-full/skip/
-# help are a bash-only vocabulary this job fully owns. Issue #821: imported
-# from parser.py (single source of truth) rather than duplicated here, same
-# as KNOWN_COMMANDS above.
-_BASH_ONLY_COMMANDS = BASH_ONLY_COMMANDS
+# help are routed by this workflow alone and never become a SlashCommand.
+# Issue #821: imported from parser.py (single source of truth) rather than
+# duplicated here, same as KNOWN_COMMANDS above.
+_WORKFLOW_COMMANDS = WORKFLOW_COMMANDS
 
 # `dismiss`/canonical `false-positive` are the same family everywhere in this
 # repo (ai_pr_review/slash/parser.py's SlashCommand.canonical_name); normalize
@@ -220,3 +220,32 @@ def test_verdict_family_is_the_expected_four_commands() -> None:
     # includes `fixed` (cli.py's dismiss command still replies for `fixed`,
     # just never persists it -- see DismissResult.feedback_eligible).
     assert _dismiss_body_finding_families(jobs) == {"false-positive", "wont-fix", "fixed"}
+
+
+# Workflow-only command aliases (issue #995)
+
+
+def test_handle_command_job_gate_is_prefix_only() -> None:
+    """`handle-command` must gate on the `/ai-pr-review` prefix and nothing
+    narrower. A startsWith chain over command names (as `dismiss-finding` has)
+    would drop an alias before the router ever mapped it."""
+    if_text = _workflow_jobs()["handle-command"]["if"]
+    prefixes = re.findall(r"startsWith\(inputs\.comment-body, '([^']*)'\)", if_text)
+    assert prefixes == ["/ai-pr-review"], prefixes
+
+
+def test_workflow_routes_on_canonical_names_not_aliases() -> None:
+    """The router prints the canonical name for an alias, so no condition may
+    compare `command` against an alias spelling, and each alias target must be
+    routed somewhere."""
+    text = _WORKFLOW_PATH.read_text()
+    for alias, target in WORKFLOW_COMMAND_ALIASES.items():
+        assert not re.search(rf"outputs\.command\s*==\s*'{re.escape(alias)}'", text), alias
+        assert f"steps.cmd.outputs.command == '{target}'" in text, target
+
+
+def test_help_text_lists_every_command_alias() -> None:
+    step = _step(_workflow_jobs()["handle-command"], "Reply with help text")
+    for alias, target in WORKFLOW_COMMAND_ALIASES.items():
+        assert f"`/ai-pr-review {target}`" in step["run"], target
+        assert f"`/ai-pr-review {alias}`" in step["run"], alias
