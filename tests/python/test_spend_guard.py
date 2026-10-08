@@ -437,3 +437,45 @@ def test_preflight_worst_case_prices_the_long_prompt_tier_like_the_reservation(t
     assert worst > base  # the long tier is dearer
     # A Sonnet 5.5 call has no tier, so the two agree.
     assert g.estimate_units(SONNET, **kwargs) == g.estimate_units(SONNET, worst_case=True, **kwargs)
+
+
+@pytest.mark.anyio
+async def test_a_settle_failure_keeps_the_response_and_the_reservation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    guard = _guard(tmp_path)
+
+    async def real(_r: LLMRequest) -> LLMResponse:
+        return _resp()
+
+    def boom(*_a: Any, **_k: Any) -> int:
+        raise sg.LedgerError("lock timeout")
+
+    monkeypatch.setattr(guard, "settle", boom)
+    out = await guard.call(real, _req())
+    assert out.text == "ok"
+    err = capsys.readouterr().err
+    assert "succeeded" in err and "lock timeout" in err and "reservation as spent" in err
+    assert _ledger(tmp_path)["spent_units"] > 0
+
+
+def test_a_broken_audit_log_warns_once_and_never_blocks(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    guard = _guard(tmp_path)
+    guard._history_path = tmp_path / "no-such-dir" / "history.jsonl"
+    guard.reserve(_req())
+    guard.reserve(_req())
+    err = capsys.readouterr().err
+    assert err.count("cannot write the audit log") == 1
+
+
+def test_settle_over_a_cap_warns_and_the_next_reserve_refuses(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    guard = _guard(tmp_path, run=0.05)
+    reservation = guard.reserve(_req(max_tokens=100))
+    guard.settle(reservation, _resp(input_tokens=2_000_000, output_tokens=0))
+    assert "cap is now exceeded" in capsys.readouterr().err
+    with pytest.raises(sg.SpendCapExceeded):
+        guard.reserve(_req(max_tokens=100))
