@@ -16,12 +16,26 @@ from pathlib import Path
 
 
 @dataclass
+class LongPromptRates:
+    """Rates that replace a model's base rates when one call's prompt is
+    longer than ``threshold`` tokens. Only Claude Haiku 5.5 is priced this
+    way today (up to 100,000 prompt tokens, then higher rates)."""
+
+    threshold: int
+    input_rate: int
+    output_rate: int
+    cache_write_rate: int = 0
+    cache_read_rate: int = 0
+
+
+@dataclass
 class ModelRates:
     display_name: str
     input_rate: int
     output_rate: int
     cache_write_rate: int = 0
     cache_read_rate: int = 0
+    long_prompt: LongPromptRates | None = None
 
 
 @dataclass
@@ -83,20 +97,61 @@ def _as_int(v: object, default: int = 0) -> int:
         return default
 
 
+def _parse_long_prompt(entry: dict[str, object]) -> tuple[LongPromptRates | None, bool]:
+    """Read an entry's optional ``long_prompt`` object.
+
+    Returns ``(rates, ok)``. A missing key is ``(None, True)``. A key that is
+    present but not a usable tier (not an object, no positive threshold, or no
+    positive input and output rate) is ``(None, False)``: the caller must then
+    treat the whole entry as unpriced, because silently using the base rates
+    would under-count a model that is dearer for long prompts.
+    """
+    raw = entry.get("long_prompt")
+    if raw is None:
+        return None, True
+    if not isinstance(raw, dict):
+        return None, False
+    rates = LongPromptRates(
+        threshold=_as_int(raw.get("threshold", 0)),
+        input_rate=_as_int(raw.get("input_rate", 0)),
+        output_rate=_as_int(raw.get("output_rate", 0)),
+        cache_write_rate=_as_int(raw.get("cache_write_rate", 0)),
+        cache_read_rate=_as_int(raw.get("cache_read_rate", 0)),
+    )
+    if rates.threshold <= 0 or rates.input_rate <= 0 or rates.output_rate <= 0:
+        return None, False
+    return rates, True
+
+
 def model_pricing(model_id: str, pricing_data: list[dict[str, object]]) -> ModelRates:
-    """Return ModelRates for model_id, defaulting to zero rates if unknown."""
+    """Return ModelRates for model_id, defaulting to zero rates if unknown.
+
+    A matching entry whose ``long_prompt`` tier is malformed also returns zero
+    rates (unpriced), with a warning on stderr, so ``token_cost_units`` returns
+    ``None`` and callers that fail closed on ``None`` stop.
+    """
     for entry in pricing_data:
         patterns = entry.get("patterns", [])
         if not isinstance(patterns, list):
             continue
         for pat in patterns:
             if re.search(str(pat), model_id):
+                display_name = str(entry.get("display_name", model_id))
+                long_prompt, ok = _parse_long_prompt(entry)
+                if not ok:
+                    print(
+                        f"WARNING: model_pricing: '{display_name}' has a malformed "
+                        "long_prompt tier in the pricing file; treating it as unpriced.",
+                        file=sys.stderr,
+                    )
+                    return ModelRates(display_name=display_name, input_rate=0, output_rate=0)
                 return ModelRates(
-                    display_name=str(entry.get("display_name", model_id)),
+                    display_name=display_name,
                     input_rate=_as_int(entry.get("input_rate", 0)),
                     output_rate=_as_int(entry.get("output_rate", 0)),
                     cache_write_rate=_as_int(entry.get("cache_write_rate", 0)),
                     cache_read_rate=_as_int(entry.get("cache_read_rate", 0)),
+                    long_prompt=long_prompt,
                 )
     return ModelRates(display_name=model_id, input_rate=0, output_rate=0)
 
@@ -124,14 +179,38 @@ def token_cost_units(
     ``review.cost_ceiling``'s pre-flight estimators call this rather than
     each re-deriving the same formula, which had drifted into two
     independently-maintained copies.
+
+    The token counts must describe ONE model call. A model with a
+    ``long_prompt`` tier (Claude Haiku 5.5) is dearer when a call's prompt is
+    longer than the tier threshold, and the prompt is counted as
+    input + cache-write + cache-read tokens of that call. Each token-log row for
+    an Anthropic model is one call (``agents/dispatch.py`` builds it from a
+    single response, and ``llm/anthropic.py`` makes one request per call), so
+    ``_row_cost`` meets this. Summing several calls first would push a total
+    over the threshold that no single call reached. Anthropic's pricing page
+    says "prompts over 100,000 tokens" and does not say whether cached tokens
+    count, so cached tokens are included here (the higher, safer estimate).
     """
     if rates.input_rate == 0 and rates.output_rate == 0:
         return None
+    input_rate = rates.input_rate
+    output_rate = rates.output_rate
+    cache_write_rate = rates.cache_write_rate
+    cache_read_rate = rates.cache_read_rate
+    long_prompt = rates.long_prompt
+    if (
+        long_prompt is not None
+        and input_tokens + cache_creation_tokens + cache_read_tokens > long_prompt.threshold
+    ):
+        input_rate = long_prompt.input_rate
+        output_rate = long_prompt.output_rate
+        cache_write_rate = long_prompt.cache_write_rate
+        cache_read_rate = long_prompt.cache_read_rate
     return (
-        input_tokens * rates.input_rate
-        + output_tokens * rates.output_rate
-        + cache_creation_tokens * rates.cache_write_rate
-        + cache_read_tokens * rates.cache_read_rate
+        input_tokens * input_rate
+        + output_tokens * output_rate
+        + cache_creation_tokens * cache_write_rate
+        + cache_read_tokens * cache_read_rate
     ) // 100_000_000
 
 
