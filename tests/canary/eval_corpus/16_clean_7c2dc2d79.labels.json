@@ -1,0 +1,8 @@
+{
+  "clean": true,
+  "source": "harvested",
+  "evidence": "weak",
+  "verified_by": "history: no later fix commit blames commit 7c2dc2d79 (checked 2026-10-08)",
+  "bugs": [],
+  "accepted_extra": []
+}

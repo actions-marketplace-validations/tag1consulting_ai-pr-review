@@ -1,0 +1,16 @@
+{
+  "clean": false,
+  "source": "known-fix",
+  "evidence": "strong",
+  "verified_by": "history: introduced by 2900454c8, fixed by 6296e6ae3",
+  "bugs": [
+    {
+      "file": "ai_pr_review/feedback/inject.py",
+      "line_start": 148,
+      "line_end": 148,
+      "category": "edge-case",
+      "summary": "substring containment between paths means b.py matches lib/ab.py, so a hard exclusion filter keeps or drops the wrong file"
+    }
+  ],
+  "accepted_extra": []
+}

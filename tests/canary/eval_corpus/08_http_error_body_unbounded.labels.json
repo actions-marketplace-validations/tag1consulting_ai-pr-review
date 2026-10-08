@@ -1,0 +1,16 @@
+{
+  "clean": false,
+  "source": "known-fix",
+  "evidence": "strong",
+  "verified_by": "history: introduced by 051a08715, fixed by cee1a53ae",
+  "bugs": [
+    {
+      "file": "ai_pr_review/vcs/_body.py",
+      "line_start": 84,
+      "line_end": 93,
+      "category": "edge-case",
+      "summary": "only ValueError is caught when parsing the error body, so a deeply nested body raises RecursionError, and the scope lists in the message are not length-limited"
+    }
+  ],
+  "accepted_extra": []
+}

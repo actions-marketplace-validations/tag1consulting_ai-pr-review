@@ -1,0 +1,23 @@
+{
+  "clean": false,
+  "source": "seeded",
+  "evidence": "strong",
+  "verified_by": "by construction (tests/canary/corpus/README.md)",
+  "bugs": [
+    {
+      "file": "src/webhooks/parse.ts",
+      "line_start": 2,
+      "line_end": 3,
+      "category": "edge-case",
+      "summary": "payload is cast to any and data.user.id is read with no guard, so a malformed payload throws"
+    },
+    {
+      "file": "src/webhooks/parse.ts",
+      "line_start": 7,
+      "line_end": 7,
+      "category": "lint",
+      "summary": "loose equality count == 0 coerces types and treats a string zero like a number"
+    }
+  ],
+  "accepted_extra": []
+}

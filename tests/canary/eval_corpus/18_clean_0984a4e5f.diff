@@ -1,0 +1,59 @@
+diff --git a/ai_pr_review/cli.py b/ai_pr_review/cli.py
+index 6c5725d..e6fd247 100644
+--- a/ai_pr_review/cli.py
++++ b/ai_pr_review/cli.py
+@@ -106,6 +106,7 @@ def review() -> None:
+     Exit codes:
+       0 — review posted successfully (or skipped cleanly)
+       1 — configuration / posting error
++      2 — review posted but outcome is REQUEST_CHANGES or COMMENT (when AI_FAIL_ON_FINDINGS=true)
+     """
+     try:
+         config = ReviewConfig.from_env()
+@@ -267,7 +268,11 @@ async def _run_review_async(config: ReviewConfig) -> int:
+         await _emit_telemetry(result, rc, runtime.feedback_entries_count, runtime.sarif_elapsed_s,
+                               is_incremental=runtime.is_incremental)
+ 
+-    return 0 if result.ok else 1
++    if not result.ok:
++        return 1
++    if rc.fail_on_findings and result.outcome.event in ("REQUEST_CHANGES", "COMMENT"):
++        return 2
++    return 0
+ 
+ 
+ async def _emit_telemetry(
+diff --git a/ai_pr_review/config.py b/ai_pr_review/config.py
+index 409bcdd..9664aa9 100644
+--- a/ai_pr_review/config.py
++++ b/ai_pr_review/config.py
+@@ -70,6 +70,8 @@ _KNOWN_AI_VARS: frozenset[str] = frozenset(
+         "AI_PROFILE_MAX_TOKENS",
+         # --- Judge pass ---
+         "AI_JUDGE_PASS",
++        # --- Fail-on-findings ---
++        "AI_FAIL_ON_FINDINGS",
+         # --- Structured logging ---
+         "AI_LOG_FORMAT",
+         "AI_LOG_LEVEL",
+@@ -220,6 +222,12 @@ class ReviewConfig(BaseModel):
+     # LLM call per review. Set AI_JUDGE_PASS=false to disable.
+     enable_judge_pass: bool = True
+ 
++    # --- Fail-on-findings ---
++    # When true, exit code 2 is returned if the review outcome is REQUEST_CHANGES
++    # or COMMENT (incomplete/unknown risk). Designed for CI gates (e.g. Renovate
++    # auto-merge blocked until the bot approves). Off by default.
++    fail_on_findings: bool = False
++
+     # --- Slash commands + feedback loop ---
+     enable_feedback_loop: bool = False
+     feedback_branch: str = "ai-pr-review-bot"
+@@ -476,6 +484,7 @@ class ReviewConfig(BaseModel):
+             analyzer_diff_scope=os.environ.get("AI_ANALYZER_DIFF_SCOPE", "cap"),
+             profile_max_tokens=_int("AI_PROFILE_MAX_TOKENS", 4096),
+             enable_judge_pass=_bool("AI_JUDGE_PASS", True),
++            fail_on_findings=_bool("AI_FAIL_ON_FINDINGS"),
+             enable_feedback_loop=_bool("AI_FEEDBACK_LOOP"),
+             feedback_branch=os.environ.get("AI_FEEDBACK_BRANCH", "ai-pr-review-bot"),
+             feedback_max_tokens=_int("AI_FEEDBACK_MAX_TOKENS", 2048),
