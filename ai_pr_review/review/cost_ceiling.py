@@ -4,10 +4,10 @@ Before any agent dispatches, estimate the review's total LLM spend from:
 
   - each agent's expected *input* tokens, estimated from the diff text plus
     the shared PR-context block and language-profile text via
-    ``context.budget.estimate_tokens``'s conservative 4-chars-per-token
-    heuristic (the same approximation the context-enrichment budget already
-    uses elsewhere in this codebase) -- **not** a real provider tokenizer
-    count;
+    ``estimate_billed_tokens`` below, a characters-per-token heuristic
+    calibrated on real token counts (``tests/data/token_ratio_measurements.json``)
+    -- **not** a real provider tokenizer count. The agent's own system prompt
+    is not part of the estimate;
   - each agent's *output* tokens, assumed at the effective per-agent output
     cap (``AI_MAX_TOKENS_PER_AGENT`` when set, else the agent's own
     ``AgentSpec.max_output_tokens``) -- an upper bound, not a prediction of
@@ -85,6 +85,48 @@ from ai_pr_review.pricing import format_cost, model_pricing, token_cost_units
 
 logger = logging.getLogger(__name__)
 
+# Characters per token for cost estimates, and a safety margin on top.
+#
+# Measured on 2026-10-08 with Anthropic's token counting endpoint over 56 files
+# this tool sends to a model (corpus diffs, agent prompts, language profiles,
+# source files, docs), net of the fixed request overhead. Raw data:
+# tests/data/token_ratio_measurements.json (script:
+# tests/canary/measure_token_ratio.py). Claude Haiku 5.5, Sonnet 5.5, and
+# Opus 5.5 gave identical counts. Characters per token:
+#
+#   class     min    median   max
+#   diff      1.75   2.42     2.83
+#   prompt    2.58   2.83     2.93
+#   profile   2.36   2.62     2.78
+#   code      2.41   2.75     2.92
+#   prose     2.43   2.45     2.52
+#
+# Diffs are the densest text (most symbols, short words) and are also the main
+# input of every agent. The previous estimate, 4 characters per token with a 10%
+# margin (3.64 effective), counted 48% to 78% of the real tokens on a diff, and
+# 67% to 81% on the other classes. 1.8
+# characters per token with a 10% margin (1.64 effective) is under the worst
+# measured sample (1.75), so it does not under-count any measured file, and it
+# over-counts a typical diff by about 1.5x. The older Claude Sonnet 4.6
+# tokenizer gives fewer tokens (2.25 at the minimum), so this over-counts there.
+# OpenAI and Google tokenizers were not measured. An over-estimate is the safe
+# direction for a ceiling check. ``tests/python/test_token_estimate_calibration.py``
+# fails if a measured file is ever under-counted.
+_BILLED_CHARS_PER_TOKEN = 1.8
+_BILLED_MARGIN = 1.1
+
+
+def estimate_billed_tokens(text: str) -> int:
+    """Estimate the input tokens a provider will bill for *text*.
+
+    Use this for cost. ``context.budget.estimate_tokens`` with its defaults is
+    for the context-enrichment budget and counts only 48% to 81% of the real
+    tokens on this tool's text. See the constants above for the measurement.
+    """
+    return estimate_tokens(
+        text, chars_per_token=_BILLED_CHARS_PER_TOKEN, margin=_BILLED_MARGIN
+    )
+
 
 class CostCeilingExceeded(RuntimeError):
     """Raised when the pre-flight cost estimate exceeds the configured ceiling.
@@ -158,9 +200,9 @@ def estimate_review_cost(
 
     See the module docstring for what this approximates and does not.
     """
-    diff_tokens = estimate_tokens(diff_text)
-    shared_context_tokens = estimate_tokens(shared_context_text)
-    profile_tokens = estimate_tokens(language_profile_text)
+    diff_tokens = estimate_billed_tokens(diff_text)
+    shared_context_tokens = estimate_billed_tokens(shared_context_text)
+    profile_tokens = estimate_billed_tokens(language_profile_text)
 
     per_agent: list[AgentCostEstimate] = []
     total_units = 0
@@ -248,7 +290,7 @@ def estimate_preflight_agent_cost(
     ``review/preflight.py`` (their ``AgentSpec.max_output_tokens`` in
     ``agents/roster.py`` is not what's actually applied to their calls).
     """
-    input_tokens = estimate_tokens(diff_text)
+    input_tokens = estimate_billed_tokens(diff_text)
     rates = model_pricing(model, pricing_data)
     raw_cost = token_cost_units(
         rates, input_tokens=input_tokens, output_tokens=output_tokens
