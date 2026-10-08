@@ -137,6 +137,7 @@ class SpendGuard:
             pricing_data = load_pricing(str(REPO_ROOT / "config" / "model-pricing.json"))
         self._pricing = pricing_data
         self._run_spent_units = 0
+        self._history_warned = False
         self._lock = threading.Lock()  # guards _run_spent_units in this process
         self.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._ledger_path = self.state_dir / "ledger.json"
@@ -220,9 +221,18 @@ class SpendGuard:
             "units": units,
             "note": note,
         }
-        # The audit log never blocks a call.
-        with contextlib.suppress(OSError), open(self._history_path, "a") as handle:
-            handle.write(json.dumps(record) + "\n")
+        # The audit log never blocks a call, but a broken log is reported once.
+        try:
+            with open(self._history_path, "a") as handle:
+                handle.write(json.dumps(record) + "\n")
+        except OSError as exc:
+            if not self._history_warned:
+                self._history_warned = True
+                print(
+                    f"WARNING: spend guard: cannot write the audit log {self._history_path}: "
+                    f"{exc}. Spend is still counted in the ledger, but the history is incomplete.",
+                    file=sys.stderr,
+                )
 
     # -- cost ------------------------------------------------------------
 
@@ -330,7 +340,19 @@ class SpendGuard:
         with self._lock, self._ledger() as ledger:
             ledger["spent_units"] = max(int(ledger["spent_units"]) + delta, 0)  # type: ignore[call-overload]
             self._run_spent_units = max(self._run_spent_units + delta, 0)
+            campaign_over = int(ledger["spent_units"]) > self.campaign_cap_units  # type: ignore[call-overload]
         self._log("settle", reservation.model_id, actual)
+        if actual > reservation.units and (
+            campaign_over or self._run_spent_units > self.run_cap_units
+        ):
+            # The real cost passed the reservation and a cap. The call is already billed.
+            # Say so now. The next reserve() refuses, so the overshoot cannot grow.
+            print(
+                f"WARNING: spend guard: the real cost {usd(actual)} passed its "
+                f"{usd(reservation.units)} reservation and a spend cap is now exceeded. "
+                "The run stops at the next call.",
+                file=sys.stderr,
+            )
         return actual
 
     def abandon(self, reservation: Reservation, reason: str = "") -> None:
@@ -344,7 +366,18 @@ class SpendGuard:
         except BaseException as exc:
             self.abandon(reservation, type(exc).__name__)
             raise
-        self.settle(reservation, response)
+        try:
+            self.settle(reservation, response)
+        except SpendGuardError as exc:
+            # The call succeeded and was billed. Keep the response, keep the
+            # reservation as spent (over-counting is safe), and say what happened.
+            print(
+                f"WARNING: spend guard: the call to {reservation.model_id} succeeded but "
+                f"settling its cost failed ({exc}). Keeping the {usd(reservation.units)} "
+                "reservation as spent.",
+                file=sys.stderr,
+            )
+            self._log("settle-failed", reservation.model_id, reservation.units, str(exc))
         return response
 
     def wrap(self, llm_call: LLMCall) -> LLMCall:
