@@ -16,7 +16,7 @@ v2.7.0 and earlier, back to v0.7.0. See [Version History](../version-history) fo
 
 ## v2.6.1
 
-**Bitbucket's PR-comment renderer HTML-escapes raw `<!-- -->` comments instead of hiding them like GitHub and GitLab do**, so the `ai-pr-review-summary`/`ai-pr-review-inline`/`ai-pr-review-skip` ownership and watermark markers rendered as visible literal text at the top or bottom of every Bitbucket review comment — with the summary marker's embedded commit SHA autolinked to a commit page. Bitbucket now emits these markers as a `[//]: # (...)` reference-link definition instead, which all three providers render as nothing. Marker parsing recognizes both forms, so already-posted Bitbucket comments using the old format are unaffected. GitHub and GitLab are unchanged — they already rendered the HTML-comment form correctly.
+**Bitbucket's PR-comment renderer HTML-escapes raw `<!-- -->` comments instead of hiding them like GitHub and GitLab do**, so the `ai-pr-review-summary`/`ai-pr-review-inline`/`ai-pr-review-skip` ownership and watermark markers rendered as visible literal text at the top or bottom of every Bitbucket review comment, with the summary marker's embedded commit SHA autolinked to a commit page. Bitbucket now emits these markers as a `[//]: # (...)` reference-link definition instead, which all three providers render as nothing. Marker parsing recognizes both forms, so already-posted Bitbucket comments using the old format are unaffected. GitHub and GitLab are unchanged: they already rendered the HTML-comment form correctly.
 
 ## v2.6.0
 
@@ -24,7 +24,7 @@ v2.7.0 and earlier, back to v0.7.0. See [Version History](../version-history) fo
 
 ## v2.5.0
 
-**`.github/ai-pr-review/policy.yml` lets a repo route review depth — which agents/analyzers run, quick vs. full mode — by changed-file path, base-branch glob, or head-branch glob, instead of hand-rolling a GitHub Actions expression per repo.** A route's `require` field can also turn policy routing into a manual-trigger merge gate: an automatic push runs a cheaper tier, but a required `ai-pr-review/policy-gate` check blocks merge until a qualifying run (automatic or `/ai-pr-review review-full`) lands. GitHub only for now. Six bugs were found and fixed in this release, four of them caught live while dogfooding the feature on this repo, including a deny-all policy silently permitting every agent/analyzer instead of suppressing them, and a `neutral` merge-gate conclusion that never actually blocked a merge. (#663, #664, #665, #669, #670, #671, #672, #674, #675, #676, #677, #678, #679, #683, #684, #686, #687, #688)
+**`.github/ai-pr-review/policy.yml` lets a repo route review depth (which agents/analyzers run, quick vs. full mode) by changed-file path, base-branch glob, or head-branch glob, instead of hand-rolling a GitHub Actions expression per repo.** A route's `require` field can also turn policy routing into a manual-trigger merge gate: an automatic push runs a cheaper tier, but a required `ai-pr-review/policy-gate` check blocks merge until a qualifying run (automatic or `/ai-pr-review review-full`) lands. GitHub only for now. Six bugs were found and fixed in this release, four of them caught live while dogfooding the feature on this repo, including a deny-all policy silently permitting every agent/analyzer instead of suppressing them, and a `neutral` merge-gate conclusion that never actually blocked a merge. (#663, #664, #665, #669, #670, #671, #672, #674, #675, #676, #677, #678, #679, #683, #684, #686, #687, #688)
 
 ## v2.4.9
 
@@ -38,7 +38,7 @@ The three inert `GOVERNANCE:`-block paragraphs added in #576 (`security-reviewer
 
 ## v2.4.8
 
-**A GitHub review that failed to post as `APPROVE` no longer silently posts as a plain `COMMENT` while still claiming the PR was approved (#651).** Diagnosed on a real PR: GitHub's `reviewDecision` stayed `REVIEW_REQUIRED` while the review comment itself read "AI Review: Approved." The review body is rendered for the intended outcome before posting, and when GitHub rejected the `APPROVE` request, the retry-as-`COMMENT` fallback left that misleading text uncorrected — with no signal anywhere (PR comment, workflow log, or step summary) that the approval never actually landed. The body now gets a visible correction before the `COMMENT` retry, the underlying HTTP failure is logged and raised as a Checks-tab annotation, and the workflow log / step summary now report the event actually posted instead of only the pre-post decision.
+**A GitHub review that failed to post as `APPROVE` no longer silently posts as a plain `COMMENT` while still claiming the PR was approved (#651).** Diagnosed on a real PR: GitHub's `reviewDecision` stayed `REVIEW_REQUIRED` while the review comment itself read "AI Review: Approved." The review body is rendered for the intended outcome before posting, and when GitHub rejected the `APPROVE` request, the retry-as-`COMMENT` fallback left that misleading text uncorrected, with no signal anywhere (PR comment, workflow log, or step summary) that the approval never actually landed. The body now gets a visible correction before the `COMMENT` retry, the underlying HTTP failure is logged and raised as a Checks-tab annotation, and the workflow log / step summary now report the event actually posted instead of only the pre-post decision.
 
 ## v2.4.7
 
@@ -46,17 +46,17 @@ The three inert `GOVERNANCE:`-block paragraphs added in #576 (`security-reviewer
 
 **The live-model-canary's auto-filed GitHub issue no longer mislabels an API quota/billing block as a Sonnet 5 model-behavior regression (#636).** The issue body's explanation text was hardcoded to describe every canary failure as the same class of failure as #592, regardless of what actually happened. The canary now classifies each failure as quota/billing or a genuine model-behavior anomaly and composes the issue body accordingly.
 
-**`/ai-pr-review dismiss|false-positive|wont-fix F<n>` no longer fails to locate a finding on an APPROVEd review (#645).** The review-body renderer opens the body-findings bullet section under one of three headings depending on outcome, and the bullet scanner only recognized two of them — missing the APPROVE-path `### Findings (informational)` heading used when a review has only Medium/Low findings. Both scanners now share one recognized-heading constant so they can't drift apart again.
+**`/ai-pr-review dismiss|false-positive|wont-fix F<n>` no longer fails to locate a finding on an APPROVEd review (#645).** The review-body renderer opens the body-findings bullet section under one of three headings depending on outcome, and the bullet scanner only recognized two of them, missing the APPROVE-path `### Findings (informational)` heading used when a review has only Medium/Low findings. Both scanners now share one recognized-heading constant so they can't drift apart again.
 
 ## v2.4.6
 
 **Fixed the review body's "Overall Risk" headline silently contradicting the review's own decision.** A judge-downranked High-severity finding could vanish from the headline ("Overall Risk: None") on GitHub and Bitbucket even though the review still correctly requested changes and posted the finding inline. Fixed with a shared headline calculation both providers now use, plus two related fixes: a prompt-injection path that let an untrusted agent hide its own finding was closed, and a Bitbucket-specific bug that could blank the entire findings section when every finding happened to be out-of-diff was fixed.
 
-`REVIEW_TARGET=standalone` now emits a runtime deprecation warning — its original behavior (posting findings to an issue) was never carried over to the Python engine, and the value now only affects merge-commit filtering. `github_repository` is now stripped of whitespace like every other environment-sourced value. A VCS API error during `/ai-pr-review dismiss`/`false-positive`/`wont-fix` now surfaces as a Checks-tab annotation instead of only a run-log warning, so a failed dismiss is no longer indistinguishable from a successful one at a glance.
+`REVIEW_TARGET=standalone` now emits a runtime deprecation warning: its original behavior (posting findings to an issue) was never carried over to the Python engine, and the value now only affects merge-commit filtering. `github_repository` is now stripped of whitespace like every other environment-sourced value. A VCS API error during `/ai-pr-review dismiss`/`false-positive`/`wont-fix` now surfaces as a Checks-tab annotation instead of only a run-log warning, so a failed dismiss is no longer indistinguishable from a successful one at a glance.
 
 ## v2.4.5
 
-**Fixed the merge-commit filter (`ignore_merge_commits`) silently failing on every incremental review, and unbounded fallback diffs.** No production container configures a git identity, so the filter's cherry-pick step failed on the first commit of every incremental review, then silently fell back to an unfiltered diff unbounded by watermark age — on one PR with a stale watermark this produced a 21,013-line diff that tripped the size skip with no explanation. Fixed to work regardless of container identity, to fall back to a bounded diff on any filter failure, and to surface the failure reason in skip messages instead of swallowing it.
+**Fixed the merge-commit filter (`ignore_merge_commits`) silently failing on every incremental review, and unbounded fallback diffs.** No production container configures a git identity, so the filter's cherry-pick step failed on the first commit of every incremental review, then silently fell back to an unfiltered diff unbounded by watermark age: on one PR with a stale watermark this produced a 21,013-line diff that tripped the size skip with no explanation. Fixed to work regardless of container identity, to fall back to a bounded diff on any filter failure, and to surface the failure reason in skip messages instead of swallowing it.
 
 Release container builds now build `linux/amd64` and `linux/arm64` natively on separate runners and merge them into a single manifest, instead of emulating arm64 via QEMU. Intended to cut release wall-clock time; no change to image contents or published tags.
 
@@ -66,7 +66,7 @@ Release container builds now build `linux/amd64` and `linux/arm64` natively on s
 
 ## v2.4.3
 
-**`code-reviewer` no longer flags the `pr-number`/`issue-number` split-input pattern as broken.** Workflows that route both `issue_comment` and `pull_request_review_comment` slash-command events through one reusable workflow correctly fall back to a sibling `issue-number` input when `github.event.pull_request` doesn't exist on the `issue_comment` payload — this is the intended pattern, not a bug. Fixed with a prompt-level constraint plus a deterministic suppression backstop, the same approach used for knowledge-cutoff false positives.
+**`code-reviewer` no longer flags the `pr-number`/`issue-number` split-input pattern as broken.** Workflows that route both `issue_comment` and `pull_request_review_comment` slash-command events through one reusable workflow correctly fall back to a sibling `issue-number` input when `github.event.pull_request` doesn't exist on the `issue_comment` payload: this is the intended pattern, not a bug. Fixed with a prompt-level constraint plus a deterministic suppression backstop, the same approach used for knowledge-cutoff false positives.
 
 **Two self-action-pin suppression rules that never actually fired are now fixed.** One's file match didn't cover the documented consumer filename; the other's text pattern could never match a semgrep-sourced finding, since semgrep findings are built from the rule ID and generic message only. The underlying supply-chain rule still fires normally for genuine third-party actions.
 
@@ -90,7 +90,7 @@ Release container builds now build `linux/amd64` and `linux/arm64` natively on s
 
 **Default Anthropic and Bedrock-proxy standard model bumped to Sonnet 5.** `claude-sonnet-5` / `us.anthropic.claude-sonnet-5` supersedes Sonnet 4.6 as the default standard-tier model; premium (Opus) defaults are unchanged. Pricing and temperature handling were updated alongside the default.
 
-**Category-aware dedup, and category mapping for all 13 static analyzers.** The `category` taxonomy introduced in v2.3.1 now drives `findings/merge.py`'s clustering logic — a finding can't join a cluster that already has a conflicting real category, and corroboration between an LLM agent and a static analyzer now requires category agreement. All 13 native static analyzers (shellcheck, semgrep, trufflehog, ruff, golangci-lint, hadolint, checkov, phpcs, eslint, phpstan, kube-linter, tflint, cve-check) now map their own findings onto the same taxonomy instead of reporting `"other"` unconditionally.
+**Category-aware dedup, and category mapping for all 13 static analyzers.** The `category` taxonomy introduced in v2.3.1 now drives `findings/merge.py`'s clustering logic: a finding can't join a cluster that already has a conflicting real category, and corroboration between an LLM agent and a static analyzer now requires category agreement. All 13 native static analyzers (shellcheck, semgrep, trufflehog, ruff, golangci-lint, hadolint, checkov, phpcs, eslint, phpstan, kube-linter, tflint, cve-check) now map their own findings onto the same taxonomy instead of reporting `"other"` unconditionally.
 
 **Semgrep's category-mapping heuristic hardened against false positives.** Check-ID hint fragments are now matched as delimiter-bounded whole tokens instead of bare substrings, fixing mis-tagged findings like `python.lang.sqlite-config` (previously mis-tagged `injection` via the `"sqli"` fragment matching inside `"sqlite"`).
 
@@ -120,7 +120,7 @@ Release container builds now build `linux/amd64` and `linux/arm64` natively on s
 
 **`AI_FAIL_ON_FINDINGS` CI gate** (`fail-on-findings` action input): exit code 2 when the review outcome is `REQUEST_CHANGES` or `COMMENT`, so branch protection can block merge until the bot approves.
 
-**`AI_CONTEXT_MAX_QUERIES` raised from 50 to 200** — the previous hardcoded cap on ripgrep symbol-lookup queries was shared across all agents in a run and was often exhausted before every agent got context enrichment.
+**`AI_CONTEXT_MAX_QUERIES` raised from 50 to 200**: the previous hardcoded cap on ripgrep symbol-lookup queries was shared across all agents in a run and was often exhausted before every agent got context enrichment.
 
 **Unknown `AI_*` variables now warn instead of aborting the review**, so pinning an older container image against a newer action no longer breaks on a variable the image doesn't recognize.
 
@@ -134,7 +134,7 @@ Release container builds now build `linux/amd64` and `linux/arm64` natively on s
 
 ## v2.1.0
 
-**LLM judge pass (Phase 2.75, `AI_JUDGE_PASS=true`).** After findings are extracted, merged, suppressed, and scoped, a single cheap-model call scores each candidate finding and may `downrank` weak single-source results: confidence is lowered by 15 points and the finding is routed to the review body instead of as an inline comment. Downrank changes *placement* only — it never changes severity, and a downranked Critical or High still triggers `REQUEST_CHANGES` and is counted in the review's "Overall Risk" headline, exactly as if it had stayed inline. (An earlier version of this doc, and the code prior to #622, conflated downranking with the unrelated `apply_diff_scope`/`out_of_diff` mechanism that *does* cap out-of-diff analyzer findings to Low — the two are now distinct fields, `demoted_to_body` vs. `out_of_diff`.) `keep` verdicts leave findings unchanged. Corroborated findings (static-analyzer + LLM-agent agreement on the same file/line) are exempt from downranking regardless of the judge's verdict. The judge is always fail-soft — any error returns findings unchanged. Enabled by default; set `AI_JUDGE_PASS=false` to restore pre-v2.1 behavior.
+**LLM judge pass (Phase 2.75, `AI_JUDGE_PASS=true`).** After findings are extracted, merged, suppressed, and scoped, a single cheap-model call scores each candidate finding and may `downrank` weak single-source results: confidence is lowered by 15 points and the finding is routed to the review body instead of as an inline comment. Downrank changes *placement* only: it never changes severity, and a downranked Critical or High still triggers `REQUEST_CHANGES` and is counted in the review's "Overall Risk" headline, exactly as if it had stayed inline. (An earlier version of this doc, and the code prior to #622, conflated downranking with the unrelated `apply_diff_scope`/`out_of_diff` mechanism that *does* cap out-of-diff analyzer findings to Low: the two are now distinct fields, `demoted_to_body` vs. `out_of_diff`.) `keep` verdicts leave findings unchanged. Corroborated findings (static-analyzer + LLM-agent agreement on the same file/line) are exempt from downranking regardless of the judge's verdict. The judge is always fail-soft: any error returns findings unchanged. Enabled by default; set `AI_JUDGE_PASS=false` to restore pre-v2.1 behavior.
 
 **Per-agent language-profile section routing (`AI_PROFILE_MAX_TOKENS=4096`).** Each agent now receives only the language-profile sections relevant to its review focus, packed under a configurable token budget: `security-reviewer` gets only security sections; `silent-failure-hunter` and `edge-case-hunter` get bug/edge-case sections; broad agents (`code-reviewer`, `architecture-reviewer`, `adversarial-general`) get all sections. The token table gains a "Language profiles" supplementary row showing total profile tokens injected.
 
@@ -196,13 +196,13 @@ No action input changes are required.
 
 ## v1.2.0
 
-**Diff-scope severity cap for native analyzer findings (PR #444, closes #359).** Native static analyzers (phpcs, phpstan, ruff, golangci-lint, semgrep, etc.) lint entire files — a single changed line in a large legacy file can produce hundreds of diagnostics on unchanged code. The new `analyzer-diff-scope` input (or `AI_ANALYZER_DIFF_SCOPE` env var) controls how those out-of-diff findings are handled. `cap` (default): downgrade out-of-diff analyzer findings to Low severity and collapse them into a `<details>` section in the review body — they remain visible but never trigger `REQUEST_CHANGES`. `drop`: remove them entirely. `off`: pass through unchanged (full-file linting behavior, pre-v1.2 default). LLM-agent findings are never affected regardless of this setting. See [Configuration → analyzer-diff-scope](../configuration#static-analyzer-options).
+**Diff-scope severity cap for native analyzer findings (PR #444, closes #359).** Native static analyzers (phpcs, phpstan, ruff, golangci-lint, semgrep, etc.) lint entire files: a single changed line in a large legacy file can produce hundreds of diagnostics on unchanged code. The new `analyzer-diff-scope` input (or `AI_ANALYZER_DIFF_SCOPE` env var) controls how those out-of-diff findings are handled. `cap` (default): downgrade out-of-diff analyzer findings to Low severity and collapse them into a `<details>` section in the review body: they remain visible but never trigger `REQUEST_CHANGES`. `drop`: remove them entirely. `off`: pass through unchanged (full-file linting behavior, pre-v1.2 default). LLM-agent findings are never affected regardless of this setting. See [Configuration → analyzer-diff-scope](../configuration#static-analyzer-options).
 
-**`exclude-patterns-mode` validation (PR #443, closes #442).** The `exclude-patterns-mode` input (and `AI_EXCLUDE_PATTERNS_MODE` env var) now validates that the value is `append` or `replace` — any other value raises an error at startup rather than silently falling through to append behavior. Values are case-insensitive (`APPEND`, `Replace`, etc. are all accepted and normalized to lowercase).
+**`exclude-patterns-mode` validation (PR #443, closes #442).** The `exclude-patterns-mode` input (and `AI_EXCLUDE_PATTERNS_MODE` env var) now validates that the value is `append` or `replace`: any other value raises an error at startup rather than silently falling through to append behavior. Values are case-insensitive (`APPEND`, `Replace`, etc. are all accepted and normalized to lowercase).
 
 ## v1.1.0
 
-**Config-driven diff exclude patterns (PR #438, closes #436).** The diff exclude list is now configurable. Use the new `exclude-patterns` action input (or `AI_EXCLUDE_PATTERNS` env var) to supply comma-separated git pathspec glob patterns that are excluded from the diff before the LLM reads them — reducing token costs directly on repos with large generated, documentation-only, or vendored trees. The `":!"` pathspec prefix is added automatically. Default mode is `append`, which adds user patterns after the built-in lockfile/`vendor/`/`node_modules/` excludes; set `exclude-patterns-mode: replace` (or `AI_EXCLUDE_PATTERNS_MODE=replace`) to drop the built-ins entirely. See [Configuration → Diff exclude patterns](../configuration#diff-exclude-patterns).
+**Config-driven diff exclude patterns (PR #438, closes #436).** The diff exclude list is now configurable. Use the new `exclude-patterns` action input (or `AI_EXCLUDE_PATTERNS` env var) to supply comma-separated git pathspec glob patterns that are excluded from the diff before the LLM reads them, reducing token costs directly on repos with large generated, documentation-only, or vendored trees. The `":!"` pathspec prefix is added automatically. Default mode is `append`, which adds user patterns after the built-in lockfile/`vendor/`/`node_modules/` excludes; set `exclude-patterns-mode: replace` (or `AI_EXCLUDE_PATTERNS_MODE=replace`) to drop the built-ins entirely. See [Configuration → Diff exclude patterns](../configuration#diff-exclude-patterns).
 
 **Line-range suppression rules (PR #439, closes #437).** Suppression rules now support `match.line_start` and `match.line_end` fields, scoping a rule to a specific line window within a file. This resolves the granularity gap for repos that vendor upstream code and apply patches: a rule can now target only the upstream line window (e.g. lines 1–200) so that findings on the user's own patched lines (201+) are never silenced. Multi-line findings match on overlap. A finding with no line number is never matched by a range rule. See [Suppression rules](../suppression).
 
@@ -218,7 +218,7 @@ No action input changes are required.
 
 ## v1.0.1
 
-**Agent prompt parity with claude-comprehensive-review (PRs #414–#419).** Six agents — `pr-summarizer`, `edge-case-hunter`, `blind-hunter`, `adversarial-general`, `architecture-reviewer`, and `security-reviewer` — received targeted prompt improvements ported from the companion CCR plugin: tighter output structure, improved finding signal-to-noise, and better alignment with the shared language profiles.
+**Agent prompt parity with claude-comprehensive-review (PRs #414–#419).** Six agents (`pr-summarizer`, `edge-case-hunter`, `blind-hunter`, `adversarial-general`, `architecture-reviewer`, and `security-reviewer`) received targeted prompt improvements ported from the companion CCR plugin: tighter output structure, improved finding signal-to-noise, and better alignment with the shared language profiles.
 
 **Analyzer correctness fixes (PRs #420–#423).** The semgrep analyzer gains stdin support and ruleset strategy documentation. The cve-check analyzer fixes range version truncation and `requirements.txt` pinning. shellcheck and trufflehog receive correctness improvements. All analyzers accept stdin input via the analyzer bridge.
 
@@ -234,7 +234,7 @@ No action input changes are required.
 
 **Semgrep registry rulesets are no longer baked into the image (PR #376).** The Semgrep-maintained `p/ci` and `p/security-audit` rulesets are licensed under the Semgrep Rules License v1.0 (use-restricted; not freely redistributable inside this tool's image), so they are no longer pre-downloaded. `run-semgrep.sh` falls back to `--config=auto`, which fetches rules at runtime instead. **Behavior note:** semgrep scans now require network access at review time and re-incur the ~20–40s ruleset fetch that the bake step previously eliminated. Consumers who need an offline/deterministic ruleset can point `SEMGREP_RULES_DIR` at their own permissively-licensed rule bundle. Semgrep finding output is otherwise unchanged.
 
-**`/ai-pr-review dismiss F<n>` now clears `CHANGES_REQUESTED` for inline findings too (PR #378).** Previously, dismissing an *inline* finding by its `F<n>` ID from a top-level PR comment stored the verdict but left the blocking review in place — it only told the user to go reply on the thread, and even manually resolving the thread did not clear the review (manual resolution does not re-trigger the workflow). Now the command locates the inline thread by its `[F<n>]` token, resolves it, and dismisses the `CHANGES_REQUESTED` review once every bot inline thread is resolved — the same outcome as replying directly on the thread. Thread ownership is gated by the `<!-- ai-pr-review-inline -->` marker rather than author login, which fixes a GraphQL/REST bot-login mismatch (`github-actions` vs `github-actions[bot]`) that would otherwise prevent the thread from being found.
+**`/ai-pr-review dismiss F<n>` now clears `CHANGES_REQUESTED` for inline findings too (PR #378).** Previously, dismissing an *inline* finding by its `F<n>` ID from a top-level PR comment stored the verdict but left the blocking review in place: it only told the user to go reply on the thread, and even manually resolving the thread did not clear the review (manual resolution does not re-trigger the workflow). Now the command locates the inline thread by its `[F<n>]` token, resolves it, and dismisses the `CHANGES_REQUESTED` review once every bot inline thread is resolved, the same outcome as replying directly on the thread. Thread ownership is gated by the `<!-- ai-pr-review-inline -->` marker rather than author login, which fixes a GraphQL/REST bot-login mismatch (`github-actions` vs `github-actions[bot]`) that would otherwise prevent the thread from being found.
 
 ## v0.12.1
 
@@ -244,12 +244,12 @@ No action input changes are required.
 
 ## v0.12.0
 
-**Stable per-PR `F<n>` IDs on all findings, with `/ai-pr-review dismiss F<n>` from top-level PR comments (PRs #365, #366, #367, closes #364).** AI review findings now carry stable, monotonically increasing IDs — `**[F1]**`, `**[F2]**`, etc. — across both inline review-thread comments and body-level findings (those in the `### Findings not attached to specific lines` section). IDs are PR-wide: the same finding keeps its ID across review cycles, new findings get the next unused ID, and dismissed gaps (e.g. no `F2`) signal historical dismissals.
+**Stable per-PR `F<n>` IDs on all findings, with `/ai-pr-review dismiss F<n>` from top-level PR comments (PRs #365, #366, #367, closes #364).** AI review findings now carry stable, monotonically increasing IDs (`**[F1]**`, `**[F2]**`, etc.) across both inline review-thread comments and body-level findings (those in the `### Findings not attached to specific lines` section). IDs are PR-wide: the same finding keeps its ID across review cycles, new findings get the next unused ID, and dismissed gaps (e.g. no `F2`) signal historical dismissals.
 
 Before this release, `/ai-pr-review dismiss` silently did nothing when posted as a top-level PR comment, and body-level findings had no dismissal path at all. Now:
 
 - `/ai-pr-review dismiss F1` posted as a **top-level PR comment** dismisses a specific body-level finding, records a `FeedbackEntry`, and auto-dismisses the `CHANGES_REQUESTED` review when all inline threads are also resolved.
-- `/ai-pr-review dismiss` (no ID) replies with the list of active `F<n>` IDs instead of silently doing nothing — fixing the exact user-visible bug.
+- `/ai-pr-review dismiss` (no ID) replies with the list of active `F<n>` IDs instead of silently doing nothing, fixing the exact user-visible bug.
 - Full parity: `false-positive F<n>`, `wont-fix F<n>`, `explain F<n>`, and `revise F<n>` all accept the same body-finding ID syntax from top-level comments.
 
 The ID map is embedded as a hidden HTML comment in every review body (`<!-- ai-pr-review-id-map: {...} -->`) for stateless reconstruction without a side-channel database. A backward-compatible fallback parses rendered bullet text for pre-marker reviews.
@@ -260,9 +260,9 @@ The ID map is embedded as a hidden HTML comment in every review body (`<!-- ai-p
 
 **Governance posture for LLM reviewers (PR #350).** A new shared prompt partial `prompts/_governance.md` is injected into all seven finding-producing agents (`code-reviewer`, `security-reviewer`, `architecture-reviewer`, `edge-case-hunter`, `blind-hunter`, `adversarial-general`, `silent-failure-hunter`). It encodes three principles: an Asimov-style severity lens (calibrate severity by harm to users/systems, not abstract "code smell"), don't-reinvent-the-wheel detection (flag duplication of existing utilities visible in the diff or manifest), and verify-before-naming with secret redaction (any flag/function/path named in a finding must appear in the supplied diff or manifest, and any secret-shaped value visible in the diff must be replaced with `<secret-redacted>` in finding and remediation text). Always-on, no env var toggle. Composition order is `base → _governance → _knowledge-cutoff → _trailer-findings → (suggestion-addendum)` to preserve prompt-cache locality.
 
-**Telemetry schema v2 (PR #345, issues #242, #243).** The telemetry event payload bumps from schema version `"1"` to `"2"` with six additive fields: `provider`, `model_standard`, `model_premium`, `review_mode`, `is_incremental`, and `failed_agent_latency_ms`. The `outcome` enum gains `"skipped"` and `"dry_run"` values for runs where no agent dispatch occurs. All additions are forward-compatible — v1 consumers ignoring unknown keys continue to work; consumers switching on `telemetry_schema_version` should add v2 to their accepted list.
+**Telemetry schema v2 (PR #345, issues #242, #243).** The telemetry event payload bumps from schema version `"1"` to `"2"` with six additive fields: `provider`, `model_standard`, `model_premium`, `review_mode`, `is_incremental`, and `failed_agent_latency_ms`. The `outcome` enum gains `"skipped"` and `"dry_run"` values for runs where no agent dispatch occurs. All additions are forward-compatible: v1 consumers ignoring unknown keys continue to work; consumers switching on `telemetry_schema_version` should add v2 to their accepted list.
 
-**GitHub Actions step summary (PR #345).** When `GITHUB_STEP_SUMMARY` is set (always true on GitHub-hosted runners), the Python engine now writes a concise markdown block to the step summary showing review mode, file/language counts, agent roster, findings tally by severity, failed agents, and the token cost table. Same layout as the PR comment, so operators see key metrics at a glance without opening the PR. Fail-soft — write errors are logged at WARNING and the review continues.
+**GitHub Actions step summary (PR #345).** When `GITHUB_STEP_SUMMARY` is set (always true on GitHub-hosted runners), the Python engine now writes a concise markdown block to the step summary showing review mode, file/language counts, agent roster, findings tally by severity, failed agents, and the token cost table. Same layout as the PR comment, so operators see key metrics at a glance without opening the PR. Fail-soft: write errors are logged at WARNING and the review continues.
 
 **Effective `max_tokens_per_agent` in cost table (PR #345).** When a user overrides the roster default via `AI_MAX_TOKENS_PER_AGENT`, the token cost table's Output column now displays the effective cap (e.g. `80 / 4096`) instead of the roster default (`80 / 16384`). Makes per-run token budgeting transparent.
 
@@ -279,7 +279,7 @@ The ID map is embedded as a hidden HTML comment in every review body (`<!-- ai-p
 **`dismiss_stale_reviews` hardened against silent failures (PR #342, issues #329, #325).** A parse failure on the GitHub reviews API response now emits a warning and returns early instead of silently continuing with an empty review ID list. An empty `newest_review_id` is similarly guarded.
 
 **Observability and correctness improvements (PR #341, issues #327–#333).**
-- `ImportError` is no longer swallowed in the feedback loop and analyzer bridge fail-soft blocks — genuine import failures now propagate.
+- `ImportError` is no longer swallowed in the feedback loop and analyzer bridge fail-soft blocks: genuine import failures now propagate.
 - `_safe_int` is no longer called twice per review ID in `github.py`'s bot review collection loop.
 - SARIF load failure log now includes the file paths being loaded.
 - Token table renderer failure log now includes `head_sha` for context.
@@ -290,11 +290,11 @@ The ID map is embedded as a hidden HTML comment in every review body (`<!-- ai-p
 
 ## v0.10.0
 
-**Language profiles — 19 languages (PR #322).** Agent prompts now include per-language context blocks for every language detected in the diff. Profiles cover Python, Go, TypeScript, JavaScript, PHP, Shell, Ruby, Rust, Java, C++, Kotlin, Swift, C#, Scala, SQL, Lua, Perl, YAML, and Terraform. Each profile supplies language-specific patterns, common pitfalls, and framework conventions so agents apply targeted checks rather than generic heuristics. Profiles are loaded from `language-profiles/` and injected into the `DispatchContext`.
+**Language profiles: 19 languages (PR #322).** Agent prompts now include per-language context blocks for every language detected in the diff. Profiles cover Python, Go, TypeScript, JavaScript, PHP, Shell, Ruby, Rust, Java, C++, Kotlin, Swift, C#, Scala, SQL, Lua, Perl, YAML, and Terraform. Each profile supplies language-specific patterns, common pitfalls, and framework conventions so agents apply targeted checks rather than generic heuristics. Profiles are loaded from `language-profiles/` and injected into the `DispatchContext`.
 
 **Premature review dismissal fix (PR #324, issue #323).** Fixed a race condition where a stale `CHANGES_REQUESTED` review could be auto-dismissed before the current run finished posting its own review. The action now tracks the total bot-review count and always protects the newest bot review from dismissal. A `_safe_int()` helper guards against non-integer review IDs.
 
-**Python engine runtime assembly refactor (PR #321).** `_run_review_async()` in `cli.py` has been reduced from ~230 lines to ~65 lines. A new `build_review_runtime()` factory in `ai_pr_review/review/runtime.py` assembles the fully prepared `ReviewRuntime` dataclass — provider construction, diff computation, feedback loading, agent gate evaluation, static analyzer runs, SARIF ingestion, suppression rule loading, and `OrchestrationConfig` construction — and hands it to `orchestrate.run_review()`, which reads no environment and constructs no dependencies. This makes the Python engine's runtime flow reusable for non-CLI entry points (server harness, batch runner). SARIF findings now flow through `OrchestrationConfig.extra_findings` rather than being loaded inline in the orchestrator.
+**Python engine runtime assembly refactor (PR #321).** `_run_review_async()` in `cli.py` has been reduced from ~230 lines to ~65 lines. A new `build_review_runtime()` factory in `ai_pr_review/review/runtime.py` assembles the fully prepared `ReviewRuntime` dataclass (provider construction, diff computation, feedback loading, agent gate evaluation, static analyzer runs, SARIF ingestion, suppression rule loading, and `OrchestrationConfig` construction) and hands it to `orchestrate.run_review()`, which reads no environment and constructs no dependencies. This makes the Python engine's runtime flow reusable for non-CLI entry points (server harness, batch runner). SARIF findings now flow through `OrchestrationConfig.extra_findings` rather than being loaded inline in the orchestrator.
 
 ## v0.9.4
 
@@ -316,7 +316,7 @@ The ID map is embedded as a hidden HTML comment in every review body (`<!-- ai-p
 
 **Token cost table updated on every run (PR #304).** The collapsible token cost table now updates on every incremental run: the first-run PR summary text is preserved and only the `<details>` accordion is replaced with fresh token data from the latest run.
 
-**Token table upsert bug fixes.** Fixed two bugs introduced in v0.9.1: (1) `_upsert_token_table` was a synchronous call inside an async function, blocking the anyio event loop during the GitHub API call; converted to `async def` with `anyio.to_thread.run_sync`. (2) HTTP-level errors from the VCS provider (403, 404, 422) were silently swallowed because providers return `SummaryResult(ok=False)` rather than raising — the return value is now checked and logged as a warning.
+**Token table upsert bug fixes.** Fixed two bugs introduced in v0.9.1: (1) `_upsert_token_table` was a synchronous call inside an async function, blocking the anyio event loop during the GitHub API call; converted to `async def` with `anyio.to_thread.run_sync`. (2) HTTP-level errors from the VCS provider (403, 404, 422) were silently swallowed because providers return `SummaryResult(ok=False)` rather than raising. The return value is now checked and logged as a warning.
 
 **`phpstan_level` default set to 3.** `PHPSTAN_LEVEL` now defaults to `3`.
 
@@ -326,7 +326,7 @@ The ID map is embedded as a hidden HTML comment in every review body (`<!-- ai-p
 
 **PR summarizer and token cost table wired (PR #299).** On first-run reviews, the action automatically posts a PR summary (walkthrough table, type classification, effort estimate) and a collapsible token cost table. Both are fail-soft: if either fails, review continues and a notice is posted rather than silently omitting output. The token cost table is updated on every run (see v0.9.2 above); the PR summary is posted on first run only.
 
-**Structured logging (PR #300).** Set `AI_LOG_FORMAT=json` to get machine-readable log output with `timestamp`, `level`, `logger`, `correlation_id`, and `message` fields — suitable for Datadog, CloudWatch, and similar aggregators. Correlation IDs flow through every log record for the duration of a review run. Three-layer secret masking prevents credentials from appearing in log output. See [Configuration → Structured logging](../configuration#structured-logging) for the full env-var reference.
+**Structured logging (PR #300).** Set `AI_LOG_FORMAT=json` to get machine-readable log output with `timestamp`, `level`, `logger`, `correlation_id`, and `message` fields, suitable for Datadog, CloudWatch, and similar aggregators. Correlation IDs flow through every log record for the duration of a review run. Three-layer secret masking prevents credentials from appearing in log output. See [Configuration → Structured logging](../configuration#structured-logging) for the full env-var reference.
 
 **Error surface polish (PR #300).** All internal exceptions now use a typed hierarchy (`AiPrReviewError` → `ConfigError` / `ProviderError` / `CapabilityError` / `AnalyzerError` / `EngineError`). Warning messages follow a consistent `[ai-pr-review] WARNING: <component>: <message>` format across all modules.
 
@@ -355,18 +355,18 @@ The ID map is embedded as a hidden HTML comment in every review body (`<!-- ai-p
 ## v0.7.0
 
 **Performance**
-- **Prompt caching** — Anthropic/Bedrock prompt caching via shared-cache layout delivers ~47% cost reduction on average (−46% cold, −61% hot). All agents in a cache cohort share one cache entry per run. (#137, #143)
-- **Baked semgrep rulesets** — Container image ships with `p/ci` and `p/security-audit` rulesets pre-downloaded, eliminating the 20-40s network fetch on every run. (#136)
-- **Analyzer overhead reduction** — Trufflehog uses batch invocation (single call for all files), checkov has tighter YAML/JSON content sniffing, phpstan avoids a subprocess for Drupal detection. (#134)
+- **Prompt caching**: Anthropic/Bedrock prompt caching via shared-cache layout delivers ~47% cost reduction on average (−46% cold, −61% hot). All agents in a cache cohort share one cache entry per run. (#137, #143)
+- **Baked semgrep rulesets**: Container image ships with `p/ci` and `p/security-audit` rulesets pre-downloaded, eliminating the 20-40s network fetch on every run. (#136)
+- **Analyzer overhead reduction**: Trufflehog uses batch invocation (single call for all files), checkov has tighter YAML/JSON content sniffing, phpstan avoids a subprocess for Drupal detection. (#134)
 
 **Platform**
-- **Multi-arch container images** — `linux/amd64` and `linux/arm64` builds, enabling native ARM runners. (#145)
-- **Fork PR support** — Internal workflow uses `pull_request_target` for reviewing fork PRs. (#146)
-- **Cache priming (opt-in)** — `AI_CACHE_PRIMING=true` serializes cache-writing calls before parallel fan-out for environments where opportunistic cache hits don't occur. Default off. (#154)
+- **Multi-arch container images**: `linux/amd64` and `linux/arm64` builds, enabling native ARM runners. (#145)
+- **Fork PR support**: Internal workflow uses `pull_request_target` for reviewing fork PRs. (#146)
+- **Cache priming (opt-in)**: `AI_CACHE_PRIMING=true` serializes cache-writing calls before parallel fan-out for environments where opportunistic cache hits don't occur. Default off. (#154)
 
 **Quality**
-- **Prompt trailer consolidation** — Shared `_knowledge-cutoff.md` and `_trailer-findings.md` files replace duplicated blocks across 7 agent prompts, reducing maintenance surface. (#141)
-- **Version hallucination hardening** — `ruby-org` verification type and portable ERE patterns in suppressions. (#140)
+- **Prompt trailer consolidation**: Shared `_knowledge-cutoff.md` and `_trailer-findings.md` files replace duplicated blocks across 7 agent prompts, reducing maintenance surface. (#141)
+- **Version hallucination hardening**: `ruby-org` verification type and portable ERE patterns in suppressions. (#140)
 
 **Documentation**
 - Comprehensive documentation audit addressing 27+ accuracy findings across README, CLAUDE.md, and the docs site. (#138, #155)
