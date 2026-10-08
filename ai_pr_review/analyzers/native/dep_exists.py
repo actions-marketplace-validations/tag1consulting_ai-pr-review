@@ -66,7 +66,9 @@ _NAME_PATTERNS: dict[str, re.Pattern[str]] = {
     _NPM: re.compile(r"^(?:@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*$"),
     _PYPI: re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"),
     _CRATES: re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$"),
-    _PACKAGIST: re.compile(r"^[a-z0-9](?:[_.-]?[a-z0-9]+)*/[a-z0-9](?:[_.-]?[a-z0-9]+)*$"),
+    # Each separator is required between runs of characters, so there is exactly one
+    # way to match and no nested quantifier that can backtrack without bound.
+    _PACKAGIST: re.compile(r"^[a-z0-9]+(?:[_.-][a-z0-9]+)*/[a-z0-9]+(?:[_.-][a-z0-9]+)*$"),
     _RUBYGEMS: re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$"),
 }
 _MAX_NAME_LEN = 214

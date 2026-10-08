@@ -106,6 +106,24 @@ class TestNameValidation:
         assert not de.valid_name(eco, name)
 
 
+class TestNameValidationSpeed:
+    @pytest.mark.parametrize("eco", [de._NPM, de._PYPI, de._CRATES, de._PACKAGIST, de._RUBYGEMS])
+    def test_a_hostile_name_is_rejected_fast(self, eco: str) -> None:
+        import time
+
+        hostile = ["a" * 200 + "!", "a/" + "a" * 200 + "!", "a-" * 100 + "!", "@" + "a" * 200 + "/!"]
+        start = time.monotonic()
+        for name in hostile:
+            de.valid_name(eco, name)
+        assert time.monotonic() - start < 0.5
+
+    def test_packagist_accepts_the_same_real_names_as_before(self) -> None:
+        for name in ("monolog/monolog", "symfony/polyfill-php80", "a.b/c_d", "vendor/pkg.name-x"):
+            assert de.valid_name(de._PACKAGIST, name)
+        for name in ("a--b/c", "-a/b", "a/b-", "a//b"):
+            assert not de.valid_name(de._PACKAGIST, name)
+
+
 class TestExtraction:
     def test_npm_only_new_names_are_checked(self, work: Path, registry: Registry) -> None:
         pkg = json.dumps({"dependencies": {"old-pkg": "1.0.0", "new-pkg": "^2.0.0"}}, indent=2)
