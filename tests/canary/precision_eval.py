@@ -160,24 +160,30 @@ def load_fixtures(corpus_dir: Path = CORPUS_DIR) -> list[Fixture]:
 
 
 def _same_file(finding_file: str, label_file: str) -> bool:
-    a = finding_file.lstrip("./")
-    b = label_file.lstrip("./")
+    def norm(path: str) -> str:
+        # Strip a literal "./" prefix or leading slashes, not every "." or "/" character.
+        return path[2:] if path.startswith("./") else path.lstrip("/")
+
+    a, b = norm(finding_file), norm(label_file)
     return a == b or a.endswith("/" + b) or b.endswith("/" + a)
 
 
 def matches(finding: Finding, label: Label, *, window: int = LINE_WINDOW,
             jaccard: float = KEYWORD_JACCARD) -> bool:
-    """True when *finding* is about *label*: same file, near the lines, and the
-    same category or enough shared keywords."""
+    """True when *finding* is about *label*: same file, near the lines (a
+    finding with no line never matches), and the same category or enough shared keywords."""
     ce = _load_consistency_eval()
     if not _same_file(finding.file, label.file):
         return False
     line = finding.line or finding.start_line
     start = finding.start_line or finding.line
-    if line is not None and start is not None:
-        low, high = min(start, line), max(start, line)
-        if high < label.line_start - window or low > label.line_end + window:
-            return False
+    if line is None or start is None:
+        # No line anchor: it cannot be matched to a bug, so it goes to the
+        # "needs adjudication" list instead of inflating precision or recall.
+        return False
+    low, high = min(start, line), max(start, line)
+    if high < label.line_start - window or low > label.line_end + window:
+        return False
     same_topic = finding.category == label.category or (
         ce._jaccard(ce._keywords(finding.finding), ce._keywords(label.summary)) >= jaccard
     )

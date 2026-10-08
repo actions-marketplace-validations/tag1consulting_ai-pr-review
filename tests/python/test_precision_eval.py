@@ -193,6 +193,18 @@ def test_match_needs_the_same_file() -> None:
     assert not pe.matches(_finding(file="b.py"), _label(file="a.py"))
 
 
+def test_same_file_strips_only_a_literal_dot_slash_prefix() -> None:
+    assert pe._same_file("./a.py", "a.py")
+    assert pe._same_file("/a.py", "a.py")
+    assert not pe._same_file(".github/workflows/x.yml", "github/workflows/x.yml")
+
+
+def test_a_finding_without_a_line_never_matches() -> None:
+    assert not pe.matches(_finding(line=None), _label())
+    s = pe.score_fixture([_finding(line=None)], _fixture([_label()]))
+    assert s.bugs_found == 0 and len(s.unlabeled) == 1
+
+
 def test_match_allows_a_line_window_of_five() -> None:
     assert pe.matches(_finding(line=17), _label(a=10, b=12))
     assert not pe.matches(_finding(line=18), _label(a=10, b=12))
@@ -363,7 +375,8 @@ async def test_replay_mode_with_an_empty_cache_fails_without_a_key_or_a_call(
     monkeypatch.setenv("AI_EVAL_CACHE_MODE", "replay")
     monkeypatch.delenv("ANTHROPIC_API_KEY")
     assert await pe.main([]) == 1
-    assert "no saved response" in capsys.readouterr().err or "failed" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "no saved response" in err
 
 
 @pytest.mark.anyio
