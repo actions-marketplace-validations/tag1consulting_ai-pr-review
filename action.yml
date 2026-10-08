@@ -273,7 +273,7 @@ inputs:
       Allowlist: comma-separated list of static analyzer names to run. When set,
       only the listed analyzers run and exclude-analyzers is ignored. Valid names:
       shellcheck, trufflehog, semgrep, ruff, golangci-lint, hadolint, checkov,
-      phpcs, phpstan, eslint, kube-linter, tflint, cve-check, docs-api-check,
+      phpcs, phpstan, eslint, kube-linter, tflint, cve-check, dep-exists, docs-api-check,
       docs-ref-check, docs-drift-check. docs-missing-check is also accepted as
       a deprecated no-op (see issue #815, removed for real in v3.0.0). Entries
       are split on commas; surrounding whitespace is trimmed and empty entries
@@ -288,7 +288,7 @@ inputs:
       Denylist: comma-separated list of static analyzer names to skip. All eligible
       analyzers except those listed will run. Ignored when analyzers (allowlist) is
       set. Valid names: shellcheck, trufflehog, semgrep, ruff, golangci-lint,
-      hadolint, checkov, phpcs, phpstan, eslint, kube-linter, tflint, cve-check,
+      hadolint, checkov, phpcs, phpstan, eslint, kube-linter, tflint, cve-check, dep-exists,
       docs-api-check, docs-ref-check, docs-drift-check. docs-missing-check is
       also accepted as a deprecated no-op (see issue #815, removed for real in
       v3.0.0). Entries are split on commas; surrounding whitespace is trimmed

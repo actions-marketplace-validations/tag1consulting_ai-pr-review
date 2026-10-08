@@ -49,9 +49,21 @@ In addition to severity, every analyzer maps its findings onto the same 11-value
 | **phpstan** | `.php`, `.module`, `.inc`, `.theme`, `.install`, `.profile` | All findings→High; always runs at level `PHPSTAN_LEVEL` (default 3) — a project's own `phpstan.neon`/`phpstan.neon.dist` is never auto-discovered, since the analyzed workspace may be untrusted fork-PR content | 85 | `phpstan` |
 | **kube-linter** | `.yaml`, `.yml`, `.json` with `apiVersion:` + `kind:` headers | All findings→Medium (reliability-focused: missing probes, resource limits, etc.) | 85 | `kube-linter` |
 | **tflint** | `.tf`, `.tfvars` | `error`→High, `warning`→Medium, `notice`→Low; runs per Terraform module directory | 90 | `tflint` |
+| **dep-exists** | Newly added dependencies in `package.json`, `requirements*.txt`, `Cargo.toml`, `composer.json`, `Gemfile` | A dependency the public registry does not know→High, a package first published under 30 days ago (npm, PyPI, crates.io)→Medium | 85 / 65 | `dep-exists` |
 | **docs-api-check** | Python + `@param`-family languages (JS/TS, Java, Kotlin, C#, Ruby, C++, Scala) | A documented parameter not in the signature, or vice versa, always→Medium | 90 (Python, via ruff) / 80 (tree-sitter engine) | `docs-api-check` |
 | **docs-ref-check** | Changed `.md` files | A broken relative link or heading anchor, always→Medium | 80 | `docs-ref-check` |
 | **docs-drift-check** | Any file (runs unconditionally, like semgrep/trufflehog) | A doc reference to a file this PR deletes, always→Low | 80 | `docs-drift-check` |
+
+## Dependency existence check
+
+`dep-exists` asks the public registry whether each dependency this diff adds really exists. A model can invent a package name, and an attacker can register that name and ship malicious code under it. The check makes network calls to `registry.npmjs.org`, `pypi.org`, `crates.io`, `repo.packagist.org`, and `rubygems.org`. It sends only the package name.
+
+- It checks only dependencies on added lines of a direct-dependency manifest. It does not read lockfiles.
+- It does not check Go modules, because a private Go module returns "not found" from the public proxy and would raise a false finding.
+- It skips an ecosystem when the repository sets a private registry (`.npmrc` registry, pip index flags, Cargo registries, composer `repositories`, a non-default Gemfile `source`).
+- It fails open. A timeout, a rate limit, or any status other than 200 or 404 gives no finding.
+- It checks at most 25 new dependencies per run.
+- Turn it off with `exclude-analyzers: dep-exists`.
 
 ## Documentation checks
 
