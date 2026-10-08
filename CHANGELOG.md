@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Claude Haiku 5.5 has a pricing row, and a model can now have a second set of rates for long prompts.** `config/model-pricing.json` prices `claude-haiku-5-5` (and `claude-haiku-5.5`, with or without a provider prefix) at $0.10 input, $0.50 output, $0.125 cache write, and $0.01 cache read per million tokens for a call whose prompt is up to 100,000 tokens. A call over 100,000 tokens uses the `long_prompt` rates: $0.50, $2.50, $0.625, and $0.05. `ModelRates` has a new optional `long_prompt` field (`LongPromptRates`), and `token_cost_units()` picks the tier from one call's input, cache-write, and cache-read tokens. Each token-log row for an Anthropic model is one call (`agents/dispatch.py` builds the row from a single response, and `llm/anthropic.py` makes one request per call), so the token table tiers each call on its own size. A `long_prompt` object that is present but unusable (no positive threshold, input rate, or output rate) makes the whole model unpriced, with a warning, and does not fall back to the base rates. No other model has a long-prompt tier. This only adds pricing. Haiku 5.5 is not a default, and its `temperature` and effort handling are not set up yet, so a model-change verification run is still needed before it becomes a supported default.
+
+### Fixed
+
+- **The Sonnet 5.5 cache-read price was $0.20 per million tokens, and the published price is $0.10.** The "Est. Cost" column of the token table and the compact usage line counted Sonnet 5.5 cache hits at twice their price. The pre-flight cost estimate does not model caching, so it is not affected. Opus 5.5 ($0.20) and Sonnet 5 ($0.20) were already right. A new test checks the price of Opus 5.5, Sonnet 5.5, and Haiku 5.5 against the published table.
+
 ## [2.20.0] - 2026-10-06
 
 ### Added
