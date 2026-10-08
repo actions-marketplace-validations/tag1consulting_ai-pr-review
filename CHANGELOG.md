@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **The Sonnet 5.5 cache-read price was $0.20 per million tokens, and the published price is $0.10.** The "Est. Cost" column of the token table and the compact usage line counted Sonnet 5.5 cache hits at twice their price. The pre-flight cost estimate does not model caching, so it is not affected. Opus 5.5 ($0.20) and Sonnet 5 ($0.20) were already right. A new test checks the price of Opus 5.5, Sonnet 5.5, and Haiku 5.5 against the published table.
+- **A model id with a digit glued to `opus-5` is no longer priced or handled as Opus 5.** The Opus 5 price pattern in `config/model-pricing.json` and `_OPUS_5_FAMILY_RE` in `llm/_config.py` had a lookahead that rejected a sibling version after a separator (`opus-5-9`) but not one with no separator (`opus-59`). A future `claude-opus-59` would have been priced at the Opus 5 rates, and `resolve_temperature()` and `resolve_effort()` would have treated it as Opus 5, so a temperature it accepts would be dropped. Both now start the lookahead with `(?!\d)`, as the Opus 5.5 and Sonnet 5.5 patterns already did. Dated snapshots such as `claude-opus-5-20260915` still match. Tests in `tests/python/llm/test_config.py` pin both functions.
 
 ## [2.20.0] - 2026-10-06
 

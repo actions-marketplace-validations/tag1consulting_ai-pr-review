@@ -15,17 +15,23 @@ import sys
 # explicit instead of relying on substring luck (see issue tracking the Opus
 # 5.5 rollout).
 #
-# The trailing lookahead is `(?![-.]\d(?!\d))`, not the simpler `(?![-.\d])`:
-# a plain `(?![-.\d])` also rejects a dated snapshot suffix like
-# "-20260915" (Anthropic's own model-naming convention, and AI_MODEL_STANDARD/
-# AI_MODEL_PREMIUM are free-form env vars a user could set to one), which is a
-# real multi-digit run, not a single sibling-version digit -- that would
-# silently stop stripping temperature and stop capping effort for a
-# dated Opus 5 snapshot, reintroducing the HTTP-400/180s-timeout failures this
-# module exists to prevent. `(?![-.]\d(?!\d))` excludes only a single trailing
-# version digit (matches opus-5-9, rejects it) while still accepting a
-# multi-digit date suffix (opus-5-20260915 matches the opus-5 family).
-_OPUS_5_FAMILY_RE = re.compile(r"opus-5(?:[-.]5)?(?![-.]\d(?!\d))")
+# The trailing lookahead is `(?!\d)(?![-.]\d(?!\d))`, not the simpler
+# `(?![-.\d])`:
+#   * A plain `(?![-.\d])` also rejects a dated snapshot suffix like
+#     "-20260915" (Anthropic's own model-naming convention, and
+#     AI_MODEL_STANDARD/AI_MODEL_PREMIUM are free-form env vars a user could
+#     set to one), which is a real multi-digit run, not a single
+#     sibling-version digit -- that would silently stop stripping temperature
+#     and stop capping effort for a dated Opus 5 snapshot, reintroducing the
+#     HTTP-400/180s-timeout failures this module exists to prevent.
+#   * `(?![-.]\d(?!\d))` alone excludes a single trailing version digit
+#     reached through a separator (matches opus-5-9, rejects it) while still
+#     accepting a multi-digit date suffix (opus-5-20260915 matches the
+#     opus-5 family) -- but it does NOT catch a digit appended with no
+#     separator at all, e.g. "opus-59" (same class of gap fixed in
+#     config/model-pricing.json's Opus 5.5 patterns). The leading `(?!\d)`
+#     closes that gap.
+_OPUS_5_FAMILY_RE = re.compile(r"opus-5(?:[-.]5)?(?!\d)(?![-.]\d(?!\d))")
 
 
 def _is_opus_5_family(lower_model_id: str) -> bool:
