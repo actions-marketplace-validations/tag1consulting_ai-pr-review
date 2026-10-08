@@ -387,3 +387,36 @@ async def test_the_default_estimate_is_well_under_the_run_cap(
     line = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("spend guard:")][0]
     expected = float(re.search(r"expected \$([0-9.]+)", line).group(1))  # type: ignore[union-attr]
     assert expected < 2.0
+
+
+# --- harvest script (pure helpers, no network) ---
+
+harvest = _load("harvest_labels")
+
+
+def test_harvest_decodes_the_finding_marker() -> None:
+    import base64
+
+    payload = base64.b64encode(json.dumps({"sev": "High", "cat": "edge-case", "conf": 80}).encode()).decode()
+    data = harvest.decode_marker(f"text\n<!-- ai-pr-review-finding:{payload} -->")
+    assert data == {"sev": "High", "cat": "edge-case", "conf": 80}
+    assert harvest.decode_marker("no marker") is None
+    assert harvest.decode_marker("<!-- ai-pr-review-finding:!!!! -->") is None
+
+
+def test_harvest_finds_a_dismiss_command() -> None:
+    assert harvest.dismiss_command(["thanks", "/ai-pr-review false-positive not a bug"]) == "false-positive"
+    assert harvest.dismiss_command(["/ai-pr-review rescan"]) is None
+
+
+def test_harvest_patch_touches_the_cited_line() -> None:
+    patch = "@@ -10,3 +20,4 @@\n a\n+b\n"
+    assert harvest.patch_touches(patch, 22)
+    assert harvest.patch_touches(patch, 17)
+    assert not harvest.patch_touches(patch, 5)
+    assert not harvest.patch_touches("", 22)
+
+
+def test_harvest_refuses_a_repo_that_is_not_allowed(capsys: pytest.CaptureFixture[str]) -> None:
+    assert harvest.main(["--repo", "client-org/private-repo"]) == 1
+    assert "not an allowed repository" in capsys.readouterr().err
