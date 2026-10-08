@@ -261,12 +261,22 @@ class SpendGuard:
             )
         return worst
 
-    def estimate_units(self, model_id: str, *, input_tokens: int, output_tokens: int) -> int:
-        """Cost of one call with these token counts (for a pre-flight estimate)."""
-        units = token_cost_units(
-            self._rates(model_id), input_tokens=input_tokens, output_tokens=output_tokens
-        )
+    def estimate_units(
+        self, model_id: str, *, input_tokens: int, output_tokens: int, worst_case: bool = False
+    ) -> int:
+        """Cost of one call with these token counts (for a pre-flight estimate).
+
+        ``worst_case`` also prices the dearer prompt-length tier, as ``reserve()``
+        does, so the pre-flight worst case matches what the guard will reserve.
+        """
+        rates = self._rates(model_id)
+        units = token_cost_units(rates, input_tokens=input_tokens, output_tokens=output_tokens)
         assert units is not None  # _rates() raises for an unpriced model
+        long_prompt = rates.long_prompt
+        if worst_case and long_prompt is not None:
+            units = max(units, (
+                input_tokens * long_prompt.input_rate + output_tokens * long_prompt.output_rate
+            ) // 100_000_000)
         return units
 
     # -- reserve and settle ---------------------------------------------

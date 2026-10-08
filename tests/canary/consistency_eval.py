@@ -543,14 +543,15 @@ def _estimate_invocation(
                     expected += runs * guard.estimate_units(
                         model_id, input_tokens=in_tokens, output_tokens=_EXPECTED_OUTPUT_TOKENS)
                     worst += runs * guard.estimate_units(
-                        model_id, input_tokens=in_tokens, output_tokens=_WORST_OUTPUT_TOKENS)
+                        model_id, input_tokens=in_tokens, output_tokens=_WORST_OUTPUT_TOKENS,
+                        worst_case=True)
                     calls += runs
                 if toggles["judge"]:
                     expected += runs * guard.estimate_units(
                         model_id, input_tokens=_JUDGE_INPUT_TOKENS, output_tokens=1000)
                     worst += runs * guard.estimate_units(
                         model_id, input_tokens=_JUDGE_INPUT_TOKENS,
-                        output_tokens=_JUDGE_MAX_OUTPUT_TOKENS)
+                        output_tokens=_JUDGE_MAX_OUTPUT_TOKENS, worst_case=True)
                     calls += runs
     return expected, worst, calls
 

@@ -427,3 +427,13 @@ def test_an_unpriced_model_is_refused_before_any_call(
     diff = _CANARY / "corpus" / "11_typescript_type_safety_synthetic.diff"
     with pytest.raises(sg.UnpricedModelError):
         ce._estimate_invocation([diff], 1, ("code-reviewer",), ("baseline",), ("claude-haiku-9-9",), g)
+
+
+def test_preflight_worst_case_prices_the_long_prompt_tier_like_the_reservation(tmp_path: Path) -> None:
+    g = _guard(tmp_path)
+    kwargs = {"input_tokens": 3000, "output_tokens": 32768}
+    base = g.estimate_units(HAIKU, **kwargs)
+    worst = g.estimate_units(HAIKU, worst_case=True, **kwargs)
+    assert worst > base  # the long tier is dearer
+    # A Sonnet 5.5 call has no tier, so the two agree.
+    assert g.estimate_units(SONNET, **kwargs) == g.estimate_units(SONNET, worst_case=True, **kwargs)
