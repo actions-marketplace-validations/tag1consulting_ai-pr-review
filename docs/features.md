@@ -11,18 +11,11 @@ For what changed in each release, see [Version History](version-history).
 
 ## Code suggestions
 
-Code suggestions are enabled by default. The review tool asks eligible LLM agents to emit concrete code fixes alongside their findings. Each fix is rendered as a ` ```suggestion ` block inside the inline review comment, which GitHub and GitLab display as an "Apply suggestion" button — the PR/MR author can accept the fix with one click.
+Code suggestions are on by default. The review tool asks eligible LLM agents to give concrete code fixes with their findings. The tool shows each fix as a ` ```suggestion ` block inside the inline review comment. GitHub and GitLab display that block as an "Apply suggestion" button, and the PR or MR author can accept the fix with one click.
 
-> **New in v0.6.0:** Suggestions now work on GitLab MRs using GitLab's
-> native ` ```suggestion:-N+0 ` syntax for multi-line replacements.
-> Previously suggestions were GitHub-only. Requires GitLab 11.6+
-> (when the suggestion fence syntax was introduced). The
-> `enable-suggestions` flag (`true` by default) applies uniformly
-> across all VCS providers — setting it to `false` disables suggestions
-> on both GitHub and GitLab. Bitbucket always ignores suggestions
-> regardless of this flag.
+> **New in v0.6.0:** Suggestions work on GitLab MRs. They use the native ` ```suggestion:-N+0 ` syntax of GitLab for multi-line replacements. Before this version, suggestions were GitHub-only. This needs GitLab 11.6 or later (the version that introduced the suggestion fence syntax). The `enable-suggestions` flag (`true` by default) applies to all VCS providers. If you set it to `false`, suggestions are off on both GitHub and GitLab. Bitbucket always ignores suggestions, whatever the flag value.
 
-To disable suggestions, set `enable-suggestions: false`:
+To turn off suggestions, set `enable-suggestions: false`:
 
 ```yaml
 - uses: tag1consulting/ai-pr-review/container-action@main  # or pin to a release tag
@@ -34,89 +27,104 @@ To disable suggestions, set `enable-suggestions: false`:
     enable-suggestions: false
 ```
 
-**Eligible agents** (those most likely to produce concrete line-level fixes): `code-reviewer`, `edge-case-hunter`, `security-reviewer`, `silent-failure-hunter`, `blind-hunter`. Design-level agents (`architecture-reviewer`, `adversarial-general`) and static analyzers (shellcheck, semgrep, ruff, etc.) never emit suggestions.
+**Eligible agents** (the agents most likely to give concrete line-level fixes): `code-reviewer`, `edge-case-hunter`, `security-reviewer`, `silent-failure-hunter`, `blind-hunter`. Design-level agents (`architecture-reviewer`, `adversarial-general`) and static analyzers (shellcheck, semgrep, ruff, and others) never give suggestions.
 
-**How it works.** Eligible agents have a short prompt addendum appended to their system prompt instructing them to include a `suggested_code` field (and optional `start_line` for multi-line replacements) only when the fix is concrete and complete. The post-review script constructs the suggestion fence itself — agents are not trusted to emit the markdown directly. Multi-line suggestions are validated against the diff: every line in the replacement range must appear on the new-file side of a diff hunk, or the suggestion is dropped while keeping the natural-language remediation.
+**How it works.** The tool adds a short prompt addendum to the system prompt of each eligible agent. The addendum tells the agent to include a `suggested_code` field (and an optional `start_line` for multi-line replacements) only when the fix is concrete and complete. The post-review code builds the suggestion fence itself. The tool does not trust agents to write the markdown directly. The tool checks multi-line suggestions against the diff. Every line in the replacement range must appear on the new-file side of a diff hunk. If not, the tool drops the suggestion and keeps the natural-language remediation.
 
-**Caveats.** Suggestions increase output token usage. The feature works on both GitHub and GitLab (using GitLab's `suggestion` fence syntax) — Bitbucket reviews ignore it. Suggestions are validated defensively: `start_line` must be a positive integer no greater than `line` with no leading zeros, multi-line ranges are capped at 100 lines, and `suggested_code` containing triple backticks (which would break the suggestion fence) is rejected. When any validation fails, the suggestion is dropped with a WARNING logged to the Actions run and the finding still posts with its natural-language remediation. On incremental reviews (SHA watermark active), suggestions only render when the finding's line range is still in the current incremental diff — add the `ai-review-rescan` label to force a full re-review.
+**Caveats.** Suggestions increase output token usage. The feature works on GitHub and GitLab (it uses the `suggestion` fence syntax of GitLab). Bitbucket reviews ignore it. The tool checks each suggestion with strict rules:
+
+- `start_line` must be a positive integer, no greater than `line`, with no leading zeros.
+- Multi-line ranges have a limit of 100 lines.
+- The tool rejects `suggested_code` that contains triple backticks, because they break the suggestion fence.
+
+If a check fails, the tool drops the suggestion and writes a WARNING to the Actions run log. The finding still posts with its natural-language remediation. On incremental reviews (SHA watermark active), a suggestion shows only when the line range of the finding is still in the current incremental diff. To force a full re-review, add the `ai-review-rescan` label.
 
 ## Incremental reviews
 
-After the first full-PR review, subsequent pushes trigger an incremental review that only analyzes the new commits. The SHA watermark is stored in the summary comment and advanced after each review run.
+After the first full-PR review, each later push starts an incremental review. The incremental review analyzes only the new commits. The tool stores the SHA watermark in the summary comment and advances it after each review run.
 
-If the watermark cannot be found (e.g., the summary comment was deleted), the action falls back to a full PR diff.
+If the tool cannot find the watermark (for example, someone deleted the summary comment), the action uses the full PR diff.
 
-To force a full-PR diff for a single run, add the **`ai-review-rescan`** label to the PR. The watermark still advances normally afterward, so subsequent pushes resume incremental review — re-add the label if you want another full rescan.
+To force a full-PR diff for one run, add the **`ai-review-rescan`** label to the PR. The watermark still advances as usual afterward, so later pushes resume incremental review. To get another full rescan, add the label again.
 
 ## Quiet reruns (GitHub)
 
-Rerunning the review on a PR no longer always creates a new top-level review object. Each run classifies its findings against the bot's most-recently-posted review with a body (the "canonical" review, whichever state it's in — dismissed or not; an empty-body review GitHub auto-creates when the bot replies to an inline comment is never treated as canonical, since GitHub rejects any attempt to update its body) and its existing threads:
+A rerun of the review on a PR does not always create a new top-level review object. Each run compares its findings with two things. The first is the most recent review that the bot posted with a body (the "canonical" review), in any state, dismissed or not. The second is the existing threads of that review. The tool never treats an empty-body review as canonical. GitHub creates such a review automatically when the bot replies to an inline comment, and GitHub rejects any update to its body. The outcomes are:
 
-- **Nothing new** (identical findings, no verdict changes): the canonical review's body is updated in place (`PUT`). No new Conversation-tab entry.
-- **A still-open finding reworded or unchanged**: its comment is updated in place, silently. A severity *decrease* on a still-matched finding is also applied silently, with no reply — only an *increase* gets a notification (below); a downgrade with no accompanying explanation can look like the finding was tampered with rather than re-assessed, so treat a silent severity change on a rerun as a re-assessment, not a data-loss signal.
-- **A still-open finding's severity increases**: its comment is updated in place, plus a reply on that thread noting the escalation. Still no new review.
-- **A finding marked `/ai-pr-review fixed` reappears unchanged**: a reply explains it recurred and the thread is reopened. No new review.
-- **A finding marked `/ai-pr-review dismiss`/`false-positive`/`wont-fix`**: never reposted, permanently — including a similar finding nearby, as long as it's a compatible category and no more severe than what was dismissed.
-- **A genuinely new finding** (or one severe enough — High/Critical — that it must be visible even without a diff anchor): a fresh review is posted, carrying only the new finding(s). The prior blocking (`CHANGES_REQUESTED`) review is dismissed — **after** the fresh review is confirmed to have actually posted as a real, non-degraded blocking review, never before — only once none of its own findings are still open (and only when the thread fetch that determined that completed without error); it is never dismissed out from under an active finding, and a mid-run posting failure never leaves the PR silently unblocked.
-- **A persistent finding with no diff anchor** (out-of-diff, or bumped to the body by `max-inline`): the first time it appears, it forces a fresh review like any other new High/Critical finding above. On every rerun after that, as long as its exact text/location is unchanged, it's already visible in the canonical review's body — so it no longer forces a fresh review on its own, and the existing body is updated in place instead. Only a change to the finding itself (different wording, a moved line) resets this and requires a fresh review again.
+- **Nothing new** (identical findings, no verdict changes): the tool updates the body of the canonical review in place (`PUT`). The Conversation tab gets no new entry.
+- **A still-open finding, reworded or unchanged**: the tool updates its comment in place, with no notification. A severity *decrease* on a still-matched finding is also silent, with no reply. Only an *increase* sends a notification (see below). A downgrade with no explanation can look like tampering. Treat a silent severity change on a rerun as a new assessment, not as lost data.
+- **The severity of a still-open finding increases**: the tool updates its comment in place and adds a reply on that thread that notes the escalation. The tool does not post a new review.
+- **A finding marked `/ai-pr-review fixed` reappears unchanged**: a reply explains that it recurred, and the tool reopens the thread. The tool does not post a new review.
+- **A finding marked `/ai-pr-review dismiss`, `false-positive`, or `wont-fix`**: the tool never posts it again. This includes a similar finding nearby, if its category is compatible and it is not more severe than the dismissed finding.
+- **A new finding** (or a High or Critical finding that must be visible even without a diff anchor): the tool posts a fresh review that carries only the new findings. The tool dismisses the prior blocking (`CHANGES_REQUESTED`) review only when all of these are true:
+  - The fresh review is confirmed to have posted as a real, non-degraded blocking review. The tool never dismisses the prior review before this.
+  - None of the findings of the prior review are still open.
+  - The thread fetch that determined this completed without error.
 
-This full canonical-review-reuse behavior is GitHub-only. GitLab has a narrower analog: `post_findings` fuzzy-matches each finding against this bot's still-open prior discussions (same file, within 3 lines, compatible category) and skips reposting an unchanged one, updating the matched discussion's note in place instead (severity, remediation, and wording all refresh; an escalating severity also gets a reply noting the change) — but GitLab has no dismiss/false-positive/wont-fix/fixed verdict system, so there's still no suppression, and a `resolve_stale` run also never re-resolves a discussion this same run just created or matched. Set `AI_GITLAB_CROSS_RUN_DEDUP=false` to restore GitLab's pre-dedup behavior of posting a fresh discussion for every eligible finding on every run. Bitbucket's dedup works differently again: it has no comment threads to fuzzy-match at all, so instead every eligible finding renders as a Code Insights annotation, rebuilt from scratch (DELETE-then-PUT-then-POST) every run. A finding dismissed via the summary comment's hidden verdicts marker is simply excluded from that rebuild, with nothing left to un-render (issue #839, closed by the same Code Insights work as issue #873, see [Bitbucket setup](bitbucket-setup#code-insights-annotation-category-mapping)). Set `AI_BITBUCKET_CODE_INSIGHTS=false` to restore Bitbucket's pre-Code-Insights behavior of rendering every finding flat in the comment body with no suppression. Set `AI_CANONICAL_REUSE=false` to disable GitHub's reuse entirely and restore its pre-reuse behavior of always posting a fresh review — see [Configuration](configuration#quiet-reruns-and-cross-run-finding-dedup).
+  The tool never dismisses a review that has an active finding. A posting failure during a run never leaves the PR unblocked without notice.
+- **A persistent finding with no diff anchor** (out of the diff, or moved to the body by `max-inline`): the first time it appears, it forces a fresh review, like any other new High or Critical finding above. On each later rerun, if its exact text and location are unchanged, the body of the canonical review already shows it. It then does not force a fresh review, and the tool updates the existing body in place. Only a change to the finding itself (different wording, a moved line) resets this and requires a fresh review again.
 
-**Concurrency note**: if two runs land on the same PR close together (rapid pushes with no `concurrency:` group configured), there's a narrow window where one run's write to the canonical review can be superseded by the other's. The action re-checks the canonical review's state immediately before **the body `PUT`** and falls back to posting a fresh review if anything changed underneath it — this guard covers only that write; the per-thread comment updates, notification replies, and the dismiss-superseded-review call have no equivalent re-check, so this narrows the window rather than eliminating it. Configure a GitHub Actions `concurrency:` group keyed on the PR number if your repo pushes frequently enough for this to matter — see `examples/workflows/pr-review.yml` for the shipped example.
+This full canonical-review reuse works on GitHub only. GitLab has a narrower version. `post_findings` fuzzy-matches each finding against the still-open prior discussions of this bot (same file, within 3 lines, compatible category). It does not repost an unchanged finding. It updates the note of the matched discussion in place instead. The severity, remediation, and wording all refresh, and a higher severity also gets a reply that notes the change. GitLab has no dismiss, false-positive, wont-fix, or fixed verdict system, so it has no suppression. A `resolve_stale` run never re-resolves a discussion that the same run created or matched. To restore the older GitLab behavior of a fresh discussion for every eligible finding on every run, set `AI_GITLAB_CROSS_RUN_DEDUP=false`.
+
+Bitbucket dedup works in a different way. Bitbucket has no comment threads to fuzzy-match. Instead, each eligible finding appears as a Code Insights annotation, and the tool rebuilds all of them from the start on every run (DELETE, then PUT, then POST). A finding that someone dismissed through the hidden verdicts marker of the summary comment is not in that rebuild, so nothing remains to remove (issue #839, closed by the same Code Insights work as issue #873, see [Bitbucket setup](bitbucket-setup#code-insights-annotation-category-mapping)). To restore the older Bitbucket behavior of every finding in the comment body with no suppression, set `AI_BITBUCKET_CODE_INSIGHTS=false`.
+
+To turn off GitHub reuse completely and always post a fresh review, set `AI_CANONICAL_REUSE=false`. See [Configuration](configuration#quiet-reruns-and-cross-run-finding-dedup).
+
+**Concurrency note**: Two runs can start on the same PR close together (rapid pushes with no `concurrency:` group). Then one run can overwrite the write of the other run to the canonical review, in a narrow window. Just before **the body `PUT`**, the action checks the state of the canonical review again. If anything changed, the action posts a fresh review. This check covers only that write. The per-thread comment updates, the notification replies, and the call that dismisses the superseded review have no such check. The check makes the window smaller but does not remove it. If your repository gets frequent pushes, set a GitHub Actions `concurrency:` group keyed on the PR number. See `examples/workflows/pr-review.yml` for the example that ships with the action.
 
 ## Resilience
 
-**Graceful agent failure**: If an agent fails (transient API error, content filter block, etc.), the review continues with the remaining agents and notes which agents were skipped. If all finding agents fail, the review is aborted.
+**Graceful agent failure**: If an agent fails (transient API error, content filter block, and so on), the review continues with the remaining agents and notes which agents it skipped. If all finding agents fail, the review stops.
 
-**LLM retries**: Transient API failures (HTTP 408, 429, 500, 502, 503, 504, and Cloudflare 520–524) and transient network errors (connection refused, timeout) are retried with exponential backoff and jitter. Controlled by the `LLM_RETRY_COUNT` env var (default: 3).
+**LLM retries**: The tool retries transient API failures (HTTP 408, 429, 500, 502, 503, 504, and Cloudflare 520–524) and transient network errors (connection refused, timeout). It uses exponential backoff with jitter. The `LLM_RETRY_COUNT` environment variable controls the retry count (default: 3).
 
-**Parallel execution**: Agents run in a tiered fan-out by default, dispatched through one shared concurrency limiter regardless of tier — up to 4 concurrent LLM calls at a time (`concurrency`, gated by `parallel`/`AI_PARALLEL`), alongside any triggered static analyzers. The concurrency limit applies to LLM calls only (for rate-limit planning); static analyzers run concurrently with them but do not consume LLM quota. If your provider's rate limits cannot sustain this throughput, set `parallel: false` to revert to sequential execution (concurrency drops to 1).
+**Parallel execution**: Agents run in a tiered fan-out by default. One shared concurrency limiter dispatches them, whatever the tier. Up to 4 LLM calls run at the same time (`concurrency`, controlled by `parallel` and `AI_PARALLEL`), alongside any triggered static analyzers. The concurrency limit applies to LLM calls only (for rate-limit planning). Static analyzers run at the same time but do not use LLM quota. If your provider's rate limits cannot sustain this throughput, set `parallel: false` to run in sequence (concurrency drops to 1).
 
-**GitHub API retries**: Critical GitHub API calls (posting reviews, comments) retry on 502, 503, 429, and ETIMEDOUT with fixed backoff.
+**VCS API retries**: Calls to the GitHub, GitLab, and Bitbucket APIs (posting reviews and comments) retry up to 3 attempts. They retry on HTTP 429, 502, 503, and 504, on timeouts and network errors, and on 5xx responses that name a transient error. The wait between attempts doubles, with jitter.
 
-**Truncation recovery**: When an LLM response is truncated (hit max tokens), the action attempts to salvage valid findings from the partial JSON rather than discarding the entire agent output.
+**Truncation recovery**: If an LLM response is truncated (it hit the max tokens limit), the action tries to recover valid findings from the partial JSON. It does not discard the whole agent output.
 
 ## Token usage
 
-By default (`token-usage-display: compact`), each posted review comment carries a single italic summary line rather than the full table:
+By default (`token-usage-display: compact`), each posted review comment has one italic summary line. It does not have the full table:
 
 > _Review cost: $0.1234 · 45,678 tokens · 8 agents · Sonnet 5 · [full breakdown](run-url)_
 
-- **Review cost** is the run's estimated total at public list rates, suffixed `+` when any agent used a model absent from `config/model-pricing.json` (the true cost is at least this much).
-- **N agents** counts finding agents that actually ran; the synthetic `judge-pass` row (see below) contributes its tokens/cost to the total but is not counted as an agent.
-- **[full breakdown]** links to the current CI run when the platform exposes one (GitHub Actions, GitLab CI/CD job, or Bitbucket Pipelines — see `ai_pr_review/review/reporting.py`'s `ci_run_url()`); omitted when the relevant environment variables are empty rather than emitting a broken link.
+- **Review cost** is the estimated total for the run at public list rates. It has a `+` suffix when any agent used a model that is not in `config/model-pricing.json` (the true cost is at least this amount).
+- **N agents** counts the finding agents that ran. The synthetic `judge-pass` row (see below) adds its tokens and cost to the total, but the tool does not count it as an agent.
+- **[full breakdown]** links to the current CI run when the platform provides one (GitHub Actions, GitLab CI/CD job, or Bitbucket Pipelines, see `ci_run_url()` in `ai_pr_review/review/reporting.py`). If the related environment variables are empty, the tool leaves out the link and does not create a broken one.
 
-Set `token-usage-display: full` to restore the full `<details>`-wrapped table inside the comment (the behavior before this line existed), or `off` to omit token-usage content from the comment entirely. `token-usage-warn-usd` (default `1.00`, `0` disables) adds a separate warning line — never combined into the same string as the table or the compact line — when a run's estimated cost crosses the threshold. See [Configuration](configuration#token-usage-display) for both inputs.
+To show the full `<details>` table inside the comment (the behavior before this line existed), set `token-usage-display: full`. To leave out all token-usage content from the comment, set `off`. The `token-usage-warn-usd` input (default `1.00`, `0` turns it off) adds a separate warning line when the estimated cost of a run crosses the threshold. The tool never combines that line with the table or the compact line. For both inputs, see [Configuration](configuration#token-usage-display).
 
-Regardless of `token-usage-display`, the full per-agent breakdown is always available in two other places:
+Whatever the `token-usage-display` value, the full per-agent breakdown is always available in two other places:
 
-- **The CI job log** — echoed to stderr on every run, on every provider (GitHub, GitLab, Bitbucket).
-- **The [GitHub Actions step summary](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/workflow-commands-for-github-actions#adding-a-job-summary)** — GitHub only.
+- **The CI job log**: The tool writes it to stderr on every run, for every provider (GitHub, GitLab, Bitbucket).
+- **The [GitHub Actions step summary](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/workflow-commands-for-github-actions#adding-a-job-summary)**: GitHub only.
 
-The long-lived PR summary comment carries only the first-run walkthrough and is not rewritten on subsequent runs; token-usage content lives in the review body (GitHub) or the summary note (GitLab/Bitbucket), not the walkthrough.
+The long-lived PR summary comment holds only the walkthrough from the first run. The tool does not rewrite it on later runs. Token-usage content is in the review body (GitHub) or the summary note (GitLab and Bitbucket), not in the walkthrough.
 
-The full table's layout adapts based on cache activity:
+The layout of the full table depends on cache activity:
 
 | Column | Description | When shown |
 |--------|-------------|------------|
 | Agent | Agent name | Always |
-| Model | Human-readable model name (e.g. "Sonnet 4.6") | Always |
+| Model | Human-readable model name (for example "Sonnet 4.6") | Always |
 | Input | Input tokens consumed | Always |
-| Output | Output tokens generated; shown as `actual / cap` when a per-agent output cap is configured | Always |
+| Output | Output tokens generated. Shown as `actual / cap` when a per-agent output cap is configured | Always |
 | Cache Write | Tokens written to prompt cache | When any row has cache activity |
 | Cache Read | Tokens read from prompt cache | When any row has cache activity |
 | Total | Combined token count | Always |
 | Est. Cost | Estimated cost at public list prices | Always |
 
-When `LLM_PROMPT_CACHING` is active (default `auto` for Anthropic/Bedrock), the table expands to 8 columns showing Cache Write and Cache Read alongside the standard columns.
+When `LLM_PROMPT_CACHING` is active (default `auto` for Anthropic and Bedrock), the table grows to 8 columns. Cache Write and Cache Read show next to the standard columns.
 
-The `judge-pass` row appears as a regular agent row (included in the Total) when the judge actually ran:
+The `judge-pass` row shows as a regular agent row (included in the Total) when the judge ran:
 
 | Row | Description | When shown |
 |-----|-------------|------------|
-| `judge-pass` | Tokens consumed by the judge-pass LLM call; included in Total | When `AI_JUDGE_PASS=true` (default) and the judge ran on a non-empty finding set |
+| `judge-pass` | Tokens consumed by the judge-pass LLM call. Included in Total | When `AI_JUDGE_PASS=true` (default) and the judge ran on a non-empty finding set |
 
-Two supplementary rows may appear after the **Total** row. They are informational only and do not affect cost totals:
+Three supplementary rows can appear after the **Total** row. They are for information only and do not change the cost totals:
 
 | Row | Description | When shown |
 |-----|-------------|------------|
@@ -124,4 +132,4 @@ Two supplementary rows may appear after the **Total** row. They are informationa
 | Language profiles | Maximum profile tokens injected across all agents (every detected language's full profile goes to every eligible agent, issue #814) | When language profiles were injected and the count was non-zero |
 | SARIF ingestion | Wall-clock elapsed time for parsing SARIF files (e.g. `0.34s`) | When `AI_SARIF_PATHS` is configured |
 
-Costs are calculated using public list prices and do not reflect enterprise discounts, committed use agreements, or proxy markups.
+The tool calculates costs with public list prices. The costs do not include enterprise discounts, committed use agreements, or proxy markups.

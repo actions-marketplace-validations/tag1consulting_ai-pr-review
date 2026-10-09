@@ -891,6 +891,9 @@ def _print_guard_summary(guard: _spend_guard.SpendGuard) -> None:
           f"(reservations settled to real usage), campaign total "
           f"{_spend_guard.usd(guard.campaign_spent_units())} of "
           f"{_spend_guard.usd(guard.campaign_cap_units)}")
+    if guard.history_dropped:
+        print(f"WARNING: {guard.history_dropped} audit-log record(s) could not be written, so the "
+              f"history file is incomplete. The ledger total above is still correct.")
 
 
 async def main() -> int:

@@ -41,7 +41,11 @@ Commands:
 from __future__ import annotations
 
 import contextlib
-import fcntl
+
+try:
+    import fcntl
+except ImportError:  # Windows has no fcntl. The guard then refuses to run, it never runs unlocked.
+    fcntl = None  # type: ignore[assignment]
 import json
 import os
 import sys
@@ -69,7 +73,7 @@ UNITS_PER_USD = 10_000  # pricing.py counts cost in $0.0001 units
 DEFAULT_RUN_CAP_USD = 5.00
 DEFAULT_CAMPAIGN_CAP_USD = 9.00
 _LEDGER_VERSION = 1
-_LOCK_TIMEOUT_S = 10.0
+_LOCK_TIMEOUT_S = 60.0
 
 LLMCall = Callable[[LLMRequest], Awaitable[LLMResponse]]
 
@@ -138,6 +142,7 @@ class SpendGuard:
         self._pricing = pricing_data
         self._run_spent_units = 0
         self._history_warned = False
+        self.history_dropped = 0
         self._lock = threading.Lock()  # guards _run_spent_units in this process
         self.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._ledger_path = self.state_dir / "ledger.json"
@@ -159,6 +164,8 @@ class SpendGuard:
     @contextlib.contextmanager
     def _ledger(self) -> Iterator[dict[str, object]]:
         """Yield the ledger under an exclusive lock, then write it back atomically."""
+        if fcntl is None:
+            raise LedgerError("the spend guard needs fcntl (POSIX file locks) and cannot run on this platform")
         deadline = time.monotonic() + _LOCK_TIMEOUT_S
         with open(self._lock_path, "a+") as lock_file:
             while True:
@@ -226,6 +233,7 @@ class SpendGuard:
             with open(self._history_path, "a") as handle:
                 handle.write(json.dumps(record) + "\n")
         except OSError as exc:
+            self.history_dropped += 1
             if not self._history_warned:
                 self._history_warned = True
                 print(
@@ -368,7 +376,7 @@ class SpendGuard:
             raise
         try:
             self.settle(reservation, response)
-        except SpendGuardError as exc:
+        except Exception as exc:  # noqa: BLE001 - any settle failure, including OSError, must keep the response
             # The call succeeded and was billed. Keep the response, keep the
             # reservation as spent (over-counting is safe), and say what happened.
             print(
