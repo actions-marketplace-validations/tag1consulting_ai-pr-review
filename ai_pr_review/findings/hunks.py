@@ -8,10 +8,7 @@ to a model as data and never as instructions.
 
 from __future__ import annotations
 
-import re
-
-_FILE_HEADER = re.compile(r"^diff --git a/(.+) b/(.+)$")
-_HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+from ai_pr_review.diff.parse import parse_diff
 
 DEFAULT_CONTEXT_LINES = 6
 DEFAULT_MAX_CHARS = 1500
@@ -22,33 +19,11 @@ _Entry = tuple[int | None, str, str]
 
 def _hunks_for_file(diff_text: str, file: str) -> list[list[_Entry]]:
     hunks: list[list[_Entry]] = []
-    in_file = False
-    current: list[_Entry] | None = None
-    new_no = 0
-    for raw in diff_text.splitlines():
-        header = _FILE_HEADER.match(raw)
-        if header:
-            in_file = header.group(2) == file
-            current = None
+    for parsed in parse_diff(diff_text):
+        if parsed.path != file:
             continue
-        if not in_file:
-            continue
-        hunk = _HUNK_HEADER.match(raw)
-        if hunk:
-            current = []
-            hunks.append(current)
-            new_no = int(hunk.group(1))
-            continue
-        if current is None or raw.startswith("\\"):
-            continue
-        if raw.startswith("+"):
-            current.append((new_no, "+", raw[1:]))
-            new_no += 1
-        elif raw.startswith("-"):
-            current.append((None, "-", raw[1:]))
-        else:
-            current.append((new_no, " ", raw[1:]))
-            new_no += 1
+        for hunk in parsed.hunks:
+            hunks.append([(row.new_no, row.marker, row.text) for row in hunk.rows])
     return hunks
 
 

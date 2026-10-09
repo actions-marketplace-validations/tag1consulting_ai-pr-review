@@ -41,6 +41,7 @@ from urllib.parse import quote
 
 import httpx
 
+from ai_pr_review.diff.parse import FileDiff, Hunk, parse_diff
 from ai_pr_review.findings.models import Finding
 from ai_pr_review.manifest import ChangedFiles
 
@@ -105,29 +106,17 @@ class LookupResult:
 
 def added_lines(diff_text: str) -> dict[str, list[tuple[int, str]]]:
     """Return ``{path: [(new_line_number, text), ...]}`` for every added line."""
+    return _added_from(parse_diff(diff_text))
+
+
+def _added_from(files: list[FileDiff]) -> dict[str, list[tuple[int, str]]]:
     result: dict[str, list[tuple[int, str]]] = {}
-    current = ""
-    line_no = 0
-    for raw in diff_text.splitlines():
-        if raw.startswith("+++ "):
-            path = raw[4:]
-            current = path[2:] if path.startswith("b/") else ""
-            if current:
-                result.setdefault(current, [])
+    for file in files:
+        if file.new_path is None:
             continue
-        match = re.match(r"^@@ -\d+(?:,\d+)? \+(\d+)", raw)
-        if match:
-            line_no = int(match.group(1))
-            continue
-        if not current or raw.startswith("--- ") or raw.startswith("\\"):
-            continue
-        if raw.startswith("+"):
-            result[current].append((line_no, raw[1:]))
-            line_no += 1
-        elif raw.startswith("-"):
-            continue
-        else:
-            line_no += 1
+        added = result.setdefault(file.new_path, [])
+        for hunk in file.hunks:
+            added.extend((row.new_no, row.text) for row in hunk.rows if row.marker == "+" and row.new_no is not None)
     return result
 
 
@@ -138,58 +127,12 @@ def _read(path: str) -> str:
         return ""
 
 
-@dataclass(frozen=True)
-class _Hunk:
-    new_start: int
-    new_count: int
-    old_side: list[str]
-    new_side: list[str]
+def _hunks_by_file(diff_text: str) -> dict[str, list[Hunk]]:
+    """Each changed file's hunks, keyed by the path the file has after the change."""
+    return {f.new_path: f.hunks for f in parse_diff(diff_text) if f.new_path is not None}
 
 
-def _hunks_by_file(diff_text: str) -> dict[str, list[_Hunk]]:
-    """Parse each file's hunks, keeping the old-side and new-side text of every hunk."""
-    result: dict[str, list[_Hunk]] = {}
-    current = ""
-    header: tuple[int, int] | None = None
-    old_side: list[str] = []
-    new_side: list[str] = []
-
-    def flush() -> None:
-        nonlocal header
-        if header is not None and current:
-            result.setdefault(current, []).append(_Hunk(header[0], header[1], old_side[:], new_side[:]))
-        header = None
-        old_side.clear()
-        new_side.clear()
-
-    for raw in diff_text.splitlines():
-        if raw.startswith("diff --git "):
-            flush()
-            current = ""
-            continue
-        if raw.startswith("+++ ") and header is None:
-            path = raw[4:]
-            current = path[2:] if path.startswith("b/") else ""
-            continue
-        match = re.match(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", raw)
-        if match:
-            flush()
-            header = (int(match.group(1)), 1 if match.group(2) is None else int(match.group(2)))
-            continue
-        if header is None or raw.startswith("\\"):
-            continue
-        if raw.startswith("-"):
-            old_side.append(raw[1:])
-        elif raw.startswith("+"):
-            new_side.append(raw[1:])
-        else:
-            old_side.append(raw[1:])
-            new_side.append(raw[1:])
-    flush()
-    return result
-
-
-def _rebuild_base(new_text: str, hunks: list[_Hunk]) -> str | None:
+def _rebuild_base(new_text: str, hunks: list[Hunk]) -> str | None:
     """Undo a file's hunks to get its text before the change, or None when they do not fit.
 
     Each hunk's new-side text must match the file. If it does not (a changed line
@@ -274,26 +217,24 @@ def _declared_names(base_name: str, text: str) -> set[str] | None:
 _REGISTRY_CONFIG_NAMES = frozenset({".npmrc", ".yarnrc", ".yarnrc.yml"})
 
 
-def _registry_config_changed(diff_text: str) -> bool:
+def _registry_config_changed(files: list[FileDiff]) -> bool:
     """True when the diff touches a file that can point npm or cargo at a private registry."""
-    for match in re.finditer(r"^diff --git a/(.+?) b/(.+)$", diff_text, re.MULTILINE):
-        for name in match.groups():
+    for file in files:
+        for name in (file.old_path, file.new_path):
+            if name is None:
+                continue
             path = Path(name)
             if path.name in _REGISTRY_CONFIG_NAMES or (path.parent.name == ".cargo" and path.name in ("config", "config.toml")):
                 return True
     return False
 
 
-def _renamed_paths(diff_text: str) -> set[str]:
+def _renamed_paths(files: list[FileDiff]) -> set[str]:
     """New paths of files the diff renames or moves."""
-    return {
-        new
-        for old, new in re.findall(r"^diff --git a/(.+?) b/(.+)$", diff_text, re.MULTILINE)
-        if old != new
-    }
+    return {f.new_path for f in files if f.renamed and f.new_path is not None}
 
 
-def _already_declared(path: str, diff_hunks: dict[str, list[_Hunk]]) -> set[str]:
+def _already_declared(path: str, diff_hunks: dict[str, list[Hunk]]) -> set[str]:
     """Names the manifest declared before this diff. Empty when that cannot be worked out."""
     hunks = diff_hunks.get(path)
     if not hunks:
@@ -444,8 +385,9 @@ def _deps_from_gemfile(path: str, added: list[tuple[int, str]]) -> list[Dep]:
 
 def collect_new_deps(changed_files: ChangedFiles, diff_text: str) -> list[Dep]:
     """New direct dependencies on added lines of the changed manifests."""
-    by_file = added_lines(diff_text)
-    diff_hunks = _hunks_by_file(diff_text)
+    files = parse_diff(diff_text)
+    by_file = _added_from(files)
+    diff_hunks = {f.new_path: f.hunks for f in files if f.new_path is not None}
     deps: list[Dep] = []
     for path in changed_files.manifest_lockfile:
         added = by_file.get(path)
@@ -466,8 +408,8 @@ def collect_new_deps(changed_files: ChangedFiles, diff_text: str) -> list[Dep]:
     # If the same change adds, removes or edits registry config, the old manifest's names may
     # have come from a private registry. Trust none of them: check every added dependency.
     # A moved manifest may have left the directory whose registry config its old names relied on.
-    trust_base = not _registry_config_changed(diff_text)
-    renamed = _renamed_paths(diff_text)
+    trust_base = not _registry_config_changed(files)
+    renamed = _renamed_paths(files)
     already = {
         path: _already_declared(path, diff_hunks) if trust_base and path not in renamed else set()
         for path in {d.file for d in deps}
