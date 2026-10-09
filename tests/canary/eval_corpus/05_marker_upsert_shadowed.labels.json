@@ -6,7 +6,7 @@
   "bugs": [
     {
       "file": "ai_pr_review/vcs/marker.py",
-      "line_start": 567,
+      "line_start": 556,
       "line_end": 568,
       "category": "edge-case",
       "summary": "the replace path always prefers the HTML comment marker when both forms are present, but the reader treats the last marker by position as live, so the write can patch a stale shadowed marker"
