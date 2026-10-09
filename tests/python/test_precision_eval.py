@@ -452,6 +452,34 @@ def test_judge_eval_rejects_an_unknown_condition() -> None:
     assert [c.name for c in je._selected("")] == ["text-sonnet", "code-sonnet", "text-haiku", "code-haiku", "v2-sonnet"]
 
 
+class _FailingGuard:
+    """Stands in for the spend guard: every billed call raises the given error."""
+
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+
+    async def call(self, llm_call: Any, request: Any) -> Any:
+        raise self._error
+
+
+@pytest.mark.anyio
+async def test_judge_eval_does_not_hide_a_cache_miss_behind_the_fail_soft_judge(tmp_path: Path) -> None:
+    """judge_findings catches every call error and returns the findings unchanged. In the eval that
+    would turn a replay-mode cache miss into a normal-looking report, so run_conditions must raise."""
+    fx = _fixture([_label()])
+    cache = cache_mod.LLMCache(cache_dir=tmp_path, mode="replay")
+    with pytest.raises(cache_mod.CacheMiss):
+        await je.run_conditions([(fx, [_finding()])], [je.CONDITIONS[0]], cache, None)
+
+
+@pytest.mark.anyio
+async def test_judge_eval_turns_a_failed_call_into_an_error_not_a_quiet_zero(tmp_path: Path) -> None:
+    fx = _fixture([_label()])
+    cache = cache_mod.LLMCache(cache_dir=tmp_path, mode="auto")
+    with pytest.raises(RuntimeError, match="the judge call failed, so its score would be wrong"):
+        await je.run_conditions([(fx, [_finding()])], [je.CONDITIONS[0]], cache, _FailingGuard(ValueError("boom")))
+
+
 # --- corpus override and the fixture miner (pure helpers, no network) ---
 
 mf = _load("mine_fixtures")

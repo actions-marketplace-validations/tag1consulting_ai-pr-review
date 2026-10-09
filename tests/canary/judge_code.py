@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
 from pathlib import Path
 
 from ai_pr_review.agents.dispatch import LLMCall
@@ -27,6 +28,8 @@ from ai_pr_review.diff.parse import parse_diff
 from ai_pr_review.findings.judge import JudgeResult, judge_findings
 from ai_pr_review.findings.models import Finding
 from ai_pr_review.llm.base import LLMRequest, LLMResponse
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_CONTEXT_LINES = 6
 DEFAULT_MAX_CHARS = 1500
@@ -81,14 +84,26 @@ def _candidate_code(kept: list[Finding], diff_text: str) -> list[str]:
 
 
 def _unsupported_to_downrank(text: str) -> str:
-    """Rewrite ``unsupported`` verdicts to ``downrank`` in a judge reply. Other text is unchanged."""
+    """Rewrite ``unsupported`` verdicts to ``downrank`` in a judge reply.
+
+    A reply that cannot be read is returned unchanged and a warning is logged, because the
+    production judge then leaves the finding unjudged and the eval would score it as kept.
+    A leading markdown fence is stripped first, as the production judge does.
+    """
+    body = text.strip()
+    if body.startswith("```"):
+        body = body.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
     try:
-        parsed = json.loads(text)
-        for verdict in parsed["verdicts"]:
-            if verdict.get("verdict") == "unsupported":
-                verdict["verdict"] = "downrank"
-    except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
+        parsed = json.loads(body)
+        verdicts = parsed["verdicts"]
+        if not isinstance(verdicts, list):
+            raise TypeError(f"verdicts is a {type(verdicts).__name__}, not a list")
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        logger.warning("judge_code: cannot rewrite the judge reply (%s); 'unsupported' verdicts stay as they are", exc)
         return text
+    for verdict in verdicts:
+        if isinstance(verdict, dict) and verdict.get("verdict") == "unsupported":
+            verdict["verdict"] = "downrank"
     return json.dumps(parsed, ensure_ascii=False)
 
 

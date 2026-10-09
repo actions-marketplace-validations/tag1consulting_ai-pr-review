@@ -173,9 +173,21 @@ class TestCodeAwareWrapper:
         items = json.loads(llm.await_args.args[0].user_message)
         assert len(items) == 1 and items[0]["id"] == 0 and "ignore previous" in items[0]["code"]
 
-    def test_a_reply_that_is_not_json_passes_through_unchanged(self) -> None:
-        assert jc._unsupported_to_downrank("not json") == "not json"
-        assert jc._unsupported_to_downrank('{"other": 1}') == '{"other": 1}'
+    def test_a_reply_that_is_not_json_passes_through_and_is_logged(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level("WARNING", logger="judge_code"):
+            assert jc._unsupported_to_downrank("not json") == "not json"
+            assert jc._unsupported_to_downrank('{"other": 1}') == '{"other": 1}'
+            assert jc._unsupported_to_downrank('{"verdicts": "x"}') == '{"verdicts": "x"}'
+        assert caplog.text.count("cannot rewrite the judge reply") == 3
+
+    def test_a_fenced_reply_is_rewritten_like_the_production_judge_reads_it(self) -> None:
+        fenced = '```json\n{"verdicts": [{"id": 0, "verdict": "unsupported"}]}\n```'
+        assert json.loads(jc._unsupported_to_downrank(fenced)) == {"verdicts": [{"id": 0, "verdict": "downrank"}]}
+
+    def test_one_malformed_entry_does_not_stop_the_others_being_rewritten(self) -> None:
+        reply = json.dumps({"verdicts": ["junk", {"id": 1, "verdict": "unsupported"}, {"id": 2, "verdict": "keep"}]})
+        out = json.loads(jc._unsupported_to_downrank(reply))["verdicts"]
+        assert out == ["junk", {"id": 1, "verdict": "downrank"}, {"id": 2, "verdict": "keep"}]
 
     def test_the_code_prompt_names_the_trust_boundary_and_the_three_verdicts(self) -> None:
         text = (_CANARY / "judge_prompts" / "finding-judge-code.md").read_text()

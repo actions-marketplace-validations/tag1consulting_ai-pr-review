@@ -259,8 +259,18 @@ async def run_conditions(per_fixture, conditions, cache, guard):  # type: ignore
     cached = pe._CachedGuard(cache, guard if guard is not None else pe._NoCallsAllowed())
     results = [score_condition("none", per_fixture)]
     for cond in conditions:
+        # judge_findings is fail-soft: it catches every error from the call and returns the findings
+        # unchanged. For a production review that is right. For an eval it would hide a spend cap,
+        # a cache miss, or a failed call behind a report that looks normal. Record each failure here
+        # and raise after the judge returns.
+        call_errors: list[Exception] = []
+
         async def llm_call(req: LLMRequest) -> LLMResponse:
-            return await cached.call(lambda r: ce.call_llm(r, pe.PROVIDER), req)
+            try:
+                return await cached.call(lambda r: ce.call_llm(r, pe.PROVIDER), req)
+            except Exception as exc:
+                call_errors.append(exc)
+                raise
 
         judged = []
         for fx, findings in per_fixture:
@@ -277,6 +287,11 @@ async def run_conditions(per_fixture, conditions, cache, guard):  # type: ignore
                 result = await judge_findings(
                     findings, llm_call=llm_call, model=cond.model, prompt_path=cond.prompt
                 )
+            if call_errors:
+                exc = call_errors[0]
+                if isinstance(exc, (_llm_cache.CacheError, _llm_cache.CacheMiss, _spend_guard.SpendGuardError)):
+                    raise exc
+                raise RuntimeError(f"{cond.name} :: {fx.name}: the judge call failed, so its score would be wrong: {exc}") from exc
             judged.append((fx, result.findings))
         results.append(score_condition(cond.name, judged))
     return results
