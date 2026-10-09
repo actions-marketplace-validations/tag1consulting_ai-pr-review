@@ -51,6 +51,7 @@ import importlib.util
 import json
 import math
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,6 +67,13 @@ import _spend_guard  # noqa: E402
 from ai_pr_review.findings.models import Finding  # noqa: E402
 
 CORPUS_DIR = CANARY_DIR / "eval_corpus"
+
+
+def resolve_corpus_dir() -> Path:
+    """The fixture directory: ``AI_EVAL_CORPUS_DIR`` if set (for example a corpus
+    made by ``mine_fixtures.py``), else the hand-built corpus in the repository."""
+    override = os.environ.get("AI_EVAL_CORPUS_DIR", "").strip()
+    return Path(override).expanduser() if override else CORPUS_DIR
 DEFAULT_MODELS = ("claude-sonnet-5-5",)
 DEFAULT_AGENTS = ("code-reviewer",)
 LINE_WINDOW = 5  # the harness documents that a model anchors one finding a few lines apart
@@ -128,9 +136,10 @@ def _labels(raw: object, where: str) -> list[Label]:
     return out
 
 
-def load_fixtures(corpus_dir: Path = CORPUS_DIR) -> list[Fixture]:
+def load_fixtures(corpus_dir: Path | None = None) -> list[Fixture]:
     fixtures = []
-    for diff in sorted(corpus_dir.glob("*.diff")):
+    directory = corpus_dir if corpus_dir is not None else resolve_corpus_dir()
+    for diff in sorted(directory.glob("*.diff")):
         label_path = diff.with_suffix(".labels.json")
         if not label_path.is_file():
             raise ValueError(f"{diff.name} has no {label_path.name}")
@@ -372,6 +381,23 @@ def _csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     return items or default
 
 
+def apply_slice(fixtures: list[Fixture], spec: str) -> list[Fixture]:
+    """Keep ``fixtures[a:b]`` for a spec like ``0:35``. An empty spec keeps all.
+
+    A large corpus is run in slices so each invocation stays under the run cap.
+    Saved responses are shared, so slices add up and a repeat run of a slice is free.
+    """
+    spec = spec.strip()
+    if not spec:
+        return fixtures
+    match = re.fullmatch(r"(\d*):(\d*)", spec)
+    if not match:
+        raise ValueError(f"AI_EVAL_FIXTURE_SLICE must look like 0:35, not {spec!r}")
+    start = int(match.group(1) or 0)
+    stop = int(match.group(2)) if match.group(2) else len(fixtures)
+    return fixtures[start:stop]
+
+
 async def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     dry_run = "--dry-run" in argv
@@ -379,12 +405,18 @@ async def main(argv: list[str] | None = None) -> int:
     models = _csv("AI_EVAL_MODELS", DEFAULT_MODELS)
     agents = _csv("AI_EVAL_AGENTS", DEFAULT_AGENTS)
     try:
-        fixtures = load_fixtures()
+        all_fixtures = load_fixtures()
+        slice_spec = os.environ.get("AI_EVAL_FIXTURE_SLICE", "")
+        fixtures = apply_slice(all_fixtures, slice_spec)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     if not fixtures:
-        print(f"ERROR: no fixtures in {CORPUS_DIR}", file=sys.stderr)
+        if all_fixtures:
+            print(f"ERROR: AI_EVAL_FIXTURE_SLICE={slice_spec!r} selects none of the {len(all_fixtures)} "
+                  f"fixtures in {resolve_corpus_dir()}.", file=sys.stderr)
+        else:
+            print(f"ERROR: no fixtures in {resolve_corpus_dir()}", file=sys.stderr)
         return 1
     try:
         cache = _llm_cache.LLMCache.from_env(namespace=PROVIDER)

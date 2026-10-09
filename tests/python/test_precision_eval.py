@@ -450,3 +450,108 @@ def test_judge_eval_rejects_an_unknown_condition() -> None:
     with pytest.raises(ValueError, match="unknown condition"):
         je._selected("code-sonnet,nonsense")
     assert [c.name for c in je._selected("")] == ["text-sonnet", "code-sonnet", "text-haiku", "code-haiku"]
+||||||| 1667c23
+
+
+# --- corpus override and the fixture miner (pure helpers, no network) ---
+
+mf = _load("mine_fixtures")
+
+
+def test_corpus_dir_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    (tmp_path / "a.diff").write_text("d")
+    (tmp_path / "a.labels.json").write_text(json.dumps({"bugs": [
+        {"file": "f.py", "line_start": 1, "line_end": 2, "category": "edge-case", "summary": "s"}]}))
+    monkeypatch.setenv("AI_EVAL_CORPUS_DIR", str(tmp_path))
+    assert [f.name for f in pe.load_fixtures()] == ["a"]
+    monkeypatch.delenv("AI_EVAL_CORPUS_DIR")
+    assert pe.resolve_corpus_dir() == pe.CORPUS_DIR
+
+
+def test_miner_reads_removed_ranges_from_a_u0_patch() -> None:
+    patch = "@@ -10,3 +10,2 @@\n-a\n@@ -20 +19,0 @@\n-b\n@@ -30,0 +30,2 @@\n+c\n"
+    assert mf.removed_ranges(patch) == [(10, 3), (20, 1)]
+
+
+def test_miner_parses_blame_porcelain() -> None:
+    sha = "a" * 40
+    other = "b" * 40
+    porcelain = f"{sha} 7 12 1\nauthor x\n\tcode\n{other} 3 13\n\tmore\n"
+    assert mf.parse_blame(porcelain) == [(sha, 7), (other, 3)]
+
+
+def test_miner_added_line_numbers_and_summary() -> None:
+    diff = "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,2 +5,3 @@\n ctx\n+new\n-old\n+new2\n"
+    assert mf.added_line_numbers(diff) == {6, 7}
+    assert mf.summary_of("fix: subject\n\nFirst paragraph\nwraps here.\n\nSecond.\n\nThird.") == (
+        "fix: subject First paragraph wraps here.")
+    assert len(mf.summary_of("x " * 500)) <= mf.MAX_SUMMARY_CHARS
+
+
+def test_miner_writes_labels_the_loader_accepts(tmp_path: Path) -> None:
+    m = mf.Mined("abc123def", "fff000fff", "ai_pr_review/x.py", 5, 7, "fix: it", "diff --git a/f b/f\n")
+    assert mf.write([m, m], tmp_path) == 1
+    fixtures = pe.load_fixtures(tmp_path)
+    assert len(fixtures) == 1 and fixtures[0].source == "mined" and fixtures[0].evidence == "weak"
+    assert fixtures[0].bugs[0].line_start == 5
+
+
+def test_fixture_slice() -> None:
+    items = list(range(10))
+    assert pe.apply_slice(items, "") == items  # type: ignore[arg-type]
+    assert pe.apply_slice(items, "2:5") == [2, 3, 4]  # type: ignore[arg-type]
+    assert pe.apply_slice(items, "7:") == [7, 8, 9]  # type: ignore[arg-type]
+    assert pe.apply_slice(items, ":3") == [0, 1, 2]  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="0:35"):
+        pe.apply_slice(items, "abc")
+
+
+# --- review follow-ups: harvest errors, miner failures, empty slice ---
+
+
+def test_harvest_summary_reports_failed_compare_calls() -> None:
+    harvest.COMPARE_FAILURES.clear()
+    rows = [{"outcome": "untouched"}]
+    assert "compare call" not in harvest.summarize(rows)
+    harvest.COMPARE_FAILURES.append("repo a...b: boom")
+    assert "1 compare call(s) failed" in harvest.summarize(rows)
+    harvest.COMPARE_FAILURES.clear()
+
+
+def test_harvest_one_bad_pr_does_not_lose_the_others(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+
+    def fake_gh(path: str) -> Any:
+        if "pulls?state=closed" in path:
+            return [{"number": 1, "merged_at": "x"}, {"number": 2, "merged_at": "x"}]
+        raise AssertionError(path)
+
+    def fake_pr(repo: str, pr: dict[str, Any]) -> list[dict[str, Any]]:
+        if pr["number"] == 1:
+            raise subprocess.CalledProcessError(1, "gh", stderr="rate limit")
+        return [{"pr": pr["number"], "outcome": "untouched"}]
+
+    monkeypatch.setattr(harvest, "_gh", fake_gh)
+    monkeypatch.setattr(harvest, "_harvest_pr", fake_pr)
+    assert harvest.harvest_repo("tag1consulting/ai-pr-review", 10) == [{"pr": 2, "outcome": "untouched"}]
+
+
+def test_miner_records_a_tolerated_git_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    mf.GIT_FAILURES.clear()
+    assert mf._git("rev-parse", "--verify", "--quiet", "no-such-ref-xyz", check=False) == ""
+    assert mf.GIT_FAILURES and "rev-parse" in mf.GIT_FAILURES[0]
+    mf.GIT_FAILURES.clear()
+
+
+def test_miner_default_ref_falls_back_to_head(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert mf.default_ref() in ("origin/main", "HEAD")
+
+
+@pytest.mark.anyio
+async def test_empty_slice_is_not_reported_as_an_empty_corpus(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("AI_EVAL_FIXTURE_SLICE", "500:600")
+    assert await pe.main(["--dry-run"]) == 1
+    err = capsys.readouterr().err
+    assert "selects none of the" in err and "no fixtures in" not in err

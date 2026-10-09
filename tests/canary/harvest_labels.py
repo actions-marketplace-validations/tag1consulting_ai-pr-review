@@ -92,36 +92,55 @@ def harvest_repo(repo: str, limit: int) -> list[dict[str, Any]]:
     merged = [p for p in pulls if p.get("merged_at")][:limit]
     for pr in merged:
         number = pr["number"]
-        comments = _gh(f"repos/{repo}/pulls/{number}/comments?per_page=100")
-        bot = [c for c in comments if c.get("user", {}).get("type") == "Bot" and decode_marker(c.get("body", ""))]
-        replies: dict[int, list[str]] = {}
-        for c in comments:
-            parent = c.get("in_reply_to_id")
-            if parent:
-                replies.setdefault(parent, []).append(c.get("body", ""))
-        compare_cache: dict[str, dict[str, str]] = {}
-        for c in bot:
-            marker = decode_marker(c["body"]) or {}
-            commit = c.get("original_commit_id") or c.get("commit_id") or ""
-            if commit not in compare_cache:
-                compare_cache[commit] = _changed_patches(repo, commit, pr.get("merge_commit_sha") or "")
-            line = c.get("line") or c.get("original_line") or 0
-            patch = compare_cache[commit].get(c.get("path", ""), "")
-            command = dismiss_command(replies.get(c["id"], []))
-            fid = _FINDING_ID.search(c.get("body", ""))
-            rows.append({
-                "repo": repo, "pr": number, "finding": f"F{fid.group(1)}" if fid else "",
-                "file": c.get("path", ""), "line": line,
-                "severity": marker.get("sev", ""), "category": marker.get("cat", ""),
-                "confidence": marker.get("conf"), "judge": marker.get("jv", ""),
-                "outcome": ("dismissed" if command else "line-changed" if line and patch_touches(patch, line) else "untouched"),
-                "dismiss_command": command or "",
-            })
+        try:
+            rows += _harvest_pr(repo, pr)
+        except (subprocess.SubprocessError, ValueError) as exc:
+            # One bad PR must not discard the rows already collected.
+            print(f"warning: skipped {repo}#{number}: {exc}", file=sys.stderr)
     return rows
+
+
+def _harvest_pr(repo: str, pr: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    number = pr["number"]
+    comments = _gh(f"repos/{repo}/pulls/{number}/comments?per_page=100")
+    bot = [c for c in comments if c.get("user", {}).get("type") == "Bot" and decode_marker(c.get("body", ""))]
+    replies: dict[int, list[str]] = {}
+    for c in comments:
+        parent = c.get("in_reply_to_id")
+        if parent:
+            replies.setdefault(parent, []).append(c.get("body", ""))
+    compare_cache: dict[str, dict[str, str]] = {}
+    for c in bot:
+        marker = decode_marker(c["body"]) or {}
+        commit = c.get("original_commit_id") or c.get("commit_id") or ""
+        if commit not in compare_cache:
+            # Compare to the PR head, not the merge commit. A squash merge commit
+            # holds the whole PR, so nearly every cited line would look changed.
+            compare_cache[commit] = _changed_patches(repo, commit, (pr.get("head") or {}).get("sha") or "")
+        # The compare range starts at the commit the finding was posted on, so the
+        # line number must be the one in that commit.
+        line = c.get("original_line") or c.get("line") or 0
+        patch = compare_cache[commit].get(c.get("path", ""), "")
+        command = dismiss_command(replies.get(c["id"], []))
+        fid = _FINDING_ID.search(c.get("body", ""))
+        rows.append({
+            "repo": repo, "pr": number, "finding": f"F{fid.group(1)}" if fid else "",
+            "file": c.get("path", ""), "line": line,
+            "severity": marker.get("sev", ""), "category": marker.get("cat", ""),
+            "confidence": marker.get("conf"), "judge": marker.get("jv", ""),
+            "outcome": ("dismissed" if command else "line-changed" if line and patch_touches(patch, line) else "untouched"),
+            "dismiss_command": command or "",
+        })
+    return rows
+
+
+COMPARE_FAILURES: list[str] = []
 
 
 def _changed_patches(repo: str, base: str, head: str) -> dict[str, str]:
     if not base or not head:
+        COMPARE_FAILURES.append(f"{repo} {base[:9] or '?'}...{head[:9] or '?'}: missing commit")
         return {}
     try:
         data = subprocess.run(
@@ -129,7 +148,10 @@ def _changed_patches(repo: str, base: str, head: str) -> dict[str, str]:
             capture_output=True, text=True, check=True, timeout=120,
         ).stdout
         files = json.loads(data).get("files", [])
-    except (subprocess.SubprocessError, ValueError):
+    except (subprocess.SubprocessError, ValueError) as exc:
+        detail = getattr(exc, "stderr", "") or str(exc)
+        COMPARE_FAILURES.append(f"{repo} {base[:9]}...{head[:9]}: {detail[:120]}")
+        print(f"warning: compare failed for {repo} {base[:9]}...{head[:9]}: {detail[:200]}", file=sys.stderr)
         return {}
     return {f["filename"]: f.get("patch", "") for f in files if isinstance(f, dict) and "filename" in f}
 
@@ -142,7 +164,11 @@ def summarize(rows: list[dict[str, Any]]) -> str:
     for r in rows:
         counts[r["outcome"]] = counts.get(r["outcome"], 0) + 1
     parts = [f"{k}={v} ({100 * v / total:.0f}%)" for k, v in sorted(counts.items())]
-    return f"{total} findings: " + ", ".join(parts)
+    text = f"{total} findings: " + ", ".join(parts)
+    if COMPARE_FAILURES:
+        text += (f". {len(COMPARE_FAILURES)} compare call(s) failed, so some findings may read "
+                 "as untouched because the diff was not available")
+    return text
 
 
 def main(argv: list[str] | None = None) -> int:
