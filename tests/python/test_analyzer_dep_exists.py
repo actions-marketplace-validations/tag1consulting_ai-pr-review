@@ -446,6 +446,113 @@ class TestRebuildBase:
         assert {r.url.path for r in registry} == {"/invented-pkg"}
 
 
+class TestHardening:
+    """AI review round 3: F25 to F29 and F34."""
+
+    @staticmethod
+    def _not_root() -> None:
+        import os
+
+        if os.geteuid() == 0:
+            pytest.skip("file permissions do not stop root")
+
+    def test_an_unreadable_manifest_is_skipped_and_reported_not_read_as_empty(
+        self, work: Path, registry: Registry, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """F25: an empty read would hide a private index declared in the file."""
+        import os
+
+        self._not_root()
+        (work / "requirements.txt").write_text("--extra-index-url https://pypi.internal.example/simple\ninternal-lib==1\n")
+        diff = work / "d.diff"
+        diff.write_text(_diff("requirements.txt", ["internal-lib==1"]))
+        os.chmod(work / "requirements.txt", 0)
+        try:
+            with caplog.at_level("WARNING", logger=de.logger.name):
+                found = de._run_dep_exists(_cf("requirements.txt"), diff)
+        finally:
+            os.chmod(work / "requirements.txt", 0o644)
+        assert found == [] and len(registry) == 0
+        assert "cannot read 'requirements.txt' (PermissionError)" in caplog.text
+
+    def test_an_unreadable_npmrc_means_a_private_registry_may_exist(
+        self, work: Path, registry: Registry, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """F28: a PermissionError on a registry config is not the same as no config."""
+        import os
+
+        self._not_root()
+        (work / ".npmrc").write_text("registry=https://npm.internal.example/\n")
+        os.chmod(work / ".npmrc", 0)
+        pkg = json.dumps({"dependencies": {"internal-pkg": "1"}})
+        try:
+            with caplog.at_level("WARNING", logger=de.logger.name):
+                found = _run(work, "package.json", pkg, ['"internal-pkg": "1"'])
+        finally:
+            os.chmod(work / ".npmrc", 0o644)
+        assert found == [] and len(registry) == 0
+        assert "cannot read '.npmrc' (PermissionError)" in caplog.text
+
+    def test_a_missing_npmrc_is_silent_and_the_check_runs(self, work: Path, registry: Registry, caplog: pytest.LogCaptureFixture) -> None:
+        pkg = json.dumps({"dependencies": {"invented-pkg": "1"}})
+        with caplog.at_level("WARNING", logger=de.logger.name):
+            found = _run(work, "package.json", pkg, ['"invented-pkg": "1"'])
+        assert [f.severity for f in found] == ["High"]
+        assert "cannot read" not in caplog.text
+
+    def test_a_legacy_cargo_config_in_the_repository_root_is_read(self, work: Path, registry: Registry) -> None:
+        """F27: .cargo/config (no extension) at the root can name a private registry."""
+        (work / ".cargo").mkdir()
+        (work / ".cargo/config").write_text('[registries.internal]\nindex = "https://cargo.internal.example/index"\n')
+        (work / "crates").mkdir()
+        toml = '[package]\nname = "app"\n\n[dependencies]\ninternal-crate = "1.0"\n'
+        assert _run(work, "crates/Cargo.toml", toml, ['internal-crate = "1.0"']) == []
+        assert len(registry) == 0
+
+    def test_the_lookup_time_budget_stops_the_run_and_says_how_many_were_skipped(
+        self, work: Path, registry: Registry, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """F29: one slow registry must not hold the analyzer phase for 25 x the timeout."""
+        monkeypatch.setattr(de, "_TOTAL_BUDGET_SECONDS", -1.0)
+        pkg = json.dumps({"dependencies": {"pkg-a": "1", "pkg-b": "1", "pkg-c": "1"}})
+        with caplog.at_level("WARNING", logger=de.logger.name):
+            found = _run(work, "package.json", pkg, ['"pkg-a": "1"', '"pkg-b": "1"', '"pkg-c": "1"'])
+        assert found == [] and len(registry) == 0
+        assert "budget for registry lookups is used up, so 3 of 3 new dependencies are not checked" in caplog.text
+
+    def test_a_rebuild_that_does_not_fit_is_logged(self, work: Path, registry: Registry, caplog: pytest.LogCaptureFixture) -> None:
+        """F34: falling back to 'check everything' must not be silent."""
+        (work / "package.json").write_text(json.dumps({"dependencies": {"old-pkg": "2"}}, indent=2) + "\n")
+        diff = work / "d.diff"
+        diff.write_text(
+            "diff --git a/package.json b/package.json\n--- a/package.json\n+++ b/package.json\n"
+            '@@ -1,1 +1,1 @@\n-    "old-pkg": "1"\n+    "old-pkg": "9"\n'
+        )
+        with caplog.at_level("WARNING", logger=de.logger.name):
+            de._run_dep_exists(_cf("package.json"), diff)
+        assert "the diff does not fit 'package.json', so every added dependency in it is checked" in caplog.text
+
+    def test_an_old_manifest_that_cannot_be_parsed_is_logged(self, work: Path, registry: Registry, caplog: pytest.LogCaptureFixture) -> None:
+        import difflib
+
+        old, new = "{ not json\n", json.dumps({"dependencies": {"x-pkg": "1"}}, indent=2) + "\n"
+        (work / "package.json").write_text(new)
+        diff = work / "d.diff"
+        body = "\n".join(difflib.unified_diff(old.splitlines(), new.splitlines(), "a/package.json", "b/package.json", lineterm="", n=1))
+        diff.write_text("diff --git a/package.json b/package.json\n" + body + "\n")
+        with caplog.at_level("WARNING", logger=de.logger.name):
+            found = de._run_dep_exists(_cf("package.json"), diff)
+        assert "cannot parse the old version of 'package.json'" in caplog.text
+        assert [f.severity for f in found] == ["High"]
+
+    def test_a_move_from_peer_dependencies_to_dependencies_is_looked_up(self, work: Path, registry: Registry) -> None:
+        """F26: a peer is not always installed, so moving it to dependencies is a new install."""
+        old = json.dumps({"name": "app", "peerDependencies": {"peer-pkg": "1"}}, indent=2) + "\n"
+        new = json.dumps({"name": "app", "dependencies": {"peer-pkg": "^1.0.0"}}, indent=2) + "\n"  # the line changes too
+        found = TestVersionBumpsAreNotNew()._run_change(work, "package.json", old, new)
+        assert [f.severity for f in found] == ["High"]
+
+
 class TestFailOpen:
     @pytest.mark.parametrize("status", [301, 302, 403, 429, 500, 503])
     def test_other_statuses_give_no_finding(self, work: Path, registry: Registry, status: int) -> None:

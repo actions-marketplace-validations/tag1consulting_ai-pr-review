@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 import tomllib
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -52,6 +53,9 @@ _AGENT = "dep-exists"
 
 _HTTP_TIMEOUT = 8.0
 _MAX_LOOKUPS = 25
+# Total time for all registry lookups in one run. One slow registry must not hold the analyzer
+# phase for 25 x _HTTP_TIMEOUT.
+_TOTAL_BUDGET_SECONDS = 60.0
 _MAX_BODY_BYTES = 5_000_000
 _NEW_PACKAGE_DAYS = 30
 _USER_AGENT = "ai-pr-review dep-exists (+https://github.com/tag1consulting/ai-pr-review)"
@@ -123,8 +127,23 @@ def _added_from(files: list[FileDiff]) -> dict[str, list[tuple[int, str]]]:
 def _read(path: str) -> str:
     try:
         return Path(path).read_text(encoding="utf-8", errors="replace")
-    except OSError:
+    except OSError as exc:
+        logger.warning("[ai-pr-review] dep-exists: cannot read %r (%s)", path, type(exc).__name__)
         return ""
+
+
+def _readable(path: str) -> bool:
+    """True when the manifest can be read. An unreadable one is skipped, not read as empty.
+
+    An empty read would hide a private index or source declared in the file, and the analyzer
+    would look its names up on the public registry.
+    """
+    try:
+        Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        logger.warning("[ai-pr-review] dep-exists: cannot read %r (%s), so its dependencies are not checked", path, type(exc).__name__)
+        return False
+    return True
 
 
 def _hunks_by_file(diff_text: str) -> dict[str, list[Hunk]]:
@@ -163,7 +182,9 @@ def _declared_names(base_name: str, text: str) -> set[str] | None:
     try:
         if base_name == "package.json":
             data = json.loads(text)
-            for section in ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies"):
+            # peerDependencies are left out on purpose. A peer is not always installed, so a name that
+            # moves from peerDependencies to dependencies is a new install and is looked up.
+            for section in ("dependencies", "devDependencies", "optionalDependencies"):
                 table = data.get(section) if isinstance(data, dict) else None
                 if isinstance(table, dict):
                     names.update(
@@ -241,8 +262,13 @@ def _already_declared(path: str, diff_hunks: dict[str, list[Hunk]]) -> set[str]:
         return set()
     base_text = _rebuild_base(_read(path), hunks)
     if base_text is None:
+        logger.warning("[ai-pr-review] dep-exists: the diff does not fit %r, so every added dependency in it is checked", path)
         return set()
-    return _declared_names(Path(path).name, base_text) or set()
+    names = _declared_names(Path(path).name, base_text)
+    if names is None:
+        logger.warning("[ai-pr-review] dep-exists: cannot parse the old version of %r, so every added dependency in it is checked", path)
+        return set()
+    return names
 
 
 def _added_name_lines(added: list[tuple[int, str]], name: str) -> int | None:
@@ -281,13 +307,34 @@ def _deps_from_package_json(path: str, added: list[tuple[int, str]]) -> list[Dep
     return deps
 
 
+def _read_registry_config(candidate: Path) -> str | None:
+    """The text of a registry config file, or None when it is absent.
+
+    A file that exists and cannot be read (a permission error, for example) may hold a private
+    registry. It is reported as a private registry, so the ecosystem is skipped, because a
+    public lookup would give a false High finding that blocks the pull request.
+    """
+    try:
+        return candidate.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        logger.warning(
+            "[ai-pr-review] dep-exists: cannot read %r (%s), so its ecosystem is treated as having a private registry",
+            str(candidate), type(exc).__name__,
+        )
+        return _UNREADABLE
+
+
+_UNREADABLE = "\0unreadable"
+
+
 def _has_private_npm_registry(directory: Path) -> bool:
     for candidate in (directory / ".npmrc", Path(".npmrc")):
-        try:
-            text = candidate.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+        text = _read_registry_config(candidate)
+        if text is None:
             continue
-        if re.search(r"^\s*(?:@[\w.-]+:)?registry\s*=", text, re.MULTILINE):
+        if text is _UNREADABLE or re.search(r"^\s*(?:@[\w.-]+:)?registry\s*=", text, re.MULTILINE):
             return True
     return False
 
@@ -335,12 +382,16 @@ def _deps_from_cargo_toml(path: str, added: list[tuple[int, str]]) -> list[Dep]:
 
 
 def _has_private_cargo_registry(directory: Path) -> bool:
-    for candidate in (directory / ".cargo" / "config.toml", Path(".cargo/config.toml"), directory / ".cargo" / "config"):
-        try:
-            text = candidate.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+    for candidate in (
+        directory / ".cargo" / "config.toml",
+        directory / ".cargo" / "config",
+        Path(".cargo/config.toml"),
+        Path(".cargo/config"),
+    ):
+        text = _read_registry_config(candidate)
+        if text is None:
             continue
-        if re.search(r"^\s*\[(?:registries|source)\b", text, re.MULTILINE):
+        if text is _UNREADABLE or re.search(r"^\s*\[(?:registries|source)\b", text, re.MULTILINE):
             return True
     return False
 
@@ -408,7 +459,7 @@ def collect_new_deps(changed_files: ChangedFiles, diff_text: str) -> list[Dep]:
             # A manifest in the changed-file list with no entry in the diff is a skipped check.
             # Say so, so a path the diff parser could not match cannot turn the check off quietly.
             logger.warning("[ai-pr-review] dep-exists: %r is in the changed-file list but not in the diff, so its dependencies are not checked", path)
-        if not added or not Path(path).is_file():
+        if not added or not Path(path).is_file() or not _readable(path):
             continue
         base = Path(path).name
         if base == "package.json":
@@ -587,8 +638,16 @@ def _run_dep_exists(changed_files: ChangedFiles, diff_file: Path) -> list[Findin
     now = datetime.now(UTC)
     findings: list[Finding] = []
     unknown = 0
+    started = time.monotonic()
     with httpx.Client(timeout=_HTTP_TIMEOUT, follow_redirects=False, headers={"User-Agent": _USER_AGENT}) as client:
-        for dep in unique:
+        for index, dep in enumerate(unique):
+            if time.monotonic() - started > _TOTAL_BUDGET_SECONDS:
+                logger.warning(
+                    "[ai-pr-review] dep-exists: the %.0f second budget for registry lookups is used up, "
+                    "so %d of %d new dependencies are not checked",
+                    _TOTAL_BUDGET_SECONDS, len(unique) - index, len(unique),
+                )
+                break
             result = lookup(client, dep.ecosystem, dep.name)
             if result.status is Lookup.UNKNOWN:
                 unknown += 1
