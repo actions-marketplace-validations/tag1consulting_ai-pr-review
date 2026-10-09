@@ -51,6 +51,7 @@ import importlib.util
 import json
 import math
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -380,6 +381,23 @@ def _csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     return items or default
 
 
+def apply_slice(fixtures: list[Fixture], spec: str) -> list[Fixture]:
+    """Keep ``fixtures[a:b]`` for a spec like ``0:35``. An empty spec keeps all.
+
+    A large corpus is run in slices so each invocation stays under the run cap.
+    Saved responses are shared, so slices add up and a repeat run of a slice is free.
+    """
+    spec = spec.strip()
+    if not spec:
+        return fixtures
+    match = re.fullmatch(r"(\d*):(\d*)", spec)
+    if not match:
+        raise ValueError(f"AI_EVAL_FIXTURE_SLICE must look like 0:35, not {spec!r}")
+    start = int(match.group(1) or 0)
+    stop = int(match.group(2)) if match.group(2) else len(fixtures)
+    return fixtures[start:stop]
+
+
 async def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     dry_run = "--dry-run" in argv
@@ -387,7 +405,7 @@ async def main(argv: list[str] | None = None) -> int:
     models = _csv("AI_EVAL_MODELS", DEFAULT_MODELS)
     agents = _csv("AI_EVAL_AGENTS", DEFAULT_AGENTS)
     try:
-        fixtures = load_fixtures()
+        fixtures = apply_slice(load_fixtures(), os.environ.get("AI_EVAL_FIXTURE_SLICE", ""))
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

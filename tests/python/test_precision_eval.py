@@ -463,3 +463,13 @@ def test_miner_writes_labels_the_loader_accepts(tmp_path: Path) -> None:
     fixtures = pe.load_fixtures(tmp_path)
     assert len(fixtures) == 1 and fixtures[0].source == "mined" and fixtures[0].evidence == "weak"
     assert fixtures[0].bugs[0].line_start == 5
+
+
+def test_fixture_slice() -> None:
+    items = list(range(10))
+    assert pe.apply_slice(items, "") == items  # type: ignore[arg-type]
+    assert pe.apply_slice(items, "2:5") == [2, 3, 4]  # type: ignore[arg-type]
+    assert pe.apply_slice(items, "7:") == [7, 8, 9]  # type: ignore[arg-type]
+    assert pe.apply_slice(items, ":3") == [0, 1, 2]  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="0:35"):
+        pe.apply_slice(items, "abc")
