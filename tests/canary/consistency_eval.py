@@ -91,6 +91,16 @@ subset), one after (whole profile) -- same corpus/runs/models in both, and
 diff the reports. See #814's PR description for the actual before/after
 numbers.
 
+Spend guard (tests/canary/_spend_guard.py): every billed call is capped at
+$5.00 per run (AI_EVAL_MAX_COST_USD) and $9.00 across all runs on this machine
+(AI_EVAL_CAMPAIGN_CAP_USD). The harness prints a pre-flight estimate and refuses
+to start unless it fits the caps and you pass --yes (or AI_EVAL_YES=1). --dry-run
+prints the estimate and makes no call. The default invocation (14 diffs x 5 runs
+x 2 agents x 2 models) is far over the cap and is refused on purpose. Narrow it:
+
+    AI_EVAL_CORPUS_LIMIT=2 AI_EVAL_RUNS=1 AI_EVAL_AGENTS=code-reviewer \\
+      AI_EVAL_MODELS=claude-haiku-5-5 python tests/canary/consistency_eval.py --yes
+
 Not a pytest suite: this makes real, billed API calls (diffs x arms x runs x
 agents x models) and is intentionally excluded from the default
 `pytest tests/python` run. Invoke directly:
@@ -119,6 +129,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import _spend_guard  # noqa: E402  (tests/canary/_spend_guard.py)
 
 from ai_pr_review.agents.dispatch import (  # noqa: E402
     DispatchContext,
@@ -484,6 +497,65 @@ def _build_dispatch_context(
     )
 
 
+# Set by main(). See tests/canary/_spend_guard.py for the caps and how they work.
+_GUARD: _spend_guard.SpendGuard | None = None
+
+# Allowances for the parts of a call that are not the diff, used only by the
+# pre-flight estimate. The guard charges real usage, so these never limit spend.
+_SHARED_PROMPT_FILES = ("_governance.md", "_knowledge-cutoff.md", "_trailer-findings.md")
+_PROFILE_ALLOWANCE_TOKENS = 2500
+_ENRICHMENT_ALLOWANCE_TOKENS = 8192
+_JUDGE_INPUT_TOKENS = 3000
+_JUDGE_MAX_OUTPUT_TOKENS = 4096
+_EXPECTED_OUTPUT_TOKENS = 4000  # observed agent outputs ran 100 to 4,000 tokens
+_WORST_OUTPUT_TOKENS = 32768  # matches max_tokens_per_agent in _build_dispatch_context
+
+
+def _prompt_tokens(agent_name: str) -> int:
+    """Billed tokens of an agent's system prompt (its file plus the shared ones)."""
+    from ai_pr_review.review.cost_ceiling import estimate_billed_tokens
+
+    spec = next(a for a in AGENTS if a.name == agent_name)
+    names = [Path(spec.prompt_path).name, *_SHARED_PROMPT_FILES]
+    text = "".join(
+        (REPO_ROOT / "prompts" / n).read_text() for n in names if (REPO_ROOT / "prompts" / n).is_file()
+    )
+    return estimate_billed_tokens(text)
+
+
+def _estimate_invocation(
+    diff_paths: list[Path], runs: int, agent_names: tuple[str, ...],
+    arms: tuple[str, ...], models: tuple[str, ...], guard: _spend_guard.SpendGuard,
+) -> tuple[int, int, int]:
+    """Return (expected units, worst-case units, billed calls) for this invocation."""
+    from ai_pr_review.review.cost_ceiling import estimate_billed_tokens
+
+    expected = worst = calls = 0
+    for diff_path in diff_paths:
+        diff_tokens = estimate_billed_tokens(diff_path.read_text())
+        for arm in arms:
+            toggles = _ARM_TOGGLES[arm]
+            for model_id in models:
+                for name in agent_names:
+                    in_tokens = diff_tokens + _prompt_tokens(name) + _PROFILE_ALLOWANCE_TOKENS
+                    if toggles["context_enrichment"]:
+                        in_tokens += _ENRICHMENT_ALLOWANCE_TOKENS
+                    expected += runs * guard.estimate_units(
+                        model_id, input_tokens=in_tokens, output_tokens=_EXPECTED_OUTPUT_TOKENS)
+                    worst += runs * guard.estimate_units(
+                        model_id, input_tokens=in_tokens, output_tokens=_WORST_OUTPUT_TOKENS,
+                        worst_case=True)
+                    calls += runs
+                if toggles["judge"]:
+                    expected += runs * guard.estimate_units(
+                        model_id, input_tokens=_JUDGE_INPUT_TOKENS, output_tokens=1000)
+                    worst += runs * guard.estimate_units(
+                        model_id, input_tokens=_JUDGE_INPUT_TOKENS,
+                        output_tokens=_JUDGE_MAX_OUTPUT_TOKENS, worst_case=True)
+                    calls += runs
+    return expected, worst, calls
+
+
 async def _one_run(model_id: str, agent_names: tuple[str, ...],
                    diff_path: Path, arm: str, script_dir: Path) -> RunOutcome:
     """Run all target agents once over the fixture, then push the results
@@ -493,7 +565,11 @@ async def _one_run(model_id: str, agent_names: tuple[str, ...],
     _maybe_reset_symbol_cache(arm)
 
     async def llm_call(req: LLMRequest) -> LLMResponse:
-        return await call_llm(req, PROVIDER)
+        # Every billed call goes through the spend guard. No guard means no
+        # call: a harness that skipped main() must not bill anything.
+        if _GUARD is None:
+            raise RuntimeError("spend guard is not initialised; run through main()")
+        return await _GUARD.call(lambda r: call_llm(r, PROVIDER), req)
 
     agents = [a for a in AGENTS if a.name in agent_names]
     if not agents:
@@ -785,11 +861,53 @@ async def _run_one_diff(diff_path: Path, runs: int, agent_names: tuple[str, ...]
     return diff_report
 
 
+def _run_preflight(
+    guard: _spend_guard.SpendGuard, diff_paths: list[Path], runs: int,
+    agent_names: tuple[str, ...], arms: tuple[str, ...], models: tuple[str, ...],
+) -> int | None:
+    """Print the estimate and apply the spend guard. Return an exit code to stop
+    now (refused, or --dry-run), or None to go ahead."""
+    argv = sys.argv[1:]
+    dry_run = "--dry-run" in argv
+    try:
+        expected, worst, calls = _estimate_invocation(
+            diff_paths, runs, agent_names, arms, models, guard)
+        print(f"pre-flight: {calls} billed calls")
+        guard.preflight(
+            expected_units=expected, worst_case_units=worst,
+            yes=dry_run or _spend_guard.wants_yes(argv),
+        )
+    except _spend_guard.SpendGuardError as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 1
+    if dry_run:
+        print("dry run: no billed calls were made")
+        return 0
+    return None
+
+
+def _print_guard_summary(guard: _spend_guard.SpendGuard) -> None:
+    print(f"\nspend guard: this run counted {_spend_guard.usd(guard.run_spent_units)} "
+          f"(reservations settled to real usage), campaign total "
+          f"{_spend_guard.usd(guard.campaign_spent_units())} of "
+          f"{_spend_guard.usd(guard.campaign_cap_units)}")
+    if guard.history_dropped:
+        print(f"WARNING: {guard.history_dropped} audit-log record(s) could not be written, so the "
+              f"history file is incomplete. The ledger total above is still correct.")
+
+
 async def main() -> int:
-    if not os.environ.get(API_KEY_ENV):
+    global _GUARD
+    if "--dry-run" not in sys.argv[1:] and not os.environ.get(API_KEY_ENV):
         print(f"ERROR: {API_KEY_ENV} not set; this harness makes real billed "
               f"API calls and cannot run without it.", file=sys.stderr)
         return 1
+    try:
+        guard = _spend_guard.SpendGuard.from_env("consistency_eval")
+    except _spend_guard.SpendGuardError as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 1
+    _GUARD = guard
 
     runs = int(os.environ.get("AI_EVAL_RUNS", str(DEFAULT_RUNS)))
     jaccard_threshold = float(os.environ.get("AI_EVAL_JACCARD", str(DEFAULT_JACCARD)))
@@ -832,6 +950,10 @@ async def main() -> int:
               f"{len(agent_names)} agents x {len(models)} models = "
               f"{total_calls} billed agent calls, plus judge-arm judge calls)\n")
 
+        stop = _run_preflight(guard, corpus_files, runs, agent_names, arms, models)
+        if stop is not None:
+            return stop
+
         diff_reports: list[DiffReport] = []
         for diff_path in corpus_files:
             dr = await _run_one_diff(diff_path, runs, agent_names, arms, models,
@@ -841,6 +963,7 @@ async def main() -> int:
         for dr in diff_reports:
             _print_diff_report(dr)
         _print_corpus_summary(diff_reports)
+        _print_guard_summary(guard)
 
         any_usable = any(
             mr.runs_ok >= 2 for dr in diff_reports for mr in dr.model_reports
@@ -866,9 +989,14 @@ async def main() -> int:
           f"{len(arms) * runs * len(agent_names) * len(models)} billed agent calls, "
           f"plus one judge call per run with findings if the judge arm is active)\n")
 
+    stop = _run_preflight(guard, [diff_path], runs, agent_names, arms, models)
+    if stop is not None:
+        return stop
+
     dr = await _run_one_diff(diff_path, runs, agent_names, arms, models,
                              REPO_ROOT, jaccard_threshold)
     _print_diff_report(dr)
+    _print_guard_summary(guard)
 
     any_usable = any(mr.runs_ok >= 2 for mr in dr.model_reports)
     if not any_usable:
