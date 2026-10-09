@@ -15,7 +15,7 @@ hero_tagline: "AI-powered pull request review using multiple LLM agents. Posts a
   </div>
   <div class="feature">
     <h3><span class="feature-icon">&#9670;</span> 16 Static Analyzers</h3>
-    <p>Shellcheck, semgrep, trufflehog, ruff, golangci-lint, hadolint, checkov, phpcs, phpstan, kube-linter, and tflint ship as binaries in the container image. ESLint runs from the <code>node_modules</code> of your project. The cve-check analyzer runs as pure Python (OSV.dev HTTP queries, no external binary). Three documentation analyzers (docs-api-check, docs-ref-check, and docs-drift-check) also run. All 16 run as native Python.</p>
+    <p>Shellcheck, semgrep, trufflehog, ruff, golangci-lint, hadolint, checkov, phpcs, phpstan, kube-linter, and tflint ship as binaries in the container image. ESLint, cve-check, and three documentation analyzers (docs-api-check, docs-ref-check, and docs-drift-check) also run. All 16 run as native Python.</p>
   </div>
   <div class="feature">
     <h3><span class="feature-icon">&#9670;</span> Works Everywhere</h3>
