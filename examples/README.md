@@ -21,7 +21,7 @@ GitHub workflows use the `container-action` variant, which pulls a pinned public
 
 ```yaml
 image-tag: ${{ vars.AI_REVIEW_IMAGE_TAG || 'latest' }}
-context-enrichment: ${{ vars.AI_REVIEW_CONTEXT_ENRICHMENT || 'false' }}
+context-enrichment: ${{ vars.AI_REVIEW_CONTEXT_ENRICHMENT || 'true' }}
 # ... etc.
 ```
 
@@ -116,9 +116,9 @@ Three optional features can be enabled independently. All default off, all requi
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `AI_REVIEW_CONTEXT_ENRICHMENT` | `false` | Tree-sitter symbol-context injection into agent prompts (`<symbol-context>` block) |
+| `AI_REVIEW_CONTEXT_ENRICHMENT` | `true` | Tree-sitter symbol-context injection into agent prompts (`<symbol-context>` block) |
 | `AI_REVIEW_SARIF_PATHS` | `''` | Comma-separated SARIF 2.1.0 file paths to merge as findings (see [`workflows/sarif-codeql.yml`](workflows/sarif-codeql.yml) for the CodeQL flavor) |
-| `AI_REVIEW_FEEDBACK_LOOP` | `false` | Learning loop: persists `/ai-pr-review false-positive\|wont-fix\|feedback` verdicts and re-injects them into future reviews. GitHub-only. |
+| `AI_REVIEW_FEEDBACK_LOOP` | `false` | Learning loop: persists `/ai-pr-review false-positive\|wont-fix\|feedback` verdicts and re-injects them into future reviews. It works on GitHub and Bitbucket. On GitLab it does nothing. |
 | `AI_EXCLUDE_PATTERNS` | `''` | Comma-separated git pathspec globs to exclude from the diff (e.g. `vendor/*,generated/*`). Appended to built-in excludes by default. (v1.1.0) |
 | `AI_EXCLUDE_PATTERNS_MODE` | `append` | `append` adds to built-in vendor/lockfile excludes; `replace` discards them and uses only the patterns you supply. (v1.1.0) |
 | `AI_REVIEW_ANALYZER_DIFF_SCOPE` | `cap` | How out-of-diff native-analyzer findings are handled. `cap` (default): downgrade to Low and collapse under `<details>`. `drop`: remove entirely. `off`: pass through unchanged. LLM-agent findings unaffected. (v1.2.0) |

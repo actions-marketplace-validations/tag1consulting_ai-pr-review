@@ -96,14 +96,14 @@ Use the `agents` and `exclude-agents` inputs to control which agents run. See [A
 
 ### Severity icons
 
-Findings use shape-distinct icons for accessibility:
+Findings use these icons:
 
 | Icon | Severity | Review action |
 |------|----------|---------------|
-| ❌ | Critical | REQUEST_CHANGES |
-| 🚨 | High | REQUEST_CHANGES |
-| 🔶 | Medium | APPROVE (informational) |
-| 💬 | Low | APPROVE (informational) |
+| 🚨 | Critical | REQUEST_CHANGES |
+| 🔴 | High | REQUEST_CHANGES |
+| 🟡 | Medium | APPROVE (informational) |
+| 🔵 | Low | APPROVE (informational) |
 
 The "Review action" column above is this bot's default behavior. Set the `approval-ceiling` input if you never want it to post a real APPROVE (or, at the strictest setting, never set any formal review state at all). A human then makes every merge decision. See [Configuration: Approval ceiling](docs/configuration.md#approval-ceiling).
 
@@ -290,7 +290,7 @@ See [docs/configuration.md](docs/configuration.md#opt-in-capabilities) for the f
 
 **Quick mode** (default): Runs the code-reviewer and (conditionally) silent-failure-hunter. Fast and cheap, suitable for every push.
 
-**Full mode**: Runs up to 8 agents: 6 always-on finding agents plus silent-failure-hunter (conditional) and pr-summarizer on first run. Trigger with the `ai-review-full` PR label, `workflow_dispatch` input, `review-mode: full`, or by routing to it via `.ai-pr-review/policy.yml` (e.g. full mode for release branches, quick mode elsewhere).
+**Full mode**: Runs up to 9 agents: 6 finding agents, plus silent-failure-hunter (conditional), pr-summarizer (first run), and issue-linker (GitHub only). Trigger with the `ai-review-full` PR label, `workflow_dispatch` input, `review-mode: full`, or by routing to it via `.ai-pr-review/policy.yml` (e.g. full mode for release branches, quick mode elsewhere).
 
 For the full agent roster and trigger patterns, see [docs/agents.md](docs/agents.md#review-modes). For per-branch/per-path routing, see [docs/policy.md](docs/policy.md).
 

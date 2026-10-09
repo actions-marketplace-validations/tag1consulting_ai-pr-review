@@ -258,12 +258,14 @@ async def run_conditions(per_fixture, conditions, cache, guard):  # type: ignore
     ce = pe._load_consistency_eval()
     cached = pe._CachedGuard(cache, guard if guard is not None else pe._NoCallsAllowed())
     results = [score_condition("none", per_fixture)]
-    for cond in conditions:
-        # judge_findings is fail-soft: it catches every error from the call and returns the findings
-        # unchanged. For a production review that is right. For an eval it would hide a spend cap,
-        # a cache miss, or a failed call behind a report that looks normal. Record each failure here
-        # and raise after the judge returns.
-        call_errors: list[Exception] = []
+    def recording_call(call_errors: list[Exception]):  # type: ignore[no-untyped-def]
+        """An llm_call that records each failure.
+
+        judge_findings is fail-soft: it catches every error from the call and returns the findings
+        unchanged. For a production review that is right. For an eval it would hide a spend cap,
+        a cache miss, or a failed call behind a report that looks normal. Record each failure here
+        and raise after the judge returns.
+        """
 
         async def llm_call(req: LLMRequest) -> LLMResponse:
             try:
@@ -272,6 +274,11 @@ async def run_conditions(per_fixture, conditions, cache, guard):  # type: ignore
                 call_errors.append(exc)
                 raise
 
+        return llm_call
+
+    for cond in conditions:
+        call_errors: list[Exception] = []
+        llm_call = recording_call(call_errors)
         judged = []
         for fx, findings in per_fixture:
             if not findings:
