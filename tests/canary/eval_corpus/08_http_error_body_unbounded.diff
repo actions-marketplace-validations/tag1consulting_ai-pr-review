@@ -1,0 +1,57 @@
+diff --git a/ai_pr_review/vcs/_body.py b/ai_pr_review/vcs/_body.py
+index de5e9bf..17d4bdc 100644
+--- a/ai_pr_review/vcs/_body.py
++++ b/ai_pr_review/vcs/_body.py
+@@ -49,6 +49,52 @@ SLASH_COMMANDS_DOC_URL: Final[str] = (
+     "https://tag1consulting.github.io/ai-pr-review/slash-commands"
+ )
+ 
++_ERROR_BODY_LIMIT: Final[int] = 500
++
++
++def _scope_lists(body: object) -> tuple[list[str], list[str]] | None:
++    """Pull ``(required, granted)`` scope lists out of a Bitbucket error body.
++
++    Bitbucket answers a call that lacks a scope with
++    ``{"error": {"message": ..., "detail": {"required": [...], "granted": [...]}}}``.
++    Returns None for any other shape.
++    """
++    if not isinstance(body, dict):
++        return None
++    error = body.get("error")
++    detail = error.get("detail") if isinstance(error, dict) else None
++    if not isinstance(detail, dict):
++        return None
++    required, granted = detail.get("required"), detail.get("granted")
++    if not isinstance(required, list) or not isinstance(granted, list):
++        return None
++    return [str(x) for x in required], [str(x) for x in granted]
++
++
++def format_http_error_body(text: str, *, limit: int = _ERROR_BODY_LIMIT) -> str:
++    """Format an HTTP error response body for an error message or log line.
++
++    A Bitbucket scope error lists the scopes the call needed and the scopes the
++    token has. A fixed-length cut used to drop the second list, which is the one
++    an operator needs. This puts the message and both lists first and keeps them
++    whole. Any other body is cut at ``limit`` characters.
++    """
++    try:
++        body = json.loads(text)
++    except ValueError:
++        body = None
++    scopes = _scope_lists(body)
++    if scopes is not None:
++        required, granted = scopes
++        error = body["error"]  # _scope_lists proved this is a dict
++        message = str(error.get("message") or "missing scopes")
++        return (
++            f"{message[:limit]} (required scopes: {', '.join(required) or 'none'}. "
++            f"granted scopes: {', '.join(granted) or 'none'})"
++        )
++    return text[:limit]
++
++
+ _LEADING_SUMMARY_HEADING_RE: Final[re.Pattern[str]] = re.compile(
+     r"\A\s*#{1,6}[ \t]*\**[ \t]*summary[ \t]*:?[ \t]*\**[ \t]*#*[ \t]*(?:\n|\Z)",
+     re.IGNORECASE,
