@@ -200,6 +200,9 @@ jobs:
           # AI_REVIEW_SUPPRESS_WALKTHROUGH: set to 'true' to leave the per-file
           # Walkthrough table out of the summary comment (default: 'false').
           suppress-walkthrough: ${{ vars.AI_REVIEW_SUPPRESS_WALKTHROUGH || 'false' }}
+          # AI_REVIEW_FINDING_BADGES: set to 'false' to hide the evidence label and score
+          # that follow each finding (default: 'true').
+          finding-badges: ${{ vars.AI_REVIEW_FINDING_BADGES || 'true' }}
           # AI_REVIEW_TOKEN_USAGE_WARN_USD: estimated-cost threshold (USD) above which
           # a high-usage warning line is added to the comment (default: 1.00). Set to
           # 0 to disable.
@@ -334,6 +337,7 @@ jobs:
       feedback-loop: ${{ vars.AI_REVIEW_FEEDBACK_LOOP || 'false' }}
       token-usage-display: ${{ vars.AI_REVIEW_TOKEN_USAGE_DISPLAY || 'compact' }}
       suppress-walkthrough: ${{ vars.AI_REVIEW_SUPPRESS_WALKTHROUGH || 'false' }}
+      finding-badges: ${{ vars.AI_REVIEW_FINDING_BADGES || 'true' }}
       token-usage-warn-usd: ${{ vars.AI_REVIEW_TOKEN_USAGE_WARN_USD || '1.00' }}
       max-cost-usd: ${{ vars.AI_REVIEW_MAX_COST_USD || '0' }}
       fail-on-cost-ceiling: ${{ vars.AI_REVIEW_FAIL_ON_COST_CEILING || 'false' }}

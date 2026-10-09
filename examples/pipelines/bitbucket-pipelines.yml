@@ -43,9 +43,11 @@
 #                            reviews. Set to false to always exit 0.)
 #
 # Opt-in capabilities (require the Python engine, which is the default):
-#   AI_CONTEXT_ENRICHMENT  (plain, default: false; tree-sitter symbol context)
+#   AI_CONTEXT_ENRICHMENT  (plain, default: true; tree-sitter symbol context)
 #   AI_SARIF_PATHS         (plain, default: ''; comma-separated SARIF 2.1.0
 #                           file paths to merge as findings)
+#   AI_FINDING_BADGES      (plain, default: true. Set to false to hide the evidence
+#                           label and score beside each finding.)
 #   AI_SUPPRESS_WALKTHROUGH (plain, default: false. Set to true to leave the
 #                           per-file Walkthrough table out of the summary
 #                           comment. Bitbucket cannot collapse it.)

@@ -12,7 +12,7 @@ On every PR push, this action:
 1. Computes the diff (full on the first run, incremental on later pushes)
 2. Detects languages from changed file extensions
 3. Runs a roster of AI review agents against the diff
-4. Runs deterministic checks on changed files: shellcheck, CVE lookups ([OSV.dev](https://osv.dev/)), semgrep SAST, trufflehog secret scanning, ruff (Python), golangci-lint (Go), hadolint (Dockerfiles), checkov (Terraform/K8s/IaC), phpcs (PHP/Drupal), eslint (JS/TS), phpstan (PHP static analysis), kube-linter (Kubernetes), tflint (Terraform), and three documentation checks (docs-api-check, docs-ref-check, docs-drift-check). See [Static Analyzers](static-analyzers)
+4. Runs deterministic checks on changed files: shellcheck, CVE lookups ([OSV.dev](https://osv.dev/)), semgrep SAST, trufflehog secret scanning, ruff (Python), golangci-lint (Go), hadolint (Dockerfiles), checkov (Terraform/K8s/IaC), phpcs (PHP/Drupal), eslint (JS/TS), dep-exists (new dependencies that no public registry knows), phpstan (PHP static analysis), kube-linter (Kubernetes), tflint (Terraform), and three documentation checks (docs-api-check, docs-ref-check, docs-drift-check). See [Static Analyzers](static-analyzers)
 5. Posts a summary comment (first run only) and a review with inline findings
 6. Auto-resolves stale bot threads and dismisses superseded reviews
 
