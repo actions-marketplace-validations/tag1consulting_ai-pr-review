@@ -1,0 +1,746 @@
+{
+  "measured_at": "2026-10-08T21:05:07Z",
+  "endpoint": "POST /v1/messages/count_tokens",
+  "models": [
+    "claude-haiku-5-5",
+    "claude-sonnet-5-5",
+    "claude-opus-5-5",
+    "claude-sonnet-4-6"
+  ],
+  "overhead_tokens": {
+    "claude-haiku-5-5": 8,
+    "claude-sonnet-5-5": 8,
+    "claude-opus-5-5": 8,
+    "claude-sonnet-4-6": 7
+  },
+  "samples": [
+    {
+      "path": "tests/canary/corpus/01_stress_python_large.diff",
+      "class": "diff",
+      "sha256": "f6aa46f5599fc4af8fc8fcd66dbaa42ca933c71cc898bd23962ecdb69b41a7b0",
+      "chars": 67386,
+      "non_ascii_chars": 46,
+      "tokens": {
+        "claude-haiku-5-5": 26849,
+        "claude-sonnet-5-5": 26849,
+        "claude-opus-5-5": 26849,
+        "claude-sonnet-4-6": 20227
+      }
+    },
+    {
+      "path": "tests/canary/corpus/02_scolta_workflow_original_variance.diff",
+      "class": "diff",
+      "sha256": "68ede162f5444ef0d2abffbe243813bc00aba0e6f476ea4db49ba344791be865",
+      "chars": 3520,
+      "non_ascii_chars": 0,
+      "tokens": {
+        "claude-haiku-5-5": 1526,
+        "claude-sonnet-5-5": 1526,
+        "claude-opus-5-5": 1526,
+        "claude-sonnet-4-6": 1106
+      }
+    },
+    {
+      "path": "tests/canary/corpus/03_python_small_security_fix.diff",
+      "class": "diff",
+      "sha256": "0670ddeaba50aa7ecde4674f5fa70fb5ba47a06544f6ec5a9a6e2dcc04a3b046",
+      "chars": 865,
+      "non_ascii_chars": 0,
+      "tokens": {
+        "claude-haiku-5-5": 355,
+        "claude-sonnet-5-5": 355,
+        "claude-opus-5-5": 355,
+        "claude-sonnet-4-6": 280
+      }
+    },
+    {
+      "path": "tests/canary/corpus/04_json_config_only.diff",
+      "class": "diff",
+      "sha256": "9c8ac8743ee4aa64692e41bc7b17576aff441304ddd3f44a3aa6227cf1c19043",
+      "chars": 1658,
+      "non_ascii_chars": 1,
+      "tokens": {
+        "claude-haiku-5-5": 688,
+        "claude-sonnet-5-5": 688,
+        "claude-opus-5-5": 688,
+        "claude-sonnet-4-6": 505
+      }
+    },
+    {
+      "path": "tests/canary/corpus/05_python_medium_with_tests.diff",
+      "class": "diff",
+      "sha256": "7526e077de26233d3267b7eb549eef32dc8c3011ba7bf01c328ca90c05e748d7",
+      "chars": 12624,
+      "non_ascii_chars": 16,
+      "tokens": {
+        "claude-haiku-5-5": 4742,
+        "claude-sonnet-5-5": 4742,
+        "claude-opus-5-5": 4742,
+        "claude-sonnet-4-6": 3611
+      }
+    },
+    {
+      "path": "tests/canary/corpus/06_python_medium_fingerprint_logic.diff",
+      "class": "diff",
+      "sha256": "c9d4537ac6386d972c7bf7b579866ea255018cc2f8964f5db1e156a44687f42d",
+      "chars": 12146,
+      "non_ascii_chars": 0,
+      "tokens": {
+        "claude-haiku-5-5": 4993,
+        "claude-sonnet-5-5": 4993,
+        "claude-opus-5-5": 4993,
+        "claude-sonnet-4-6": 3926
+      }
+    },
+    {
+      "path": "tests/canary/corpus/07_ci_yaml_only.diff",
+      "class": "diff",
+      "sha256": "1620831381f972f903aaa28035cd33998998d8e1bff9a7c5de7facda7f1105e7",
+      "chars": 2272,
+      "non_ascii_chars": 0,
+      "tokens": {
+        "claude-haiku-5-5": 802,
+        "claude-sonnet-5-5": 802,
+        "claude-opus-5-5": 802,
+        "claude-sonnet-4-6": 611
+      }
+    },
+    {
+      "path": "tests/canary/corpus/08_python_large_security_hardening.diff",
+      "class": "diff",
+      "sha256": "3c333c8718eef99f33a1bcb952428c48806c569b6c764c742779b47e479da4b5",
+      "chars": 39443,
+      "non_ascii_chars": 35,
+      "tokens": {
+        "claude-haiku-5-5": 16268,
+        "claude-sonnet-5-5": 16268,
+        "claude-opus-5-5": 16268,
+        "claude-sonnet-4-6": 12309
+      }
+    },
+    {
+      "path": "tests/canary/corpus/09_docs_only_tiny.diff",
+      "class": "diff",
+      "sha256": "40cc45380e0bc986ad4285f45f068175d36f6074c374cd457f2b4224f109933e",
+      "chars": 9908,
+      "non_ascii_chars": 8,
+      "tokens": {
+        "claude-haiku-5-5": 3643,
+        "claude-sonnet-5-5": 3643,
+        "claude-opus-5-5": 3643,
+        "claude-sonnet-4-6": 2589
+      }
+    },
+    {
+      "path": "tests/canary/corpus/10_go_error_handling_synthetic.diff",
+      "class": "diff",
+      "sha256": "e35ef0ad9e41a11ed69b95fc2932c0b467d66fe062c399c6114b2a1fa6961926",
+      "chars": 1197,
+      "non_ascii_chars": 0,
+      "tokens": {
+        "claude-haiku-5-5": 517,
+        "claude-sonnet-5-5": 517,
+        "claude-opus-5-5": 517,
+        "claude-sonnet-4-6": 435
+      }
+    },
+    {
+      "path": "tests/canary/corpus/11_typescript_type_safety_synthetic.diff",
+      "class": "diff",
+      "sha256": "afcf682eb2a7f822ed65c74ef4ffe800b46b42e3a2231456462c7891ed8aedae",
+      "chars": 371,
+      "non_ascii_chars": 0,
+      "tokens": {
+        "claude-haiku-5-5": 171,
+        "claude-sonnet-5-5": 171,
+        "claude-opus-5-5": 171,
+        "claude-sonnet-4-6": 142
+      }
+    },
+    {
+      "path": "tests/canary/corpus/12_php_xss_sqli_synthetic.diff",
+      "class": "diff",
+      "sha256": "8dff7b4912953981c30773472c37949baa2e6ad682a9661128cdfee1512b8c54",
+      "chars": 1445,
+      "non_ascii_chars": 0,
+      "tokens": {
+        "claude-haiku-5-5": 599,
+        "claude-sonnet-5-5": 599,
+        "claude-opus-5-5": 599,
+        "claude-sonnet-4-6": 487
+      }
+    },
+    {
+      "path": "tests/canary/corpus/13_terraform_security_misconfig_synthetic.diff",
+      "class": "diff",
+      "sha256": "d57ab5f5154efb833dbadfeeee20994cf5ef501e86026e9e9aaaaeb165307b1c",
+      "chars": 696,
+      "non_ascii_chars": 0,
+      "tokens": {
+        "claude-haiku-5-5": 349,
+        "claude-sonnet-5-5": 349,
+        "claude-opus-5-5": 349,
+        "claude-sonnet-4-6": 297
+      }
+    },
+    {
+      "path": "tests/canary/corpus/14_terraform_public_bucket_synthetic.diff",
+      "class": "diff",
+      "sha256": "2bbc6733172c0093f01dbf8a91c2890e22518c161c1968f6c6f41e9a1cdee285",
+      "chars": 358,
+      "non_ascii_chars": 0,
+      "tokens": {
+        "claude-haiku-5-5": 204,
+        "claude-sonnet-5-5": 204,
+        "claude-opus-5-5": 204,
+        "claude-sonnet-4-6": 159
+      }
+    },
+    {
+      "path": "prompts/_governance.md",
+      "class": "prompt",
+      "sha256": "d384b0501e5cf1688fc72138ae33083803eff69e7f078acbde1a1c3e7c414119",
+      "chars": 9471,
+      "non_ascii_chars": 12,
+      "tokens": {
+        "claude-haiku-5-5": 3234,
+        "claude-sonnet-5-5": 3234,
+        "claude-opus-5-5": 3234,
+        "claude-sonnet-4-6": 2347
+      }
+    },
+    {
+      "path": "prompts/_knowledge-cutoff.md",
+      "class": "prompt",
+      "sha256": "ff18fe168bbc2863f926986f94b0e4d520b729b275b1b0b82ef098240a4a0c89",
+      "chars": 2318,
+      "non_ascii_chars": 12,
+      "tokens": {
+        "claude-haiku-5-5": 878,
+        "claude-sonnet-5-5": 878,
+        "claude-opus-5-5": 878,
+        "claude-sonnet-4-6": 663
+      }
+    },
+    {
+      "path": "prompts/_trailer-findings.md",
+      "class": "prompt",
+      "sha256": "7fdb72c165ca7b5713277bb10f6464ca7830e75879b638127a6e252f0b336447",
+      "chars": 934,
+      "non_ascii_chars": 3,
+      "tokens": {
+        "claude-haiku-5-5": 359,
+        "claude-sonnet-5-5": 359,
+        "claude-opus-5-5": 359,
+        "claude-sonnet-4-6": 249
+      }
+    },
+    {
+      "path": "prompts/adversarial-general.md",
+      "class": "prompt",
+      "sha256": "e18d2f63a8e65b967c195904e48bb5df3f1a04a3cbfc4280a9356fc02174cff5",
+      "chars": 7439,
+      "non_ascii_chars": 0,
+      "tokens": {
+        "claude-haiku-5-5": 2603,
+        "claude-sonnet-5-5": 2603,
+        "claude-opus-5-5": 2603,
+        "claude-sonnet-4-6": 1826
+      }
+    },
+    {
+      "path": "prompts/architecture-reviewer.md",
+      "class": "prompt",
+      "sha256": "c10884ba747c6b880f67874557e67310d5da940fe840172bfbfff4c204e151b9",
+      "chars": 8291,
+      "non_ascii_chars": 0,
+      "tokens": {
+        "claude-haiku-5-5": 2870,
+        "claude-sonnet-5-5": 2870,
+        "claude-opus-5-5": 2870,
+        "claude-sonnet-4-6": 1998
+      }
+    },
+    {
+      "path": "prompts/blind-hunter.md",
+      "class": "prompt",
+      "sha256": "4e7671553f9b3e01a7882ef729955f83ed860362a1efdf04b21af8b8e194558d",
+      "chars": 8185,
+      "non_ascii_chars": 15,
+      "tokens": {
+        "claude-haiku-5-5": 2851,
+        "claude-sonnet-5-5": 2851,
+        "claude-opus-5-5": 2851,
+        "claude-sonnet-4-6": 2042
+      }
+    },
+    {
+      "path": "prompts/code-reviewer.md",
+      "class": "prompt",
+      "sha256": "5198f66b701a8ce34ffdb1d0c1f5e15c063ab7dac64f75fd8db1f01f5ee44311",
+      "chars": 6211,
+      "non_ascii_chars": 18,
+      "tokens": {
+        "claude-haiku-5-5": 2210,
+        "claude-sonnet-5-5": 2210,
+        "claude-opus-5-5": 2210,
+        "claude-sonnet-4-6": 1518
+      }
+    },
+    {
+      "path": "prompts/edge-case-hunter.md",
+      "class": "prompt",
+      "sha256": "031736da39c0759d88177e68e9281601cf62d5e13078cba3a670d84b7bf14fcd",
+      "chars": 8491,
+      "non_ascii_chars": 26,
+      "tokens": {
+        "claude-haiku-5-5": 3102,
+        "claude-sonnet-5-5": 3102,
+        "claude-opus-5-5": 3102,
+        "claude-sonnet-4-6": 2186
+      }
+    },
+    {
+      "path": "prompts/finding-judge.md",
+      "class": "prompt",
+      "sha256": "a9ca660cd919b9d3c9e227d13ae6fa96502877d5fa5abe85c0b9f549c452fac4",
+      "chars": 2851,
+      "non_ascii_chars": 4,
+      "tokens": {
+        "claude-haiku-5-5": 982,
+        "claude-sonnet-5-5": 982,
+        "claude-opus-5-5": 982,
+        "claude-sonnet-4-6": 721
+      }
+    },
+    {
+      "path": "prompts/issue-linker.md",
+      "class": "prompt",
+      "sha256": "526c95c6ff11d884818dd51a811c2e820391884f44ff674a5c4177eb24bbf044",
+      "chars": 3951,
+      "non_ascii_chars": 12,
+      "tokens": {
+        "claude-haiku-5-5": 1347,
+        "claude-sonnet-5-5": 1347,
+        "claude-opus-5-5": 1347,
+        "claude-sonnet-4-6": 952
+      }
+    },
+    {
+      "path": "prompts/pr-summarizer.md",
+      "class": "prompt",
+      "sha256": "3e4fb592e8fe992bc0667b630c0b177ed872737af1cb461dfe2ec225e01ddfd1",
+      "chars": 2348,
+      "non_ascii_chars": 3,
+      "tokens": {
+        "claude-haiku-5-5": 910,
+        "claude-sonnet-5-5": 910,
+        "claude-opus-5-5": 910,
+        "claude-sonnet-4-6": 670
+      }
+    },
+    {
+      "path": "prompts/security-reviewer.md",
+      "class": "prompt",
+      "sha256": "913af0fb98d6daf2707b62d4b468d8f139745bf6bca12d16f62c76c4504fff28",
+      "chars": 13343,
+      "non_ascii_chars": 17,
+      "tokens": {
+        "claude-haiku-5-5": 4880,
+        "claude-sonnet-5-5": 4880,
+        "claude-opus-5-5": 4880,
+        "claude-sonnet-4-6": 3356
+      }
+    },
+    {
+      "path": "prompts/silent-failure-hunter.md",
+      "class": "prompt",
+      "sha256": "bab3031d8bb60493b8d34ab4e29bbdf6ae5e5c99c96fa9494042fb81785ef7c9",
+      "chars": 3894,
+      "non_ascii_chars": 10,
+      "tokens": {
+        "claude-haiku-5-5": 1339,
+        "claude-sonnet-5-5": 1339,
+        "claude-opus-5-5": 1339,
+        "claude-sonnet-4-6": 953
+      }
+    },
+    {
+      "path": "prompts/suggestion-addendum.md",
+      "class": "prompt",
+      "sha256": "925e39fbd823c040e1dbe922aa6af307b9b9c81027690506b1584a5a01241646",
+      "chars": 3492,
+      "non_ascii_chars": 2,
+      "tokens": {
+        "claude-haiku-5-5": 1257,
+        "claude-sonnet-5-5": 1257,
+        "claude-opus-5-5": 1257,
+        "claude-sonnet-4-6": 947
+      }
+    },
+    {
+      "path": "language-profiles/c++.md",
+      "class": "profile",
+      "sha256": "038d446a6aee6794c5a9357a7654920ba35c252758d9bd7b2b49c398d8db3903",
+      "chars": 2640,
+      "non_ascii_chars": 20,
+      "tokens": {
+        "claude-haiku-5-5": 997,
+        "claude-sonnet-5-5": 997,
+        "claude-opus-5-5": 997,
+        "claude-sonnet-4-6": 723
+      }
+    },
+    {
+      "path": "language-profiles/csharp.md",
+      "class": "profile",
+      "sha256": "ad46e534d5e617a6bf0bab8e9ec65d4a3d5d894fe7a0d610f66d03d8319a81af",
+      "chars": 2546,
+      "non_ascii_chars": 16,
+      "tokens": {
+        "claude-haiku-5-5": 991,
+        "claude-sonnet-5-5": 991,
+        "claude-opus-5-5": 991,
+        "claude-sonnet-4-6": 694
+      }
+    },
+    {
+      "path": "language-profiles/go.md",
+      "class": "profile",
+      "sha256": "2210e3ae6d61b6f3e9c624744184166517fad7f944928c812e96af82d3e18df4",
+      "chars": 1743,
+      "non_ascii_chars": 11,
+      "tokens": {
+        "claude-haiku-5-5": 662,
+        "claude-sonnet-5-5": 662,
+        "claude-opus-5-5": 662,
+        "claude-sonnet-4-6": 473
+      }
+    },
+    {
+      "path": "language-profiles/java.md",
+      "class": "profile",
+      "sha256": "4993b3c8f46deb8775b349b88688c83b770227a489a70dd22444fbf2f83751cc",
+      "chars": 2330,
+      "non_ascii_chars": 16,
+      "tokens": {
+        "claude-haiku-5-5": 871,
+        "claude-sonnet-5-5": 871,
+        "claude-opus-5-5": 871,
+        "claude-sonnet-4-6": 602
+      }
+    },
+    {
+      "path": "language-profiles/javascript.md",
+      "class": "profile",
+      "sha256": "0cfa700c9a8af11a46bae24ab50721d8843364f889782c38347140f5c02da4e3",
+      "chars": 3024,
+      "non_ascii_chars": 20,
+      "tokens": {
+        "claude-haiku-5-5": 1153,
+        "claude-sonnet-5-5": 1153,
+        "claude-opus-5-5": 1153,
+        "claude-sonnet-4-6": 813
+      }
+    },
+    {
+      "path": "language-profiles/kotlin.md",
+      "class": "profile",
+      "sha256": "eaeeb35bbbd9016f8455a61f10d81dd87db55ce9242b1793a6f19f8727641f11",
+      "chars": 2576,
+      "non_ascii_chars": 17,
+      "tokens": {
+        "claude-haiku-5-5": 987,
+        "claude-sonnet-5-5": 987,
+        "claude-opus-5-5": 987,
+        "claude-sonnet-4-6": 681
+      }
+    },
+    {
+      "path": "language-profiles/lua.md",
+      "class": "profile",
+      "sha256": "5d9ca0717d3a284a7f70be0d9906c779eb46cb716352441bb31e193bc03bca28",
+      "chars": 2241,
+      "non_ascii_chars": 14,
+      "tokens": {
+        "claude-haiku-5-5": 851,
+        "claude-sonnet-5-5": 851,
+        "claude-opus-5-5": 851,
+        "claude-sonnet-4-6": 638
+      }
+    },
+    {
+      "path": "language-profiles/perl.md",
+      "class": "profile",
+      "sha256": "b79d2724d42e8dd4e880acb208a2419834e2519d5c8a4f95d58137922c3f04e1",
+      "chars": 2637,
+      "non_ascii_chars": 16,
+      "tokens": {
+        "claude-haiku-5-5": 961,
+        "claude-sonnet-5-5": 961,
+        "claude-opus-5-5": 961,
+        "claude-sonnet-4-6": 725
+      }
+    },
+    {
+      "path": "language-profiles/php.md",
+      "class": "profile",
+      "sha256": "1f459477837c983404901c0f7c2c8da22b1792390565987fca3b40a7e4a5c998",
+      "chars": 4796,
+      "non_ascii_chars": 36,
+      "tokens": {
+        "claude-haiku-5-5": 2028,
+        "claude-sonnet-5-5": 2028,
+        "claude-opus-5-5": 2028,
+        "claude-sonnet-4-6": 1490
+      }
+    },
+    {
+      "path": "language-profiles/python.md",
+      "class": "profile",
+      "sha256": "48a69ea95882ebed52fca52827b98c1e3d6567e04ebb37e9a2555b3d8e4bfc44",
+      "chars": 3634,
+      "non_ascii_chars": 26,
+      "tokens": {
+        "claude-haiku-5-5": 1424,
+        "claude-sonnet-5-5": 1424,
+        "claude-opus-5-5": 1424,
+        "claude-sonnet-4-6": 1058
+      }
+    },
+    {
+      "path": "language-profiles/ruby.md",
+      "class": "profile",
+      "sha256": "6c577c145c29374faebf1bc03a6c67b02e9ecc05808960ffe07cc29fb6916142",
+      "chars": 2286,
+      "non_ascii_chars": 18,
+      "tokens": {
+        "claude-haiku-5-5": 905,
+        "claude-sonnet-5-5": 905,
+        "claude-opus-5-5": 905,
+        "claude-sonnet-4-6": 630
+      }
+    },
+    {
+      "path": "language-profiles/rust.md",
+      "class": "profile",
+      "sha256": "b9b128f90662c9c8ab8c57ec4635d84affc60f140a41fed25b312c0f706c0c33",
+      "chars": 2174,
+      "non_ascii_chars": 14,
+      "tokens": {
+        "claude-haiku-5-5": 855,
+        "claude-sonnet-5-5": 855,
+        "claude-opus-5-5": 855,
+        "claude-sonnet-4-6": 605
+      }
+    },
+    {
+      "path": "language-profiles/scala.md",
+      "class": "profile",
+      "sha256": "621e5bf1fdbf2ceaf9b111941bf4be212150c3698cf0bde9e1b8df88a1f2d9a2",
+      "chars": 2320,
+      "non_ascii_chars": 16,
+      "tokens": {
+        "claude-haiku-5-5": 885,
+        "claude-sonnet-5-5": 885,
+        "claude-opus-5-5": 885,
+        "claude-sonnet-4-6": 626
+      }
+    },
+    {
+      "path": "language-profiles/shell.md",
+      "class": "profile",
+      "sha256": "9a6d95d78dc8fb779c721340c4a071f0d97783485e3b26e1a60aadbbf3fd7707",
+      "chars": 3249,
+      "non_ascii_chars": 29,
+      "tokens": {
+        "claude-haiku-5-5": 1349,
+        "claude-sonnet-5-5": 1349,
+        "claude-opus-5-5": 1349,
+        "claude-sonnet-4-6": 927
+      }
+    },
+    {
+      "path": "language-profiles/sql.md",
+      "class": "profile",
+      "sha256": "9a47aa94bc83d083022c6764ec8e28df32b9d45aefdcee42ebbbf729d6ee0f8f",
+      "chars": 2465,
+      "non_ascii_chars": 17,
+      "tokens": {
+        "claude-haiku-5-5": 1012,
+        "claude-sonnet-5-5": 1012,
+        "claude-opus-5-5": 1012,
+        "claude-sonnet-4-6": 633
+      }
+    },
+    {
+      "path": "language-profiles/swift.md",
+      "class": "profile",
+      "sha256": "5d02ea4e9db2c1c82bac595863648133a20c414978b13c1e5d9569102ec8a684",
+      "chars": 2392,
+      "non_ascii_chars": 18,
+      "tokens": {
+        "claude-haiku-5-5": 867,
+        "claude-sonnet-5-5": 867,
+        "claude-opus-5-5": 867,
+        "claude-sonnet-4-6": 605
+      }
+    },
+    {
+      "path": "language-profiles/terraform.md",
+      "class": "profile",
+      "sha256": "adab7e952e57cd8400ac2c2251a250d569a0fb4c8b3bbc947f3d62b2b377c2fa",
+      "chars": 2762,
+      "non_ascii_chars": 17,
+      "tokens": {
+        "claude-haiku-5-5": 994,
+        "claude-sonnet-5-5": 994,
+        "claude-opus-5-5": 994,
+        "claude-sonnet-4-6": 694
+      }
+    },
+    {
+      "path": "language-profiles/typescript.md",
+      "class": "profile",
+      "sha256": "300c0683177f4587794d8fdc89de2b1cfd9afc8d43498c5b3596519acff2b40f",
+      "chars": 3891,
+      "non_ascii_chars": 26,
+      "tokens": {
+        "claude-haiku-5-5": 1470,
+        "claude-sonnet-5-5": 1470,
+        "claude-opus-5-5": 1470,
+        "claude-sonnet-4-6": 1047
+      }
+    },
+    {
+      "path": "language-profiles/yaml.md",
+      "class": "profile",
+      "sha256": "57af23bd6479f82750cf29d1665dc2de51f7c367aa5ac06dc940d4f320d20593",
+      "chars": 2590,
+      "non_ascii_chars": 12,
+      "tokens": {
+        "claude-haiku-5-5": 995,
+        "claude-sonnet-5-5": 995,
+        "claude-opus-5-5": 995,
+        "claude-sonnet-4-6": 681
+      }
+    },
+    {
+      "path": "ai_pr_review/pricing.py",
+      "class": "code",
+      "sha256": "0b3e504218b0febdf61de35df9f0348343fba5a5ee50cb99952cca04664fcf55",
+      "chars": 12908,
+      "non_ascii_chars": 26,
+      "tokens": {
+        "claude-haiku-5-5": 4921,
+        "claude-sonnet-5-5": 4921,
+        "claude-opus-5-5": 4921,
+        "claude-sonnet-4-6": 3913
+      }
+    },
+    {
+      "path": "ai_pr_review/findings/judge.py",
+      "class": "code",
+      "sha256": "05bd90f2b8e5fa59cfb8fd9c73beda9f615b185c2664259066ad00889a4e0d1f",
+      "chars": 10490,
+      "non_ascii_chars": 10,
+      "tokens": {
+        "claude-haiku-5-5": 3907,
+        "claude-sonnet-5-5": 3907,
+        "claude-opus-5-5": 3907,
+        "claude-sonnet-4-6": 2897
+      }
+    },
+    {
+      "path": "ai_pr_review/findings/merge.py",
+      "class": "code",
+      "sha256": "eaa3abdf73de9aebc18bf2c22f2ee04dbcb7c012b80dc5af5ac542c4ce30334c",
+      "chars": 7120,
+      "non_ascii_chars": 4,
+      "tokens": {
+        "claude-haiku-5-5": 2532,
+        "claude-sonnet-5-5": 2532,
+        "claude-opus-5-5": 2532,
+        "claude-sonnet-4-6": 1939
+      }
+    },
+    {
+      "path": "ai_pr_review/config.py",
+      "class": "code",
+      "sha256": "dfb91ce64e8135c2703aab93b4ef23330f7d9dda7c1b923e3ccb661522a87d2c",
+      "chars": 45438,
+      "non_ascii_chars": 5,
+      "tokens": {
+        "claude-haiku-5-5": 18893,
+        "claude-sonnet-5-5": 18893,
+        "claude-opus-5-5": 18893,
+        "claude-sonnet-4-6": 13517
+      }
+    },
+    {
+      "path": "ai_pr_review/vcs/github.py",
+      "class": "code",
+      "sha256": "c0fd705eaaae48fa37d470a9524df8014cd699a8115c37fbfb33f03884a7afc3",
+      "chars": 132740,
+      "non_ascii_chars": 39,
+      "tokens": {
+        "claude-haiku-5-5": 45525,
+        "claude-sonnet-5-5": 45525,
+        "claude-opus-5-5": 45525,
+        "claude-sonnet-4-6": 34766
+      }
+    },
+    {
+      "path": "ai_pr_review/agents/dispatch.py",
+      "class": "code",
+      "sha256": "b1d2b2616a68bd816c6bb3b60c6329f693df3d6acee910465b35146a75fcae59",
+      "chars": 33002,
+      "non_ascii_chars": 14,
+      "tokens": {
+        "claude-haiku-5-5": 11594,
+        "claude-sonnet-5-5": 11594,
+        "claude-opus-5-5": 11594,
+        "claude-sonnet-4-6": 8599
+      }
+    },
+    {
+      "path": "README.md",
+      "class": "prose",
+      "sha256": "d5977fe529ee2b8a35fb45ac9d110a6aae4ffca34ac9b4b14c70ee7a128dd25d",
+      "chars": 45453,
+      "non_ascii_chars": 116,
+      "tokens": {
+        "claude-haiku-5-5": 18587,
+        "claude-sonnet-5-5": 18587,
+        "claude-opus-5-5": 18587,
+        "claude-sonnet-4-6": 13294
+      }
+    },
+    {
+      "path": "docs/configuration.md",
+      "class": "prose",
+      "sha256": "b458fcf2f53ab2106e2ca7254b355a914193572897929b58aa487f761a741029",
+      "chars": 48008,
+      "non_ascii_chars": 59,
+      "tokens": {
+        "claude-haiku-5-5": 19716,
+        "claude-sonnet-5-5": 19716,
+        "claude-opus-5-5": 19716,
+        "claude-sonnet-4-6": 13747
+      }
+    },
+    {
+      "path": "docs/architecture-internals.md",
+      "class": "prose",
+      "sha256": "0b09b6ac203d942a03000e9843fd6238f25545026801af5ead145d3324983658",
+      "chars": 53623,
+      "non_ascii_chars": 93,
+      "tokens": {
+        "claude-haiku-5-5": 21240,
+        "claude-sonnet-5-5": 21240,
+        "claude-opus-5-5": 21240,
+        "claude-sonnet-4-6": 14971
+      }
+    }
+  ]
+}

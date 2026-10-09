@@ -74,6 +74,14 @@ def test_resolve_temperature_rejected_for_dated_opus_5_snapshot() -> None:
     assert resolve_temperature(0.3, "claude-opus-5-20260915") is None
 
 
+def test_resolve_temperature_accepted_for_hypothetical_opus_59_no_separator() -> None:
+    """Explicit-match regression lock: a hypothetical claude-opus-59 (a digit
+    appended with no "-"/"." separator) is NOT treated as opus-5 family --
+    same class of gap as config/model-pricing.json's Opus 5.5 patterns, which
+    needed the same fix (see that file's `(?!\\d)` prefix)."""
+    assert resolve_temperature(0.3, "claude-opus-59") == 0.3
+
+
 def test_resolve_temperature_accepted_for_sonnet_4_6() -> None:
     """Regression lock: Sonnet 4.6 still accepts a non-default temperature."""
     assert resolve_temperature(0.3, "claude-sonnet-4-6") == 0.3
@@ -162,6 +170,13 @@ def test_resolve_effort_low_for_opus_5_5() -> None:
 def test_resolve_effort_low_for_bedrock_opus_5_5() -> None:
     """Regression lock: a provider-prefixed Opus 5.5 id must also get the cap."""
     assert resolve_effort("global.anthropic.claude-opus-5-5") == "low"
+
+
+def test_resolve_effort_omitted_for_hypothetical_opus_59_no_separator() -> None:
+    """Explicit-match regression lock: a hypothetical claude-opus-59 (a digit
+    appended with no "-"/"." separator) does not inherit the opus-5 effort
+    cap -- same class of gap as config/model-pricing.json's Opus 5.5 patterns."""
+    assert resolve_effort("claude-opus-59") is None
 
 
 def test_resolve_effort_omitted_for_hypothetical_opus_5_9() -> None:

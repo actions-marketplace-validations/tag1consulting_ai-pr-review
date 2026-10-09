@@ -53,9 +53,9 @@ class TestEstimateReviewCost:
 
         estimate = estimate_review_cost(
             agents=[agent_with_context, agent_without_context],
-            diff_text="a" * 1000,  # estimate_tokens -> 275
+            diff_text="a" * 1000,  # estimate_billed_tokens -> 611
             shared_context_text="",
-            language_profile_text="b" * 400,  # estimate_tokens -> 110
+            language_profile_text="b" * 400,  # estimate_billed_tokens -> 244
             standard_model="known-model",
             premium_model="",
             review_mode="quick",
@@ -66,17 +66,17 @@ class TestEstimateReviewCost:
         by_name = {a.agent: a for a in estimate.per_agent}
 
         with_ctx = by_name["with-context"]
-        assert with_ctx.estimated_input_tokens == 275 + 110
+        assert with_ctx.estimated_input_tokens == 611 + 244
         assert with_ctx.estimated_output_tokens == 1000
         assert with_ctx.unknown_pricing is False
-        assert with_ctx.estimated_cost_units == 2385  # (385*1e8 + 1000*2e8)//1e8
+        assert with_ctx.estimated_cost_units == 2855  # (855*1e8 + 1000*2e8)//1e8
 
         without_ctx = by_name["without-context"]
-        assert without_ctx.estimated_input_tokens == 275
-        assert without_ctx.estimated_cost_units == 2275  # (275*1e8 + 1000*2e8)//1e8
+        assert without_ctx.estimated_input_tokens == 611
+        assert without_ctx.estimated_cost_units == 2611  # (611*1e8 + 1000*2e8)//1e8
 
-        assert estimate.total_cost_units == 2385 + 2275
-        assert estimate.total_cost_usd == pytest.approx(0.4660)
+        assert estimate.total_cost_units == 2855 + 2611
+        assert estimate.total_cost_usd == pytest.approx(0.5466)
         assert estimate.any_unknown_pricing is False
 
     def test_context_ineligible_agent_excludes_shared_and_profile_tokens(self) -> None:
@@ -92,8 +92,8 @@ class TestEstimateReviewCost:
             effective_max_output_tokens=500,
             pricing_data=_PRICING,
         )
-        # Only the diff contributes -- estimate_tokens("x"*100) = int(100/4*1.1) = 27
-        assert estimate.per_agent[0].estimated_input_tokens == 27
+        # Only the diff contributes -- estimate_billed_tokens("x"*100) = int(100/1.8*1.1) = 61
+        assert estimate.per_agent[0].estimated_input_tokens == 61
 
     def test_tier2_full_mode_uses_premium_model(self) -> None:
         agent = _agent("architecture-reviewer", tier=2)
@@ -249,16 +249,16 @@ class TestEstimatePreflightAgentCost:
         estimate = estimate_preflight_agent_cost(
             agent_name="pr-summarizer",
             model="known-model",
-            diff_text="a" * 1000,  # estimate_tokens -> 275
+            diff_text="a" * 1000,  # estimate_billed_tokens -> 611
             output_tokens=4096,
             pricing_data=_PRICING,
         )
         assert estimate.agent == "pr-summarizer"
         assert estimate.model == "known-model"
-        assert estimate.estimated_input_tokens == 275
+        assert estimate.estimated_input_tokens == 611
         assert estimate.estimated_output_tokens == 4096
-        # (275*1e8 + 4096*2e8)//1e8
-        assert estimate.estimated_cost_units == 275 + 4096 * 2
+        # (611*1e8 + 4096*2e8)//1e8
+        assert estimate.estimated_cost_units == 611 + 4096 * 2
         assert estimate.unknown_pricing is False
 
     def test_unknown_model_is_fail_soft(self, caplog: pytest.LogCaptureFixture) -> None:
