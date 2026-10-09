@@ -64,6 +64,7 @@ Each analyzer maps its findings to a severity and to one of the 11 categories th
 - It does not check Go modules, because a private Go module returns "not found" from the public proxy and would raise a false finding.
 - It skips an ecosystem when the repository sets a private registry (`.npmrc` registry, pip index flags, Cargo registries, composer `repositories`, a non-default Gemfile `source`).
 - It fails open. A timeout, a rate limit, or any status other than 200 or 404 gives no finding.
+- It reads only files in the repository, so it cannot see a private registry that is set in CI settings or a user-level config. A private scoped npm package, or a monorepo package that another package lists by plain version, returns "not found" from the public registry. The result is a High finding, and a High finding makes the review request changes. Set the registry in a file in the repository, or turn the analyzer off.
 - It checks at most 25 new dependencies per run.
 - Turn it off with `exclude-analyzers: dep-exists`.
 

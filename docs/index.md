@@ -72,7 +72,7 @@ Reviews start on the next PR.
 
 **Each finding shows where its evidence came from.** A short label and the confidence score follow the finding text, for example `(corroborated by analyzer, confidence 88)`. It is display text only. Set `finding-badges: 'false'` to hide it.
 
-**A new analyzer checks new dependencies.** `dep-exists` asks the public registry whether each dependency that a diff adds really exists. An unknown name is a High finding, because a model can invent a package name and an attacker can register it. Turn it off with `exclude-analyzers: dep-exists`.
+**Behavior change: a new analyzer checks new dependencies.** `dep-exists` asks the public registry whether each dependency that a diff adds really exists. An unknown name is a High finding, because a model can invent a package name and an attacker can register it. A High finding makes the review request changes, so a private package that the public registry does not know can block a pull request. Turn the analyzer off with `exclude-analyzers: dep-exists`.
 
 **The review comment says what it did not look at.** A short `Not reviewed:` note lists your `exclude-patterns`, the agents that did not run, and whether the review is incremental.
 
