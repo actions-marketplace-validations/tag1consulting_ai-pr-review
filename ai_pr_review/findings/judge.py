@@ -41,6 +41,9 @@ logger = logging.getLogger(__name__)
 
 JUDGE_DOWNRANK_AMOUNT: int = 15
 
+# "unsupported" is returned only by the code-aware prompt.
+_KNOWN_VERDICTS = frozenset({"keep", "downrank", "unsupported"})
+
 
 @dataclass(frozen=True)
 class JudgeResult:
@@ -149,6 +152,13 @@ def _apply_verdicts(
         # verdict the judge assigned, independent of whether corroboration
         # goes on to override its placement effect below.
         verdict_raw = id_to_verdict.get(idx, "keep")
+        if verdict_raw not in _KNOWN_VERDICTS:
+            # A typo or a new verdict name would otherwise make every finding fall
+            # back to "keep" and the judge look like it worked.
+            logger.warning(
+                "judge: unrecognized verdict %r for finding %d; treating it as keep",
+                verdict_raw, idx,
+            )
         # "unsupported" comes from the code-aware prompt: the cited code does not show
         # the problem. It routes the finding the same way as "downrank".
         verdict: JudgeVerdict = "downrank" if verdict_raw in ("downrank", "unsupported") else "keep"

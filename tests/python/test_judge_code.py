@@ -92,9 +92,18 @@ class TestUnsupportedVerdict:
         out, count = _apply_verdicts([_finding(corroborated=True)], [{"id": 0, "verdict": "unsupported"}])
         assert count == 0 and not out[0].demoted_to_body
 
-    def test_an_unknown_verdict_is_kept(self) -> None:
-        out, _ = _apply_verdicts([_finding()], [{"id": 0, "verdict": "drop"}])
+    def test_an_unknown_verdict_is_kept_and_logged(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level("WARNING", logger="ai_pr_review.findings.judge"):
+            out, _ = _apply_verdicts([_finding()], [{"id": 0, "verdict": "drop"}])
         assert not out[0].demoted_to_body
+        assert "unrecognized verdict 'drop'" in caplog.text
+
+    def test_known_verdicts_do_not_warn(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level("WARNING", logger="ai_pr_review.findings.judge"):
+            _apply_verdicts([_finding(), _finding(), _finding()],
+                            [{"id": 0, "verdict": "keep"}, {"id": 1, "verdict": "downrank"},
+                             {"id": 2, "verdict": "unsupported"}])
+        assert "unrecognized" not in caplog.text
 
 
 class TestJudgeCall:
