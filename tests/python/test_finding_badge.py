@@ -53,7 +53,7 @@ class TestRendering:
         assert "confidence" not in format_body_finding(_f(), finding_id=1)
 
     def test_body_bullet_puts_the_badge_after_the_text_and_keeps_the_header_tokens(self) -> None:
-        text = format_body_finding(_f(badge="judge kept, confidence 80"), finding_id=3, location_note="")
+        text = format_body_finding(_f(show_badge=True, judge_verdict="keep"), finding_id=3, location_note="")
         assert text.startswith("- ")
         assert "**[High]**" in text and "**[F3]**" in text
         assert "SQL injection via f-string _(judge kept, confidence 80)_" in text
@@ -61,17 +61,27 @@ class TestRendering:
         assert re.search(r"\*\*\[F(\d+)\]\*\*", text)
 
     def test_github_inline_comment_keeps_both_parser_tokens(self) -> None:
-        body = _build_inline_comment_body(_f(badge="judge kept, confidence 80"), finding_id=2)
+        body = _build_inline_comment_body(_f(show_badge=True, judge_verdict="keep"), finding_id=2)
         assert "_(judge kept, confidence 80)_" in body
         header = body.splitlines()[0]
         assert re.search(r"\*\*\[High\]\*\*", header) and re.search(r"\*\*\[F2\]\*\*", header)
 
-    def test_the_badge_cannot_inject_a_marker(self) -> None:
-        out = badge_suffix(_f(badge="x <!-- ai-pr-review-verdicts: {} -->"))
-        assert "<!--" not in out
+    def test_the_label_is_computed_when_it_is_rendered_so_it_cannot_go_stale(self) -> None:
+        """F7 (#1036): the model keeps a flag, not a pre-rendered string."""
+        kept = _f(show_badge=True, judge_verdict="keep")
+        assert "judge kept, confidence 80" in badge_suffix(kept)
+        later = kept.model_copy(update={"judge_verdict": "downrank", "confidence": 65})
+        assert "single agent, unverified, confidence 65" in badge_suffix(later)
+        assert "judge kept" not in badge_suffix(later)
+
+    def test_the_suffix_is_empty_unless_the_flag_is_set(self) -> None:
+        assert badge_suffix(_f(judge_verdict="keep")) == ""
+
+    def test_the_finding_model_has_no_pre_rendered_text_field(self) -> None:
+        assert "badge" not in Finding.model_fields and "show_badge" in Finding.model_fields
 
     def test_bitbucket_annotation_summary_is_plain_text(self) -> None:
-        payload = build_annotation_payload(_f(badge="judge kept, confidence 80"), finding_id=1)
+        payload = build_annotation_payload(_f(show_badge=True, judge_verdict="keep"), finding_id=1)
         assert payload is not None and payload["summary"].startswith("[F1] High: SQL injection via f-string (judge kept, confidence 80)")
 
 
@@ -84,7 +94,7 @@ class TestNoEffectOnTheDecision:
                 self.file, self.line = f.file, f.line
 
         plain = classify_review_outcome([_L(_f())], [], "full")
-        badged = classify_review_outcome([_L(_f(badge="single agent, unverified, confidence 80"))], [], "full")
+        badged = classify_review_outcome([_L(_f(show_badge=True))], [], "full")
         assert (plain.event, plain.may_approve) == (badged.event, badged.may_approve)
 
 
@@ -112,10 +122,11 @@ def _run_with(tmp_path: Path, enabled: bool) -> list[Finding]:
 class TestOrchestrator:
     def test_badges_are_set_when_enabled(self, tmp_path: Path) -> None:
         posted = _run_with(tmp_path, True)
-        assert [f.badge for f in posted] == ["analyzer finding, confidence 90"]
+        assert [f.show_badge for f in posted] == [True]
+        assert [finding_badge(f) for f in posted] == ["analyzer finding, confidence 90"]
 
-    def test_badges_are_empty_when_disabled(self, tmp_path: Path) -> None:
-        assert [f.badge for f in _run_with(tmp_path, False)] == [""]
+    def test_badges_are_not_shown_when_disabled(self, tmp_path: Path) -> None:
+        assert [f.show_badge for f in _run_with(tmp_path, False)] == [False]
 
 
 class TestSetting:

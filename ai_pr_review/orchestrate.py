@@ -310,9 +310,7 @@ async def run_review(
     # label can use the judge verdict, and before outcome classification, which
     # never reads it.
     if cfg.finding_badges and kept:
-        from ai_pr_review.findings.badge import finding_badge
-
-        kept = [f.model_copy(update={"badge": finding_badge(f)}) for f in kept]
+        kept = [f.model_copy(update={"show_badge": True}) for f in kept]
 
     # Phase 3: outcome classification.
     # classify_review_outcome's Protocol declares severity: str; Finding's

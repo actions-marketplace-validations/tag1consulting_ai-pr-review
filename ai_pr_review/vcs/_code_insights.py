@@ -30,6 +30,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
+from ai_pr_review.findings.badge import finding_badge
 from ai_pr_review.findings.models import Finding, Severity
 from ai_pr_review.vcs._body import format_http_error_body
 from ai_pr_review.vcs._finding_ids import fingerprint
@@ -178,7 +179,7 @@ def build_annotation_payload(
     if not finding.file or finding.line is None:
         return None
     token = f"[F{finding_id}] " if finding_id is not None else ""
-    badge = f" ({finding.badge})" if finding.badge else ""
+    badge = f" ({finding_badge(finding)})" if finding.show_badge else ""
     summary = f"{token}{finding.severity}: {finding.finding}{badge}"
     if finding.remediation:
         summary = f"{summary}\n\nRemediation: {finding.remediation}"
