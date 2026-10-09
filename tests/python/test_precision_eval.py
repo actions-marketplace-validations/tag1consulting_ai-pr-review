@@ -420,3 +420,46 @@ def test_harvest_patch_touches_the_cited_line() -> None:
 def test_harvest_refuses_a_repo_that_is_not_allowed(capsys: pytest.CaptureFixture[str]) -> None:
     assert harvest.main(["--repo", "client-org/private-repo"]) == 1
     assert "not an allowed repository" in capsys.readouterr().err
+
+
+# --- corpus override and the fixture miner (pure helpers, no network) ---
+
+mf = _load("mine_fixtures")
+
+
+def test_corpus_dir_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    (tmp_path / "a.diff").write_text("d")
+    (tmp_path / "a.labels.json").write_text(json.dumps({"bugs": [
+        {"file": "f.py", "line_start": 1, "line_end": 2, "category": "edge-case", "summary": "s"}]}))
+    monkeypatch.setenv("AI_EVAL_CORPUS_DIR", str(tmp_path))
+    assert [f.name for f in pe.load_fixtures()] == ["a"]
+    monkeypatch.delenv("AI_EVAL_CORPUS_DIR")
+    assert pe.resolve_corpus_dir() == pe.CORPUS_DIR
+
+
+def test_miner_reads_removed_ranges_from_a_u0_patch() -> None:
+    patch = "@@ -10,3 +10,2 @@\n-a\n@@ -20 +19,0 @@\n-b\n@@ -30,0 +30,2 @@\n+c\n"
+    assert mf.removed_ranges(patch) == [(10, 3), (20, 1)]
+
+
+def test_miner_parses_blame_porcelain() -> None:
+    sha = "a" * 40
+    other = "b" * 40
+    porcelain = f"{sha} 7 12 1\nauthor x\n\tcode\n{other} 3 13\n\tmore\n"
+    assert mf.parse_blame(porcelain) == [(sha, 7), (other, 3)]
+
+
+def test_miner_added_line_numbers_and_summary() -> None:
+    diff = "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,2 +5,3 @@\n ctx\n+new\n-old\n+new2\n"
+    assert mf.added_line_numbers(diff) == {6, 7}
+    assert mf.summary_of("fix: subject\n\nFirst paragraph\nwraps here.\n\nSecond.\n\nThird.") == (
+        "fix: subject First paragraph wraps here.")
+    assert len(mf.summary_of("x " * 500)) <= mf.MAX_SUMMARY_CHARS
+
+
+def test_miner_writes_labels_the_loader_accepts(tmp_path: Path) -> None:
+    m = mf.Mined("abc123def", "fff000fff", "ai_pr_review/x.py", 5, 7, "fix: it", "diff --git a/f b/f\n")
+    assert mf.write([m, m], tmp_path) == 1
+    fixtures = pe.load_fixtures(tmp_path)
+    assert len(fixtures) == 1 and fixtures[0].source == "mined" and fixtures[0].evidence == "weak"
+    assert fixtures[0].bugs[0].line_start == 5
