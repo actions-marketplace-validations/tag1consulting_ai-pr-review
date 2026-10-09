@@ -479,3 +479,40 @@ def test_settle_over_a_cap_warns_and_the_next_reserve_refuses(
     assert "cap is now exceeded" in capsys.readouterr().err
     with pytest.raises(sg.SpendCapExceeded):
         guard.reserve(_req(max_tokens=100))
+
+
+@pytest.mark.anyio
+async def test_any_settle_failure_keeps_the_billed_response(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    guard = _guard(tmp_path)
+
+    async def real(_r: LLMRequest) -> LLMResponse:
+        return _resp()
+
+    def boom(*_a: Any, **_k: Any) -> int:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(guard, "settle", boom)
+    out = await guard.call(real, _req())
+    assert out.text == "ok" and "disk full" in capsys.readouterr().err
+
+
+def test_dropped_audit_records_are_counted(tmp_path: Path) -> None:
+    guard = _guard(tmp_path)
+    guard._history_path = tmp_path / "no-such-dir" / "history.jsonl"
+    guard.reserve(_req())
+    guard.reserve(_req())
+    assert guard.history_dropped == 2
+
+
+def test_without_fcntl_the_guard_refuses_instead_of_running_unlocked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sg, "fcntl", None)
+    with pytest.raises(sg.LedgerError, match="fcntl"):
+        _guard(tmp_path).reserve(_req())
+
+
+def test_the_lock_timeout_is_long_enough_for_a_busy_ledger() -> None:
+    assert sg._LOCK_TIMEOUT_S >= 60

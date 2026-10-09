@@ -554,3 +554,25 @@ async def test_empty_slice_is_not_reported_as_an_empty_corpus(
     assert await pe.main(["--dry-run"]) == 1
     err = capsys.readouterr().err
     assert "selects none of the" in err and "no fixtures in" not in err
+
+
+def test_harvest_skips_a_malformed_pr_payload_and_shows_the_stderr(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import subprocess
+
+    def fake_gh(path: str) -> Any:
+        return [{"number": n, "merged_at": "x"} for n in (1, 2, 3)]
+
+    def fake_pr(repo: str, pr: dict[str, Any]) -> list[dict[str, Any]]:
+        if pr["number"] == 1:
+            raise KeyError("body")
+        if pr["number"] == 2:
+            raise subprocess.CalledProcessError(1, "gh", stderr="API rate limit exceeded")
+        return [{"pr": pr["number"], "outcome": "untouched"}]
+
+    monkeypatch.setattr(harvest, "_gh", fake_gh)
+    monkeypatch.setattr(harvest, "_harvest_pr", fake_pr)
+    assert harvest.harvest_repo("tag1consulting/ai-pr-review", 10) == [{"pr": 3, "outcome": "untouched"}]
+    err = capsys.readouterr().err
+    assert "KeyError" in err and "API rate limit exceeded" in err

@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 # by each analyzers/run-*.sh script exactly (using prefix matching).
 _ANALYZER_PREFIXES: tuple[str, ...] = (
     "checkov",
+    "dep-exists",
     "docs-api-check",
     "docs-drift-check",
     "docs-ref-check",

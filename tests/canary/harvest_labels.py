@@ -94,9 +94,12 @@ def harvest_repo(repo: str, limit: int) -> list[dict[str, Any]]:
         number = pr["number"]
         try:
             rows += _harvest_pr(repo, pr)
-        except (subprocess.SubprocessError, ValueError) as exc:
-            # One bad PR must not discard the rows already collected.
-            print(f"warning: skipped {repo}#{number}: {exc}", file=sys.stderr)
+        except (subprocess.SubprocessError, ValueError, KeyError, TypeError) as exc:
+            # One bad PR must not discard the rows already collected. A malformed
+            # payload (a missing key) is skipped the same way as a failed API call.
+            detail = getattr(exc, "stderr", "") or ""
+            print(f"warning: skipped {repo}#{number}: {type(exc).__name__}: {exc} {detail.strip()[:200]}".rstrip(),
+                  file=sys.stderr)
     return rows
 
 
