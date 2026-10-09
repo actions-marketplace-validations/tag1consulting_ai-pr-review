@@ -41,7 +41,7 @@
 #   AI_REVIEW_MAX_COST_USD: pre-flight cost ceiling in USD; run aborts before dispatch if the estimate exceeds it, 0 disables (default: 0)
 #   AI_REVIEW_FAIL_ON_COST_CEILING: exit code 2 (instead of 0) when the cost ceiling is exceeded (default: false)
 #   AI_REVIEW_MODE_DEFAULT: mode for automatic review AND /ai-pr-review rescan when set (default: '', defer to policy.yml, else quick)
-#   AI_REVIEW_FEEDBACK_LOOP: enable learning loop (default: false; GitHub-only)
+#   AI_REVIEW_FEEDBACK_LOOP: enable learning loop (default: false)
 #   AI_REVIEW_CONTEXT_ENRICHMENT: tree-sitter symbol-context injection (default: true)
 #   AI_REVIEW_CONTEXT_MAX_QUERIES: cap on symbol-lookup queries per run (default: 200)
 #   AI_REVIEW_SARIF_PATHS: comma-separated SARIF 2.1.0 paths to merge as findings
