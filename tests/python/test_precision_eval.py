@@ -449,7 +449,7 @@ def test_judge_eval_counts_inline_precision_and_demoted_real_findings() -> None:
 def test_judge_eval_rejects_an_unknown_condition() -> None:
     with pytest.raises(ValueError, match="unknown condition"):
         je._selected("code-sonnet,nonsense")
-    assert [c.name for c in je._selected("")] == ["text-sonnet", "code-sonnet", "text-haiku", "code-haiku"]
+    assert [c.name for c in je._selected("")] == ["text-sonnet", "code-sonnet", "text-haiku", "code-haiku", "v2-sonnet"]
 
 
 # --- corpus override and the fixture miner (pure helpers, no network) ---

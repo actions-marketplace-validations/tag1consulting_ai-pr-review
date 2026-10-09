@@ -18,6 +18,7 @@ Conditions (``AI_EVAL_JUDGE_CONDITIONS`` picks a subset):
   code-sonnet   the code-aware prompt (finding plus cited hunk) on Sonnet 5.5
   text-haiku    the production prompt on Haiku 5.5
   code-haiku    the code-aware prompt on Haiku 5.5
+  v2-sonnet     the text prompt with an extra keep rule and an extra downrank rule
 
 Metrics per condition, using the corpus labels:
 
@@ -85,9 +86,12 @@ class Condition:
     name: str
     model: str
     with_code: bool
+    prompt_file: str = ""
 
     @property
     def prompt(self) -> Path:
+        if self.prompt_file:
+            return REPO_ROOT / "prompts" / self.prompt_file
         return CODE_PROMPT if self.with_code else TEXT_PROMPT
 
 
@@ -96,6 +100,8 @@ CONDITIONS = (
     Condition("code-sonnet", SONNET, True),
     Condition("text-haiku", HAIKU, False),
     Condition("code-haiku", HAIKU, True),
+    # A tweaked text-only prompt (more keep for concrete consequences). Sonnet only.
+    Condition("v2-sonnet", SONNET, False, "finding-judge-v2.md"),
 )
 _ALL_NAMES = ("none",) + tuple(c.name for c in CONDITIONS)
 
