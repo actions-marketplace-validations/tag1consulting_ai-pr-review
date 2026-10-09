@@ -473,3 +473,54 @@ def test_fixture_slice() -> None:
     assert pe.apply_slice(items, ":3") == [0, 1, 2]  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="0:35"):
         pe.apply_slice(items, "abc")
+
+
+# --- review follow-ups: harvest errors, miner failures, empty slice ---
+
+
+def test_harvest_summary_reports_failed_compare_calls() -> None:
+    harvest.COMPARE_FAILURES.clear()
+    rows = [{"outcome": "untouched"}]
+    assert "compare call" not in harvest.summarize(rows)
+    harvest.COMPARE_FAILURES.append("repo a...b: boom")
+    assert "1 compare call(s) failed" in harvest.summarize(rows)
+    harvest.COMPARE_FAILURES.clear()
+
+
+def test_harvest_one_bad_pr_does_not_lose_the_others(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+
+    def fake_gh(path: str) -> Any:
+        if "pulls?state=closed" in path:
+            return [{"number": 1, "merged_at": "x"}, {"number": 2, "merged_at": "x"}]
+        raise AssertionError(path)
+
+    def fake_pr(repo: str, pr: dict[str, Any]) -> list[dict[str, Any]]:
+        if pr["number"] == 1:
+            raise subprocess.CalledProcessError(1, "gh", stderr="rate limit")
+        return [{"pr": pr["number"], "outcome": "untouched"}]
+
+    monkeypatch.setattr(harvest, "_gh", fake_gh)
+    monkeypatch.setattr(harvest, "_harvest_pr", fake_pr)
+    assert harvest.harvest_repo("tag1consulting/ai-pr-review", 10) == [{"pr": 2, "outcome": "untouched"}]
+
+
+def test_miner_records_a_tolerated_git_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    mf.GIT_FAILURES.clear()
+    assert mf._git("rev-parse", "--verify", "--quiet", "no-such-ref-xyz", check=False) == ""
+    assert mf.GIT_FAILURES and "rev-parse" in mf.GIT_FAILURES[0]
+    mf.GIT_FAILURES.clear()
+
+
+def test_miner_default_ref_falls_back_to_head(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert mf.default_ref() in ("origin/main", "HEAD")
+
+
+@pytest.mark.anyio
+async def test_empty_slice_is_not_reported_as_an_empty_corpus(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("AI_EVAL_FIXTURE_SLICE", "500:600")
+    assert await pe.main(["--dry-run"]) == 1
+    err = capsys.readouterr().err
+    assert "selects none of the" in err and "no fixtures in" not in err

@@ -405,12 +405,18 @@ async def main(argv: list[str] | None = None) -> int:
     models = _csv("AI_EVAL_MODELS", DEFAULT_MODELS)
     agents = _csv("AI_EVAL_AGENTS", DEFAULT_AGENTS)
     try:
-        fixtures = apply_slice(load_fixtures(), os.environ.get("AI_EVAL_FIXTURE_SLICE", ""))
+        all_fixtures = load_fixtures()
+        slice_spec = os.environ.get("AI_EVAL_FIXTURE_SLICE", "")
+        fixtures = apply_slice(all_fixtures, slice_spec)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     if not fixtures:
-        print(f"ERROR: no fixtures in {resolve_corpus_dir()}", file=sys.stderr)
+        if all_fixtures:
+            print(f"ERROR: AI_EVAL_FIXTURE_SLICE={slice_spec!r} selects none of the {len(all_fixtures)} "
+                  f"fixtures in {resolve_corpus_dir()}.", file=sys.stderr)
+        else:
+            print(f"ERROR: no fixtures in {resolve_corpus_dir()}", file=sys.stderr)
         return 1
     try:
         cache = _llm_cache.LLMCache.from_env(namespace=PROVIDER)

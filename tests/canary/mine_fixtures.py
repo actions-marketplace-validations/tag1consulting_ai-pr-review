@@ -46,12 +46,19 @@ _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
+GIT_FAILURES: list[str] = []
+
+
 def _git(*args: str, check: bool = True) -> str:
     result = subprocess.run(
         ["git", "-C", str(REPO_ROOT), *args], capture_output=True, text=True, timeout=120, check=False,
     )
-    if check and result.returncode != 0:
-        raise RuntimeError(f"git {' '.join(args[:3])} failed: {result.stderr[:200]}")
+    if result.returncode != 0:
+        if check:
+            raise RuntimeError(f"git {' '.join(args[:3])} failed: {result.stderr[:200]}")
+        # A caller that tolerates failure still gets a record of it, so a broken git
+        # setup is not mistaken for "this commit has no data".
+        GIT_FAILURES.append(f"git {' '.join(args[:3])}: {result.stderr.strip()[:120]}")
     return result.stdout
 
 
@@ -153,8 +160,17 @@ def known_introducers() -> set[str]:
     return found
 
 
+def default_ref() -> str:
+    """``origin/main`` if it exists, else ``HEAD``. Use ``--pin`` for a repeatable run."""
+    result = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "rev-parse", "--verify", "--quiet", "origin/main"],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    return "origin/main" if result.returncode == 0 else "HEAD"
+
+
 def fix_commits(limit: int) -> list[str]:
-    out = _git("log", "origin/main", "--no-merges", "--format=%H", "-i", "--grep=^fix", "--", SOURCE_GLOB)
+    out = _git("log", default_ref(), "--no-merges", "--format=%H", "-i", "--grep=^fix", "--", SOURCE_GLOB)
     return out.split()[: max(limit, 0)]
 
 
@@ -195,7 +211,12 @@ def main(argv: list[str] | None = None) -> int:
     skip = known_introducers()
     fix_shas: dict[str, None] = {}
     pinned = json.loads(Path(args.pin).read_text()) if args.pin else None
-    for fix in (pinned if pinned is not None else fix_commits(args.scan)):
+    try:
+        candidates = pinned if pinned is not None else fix_commits(args.scan)
+    except RuntimeError as exc:
+        print(f"error: cannot list fix commits ({exc}). Run inside a clone of the repository.", file=sys.stderr)
+        return 1
+    for fix in candidates:
         for m in mine_commit(fix):
             if m.introducing in skip:
                 continue
@@ -207,6 +228,9 @@ def main(argv: list[str] | None = None) -> int:
             break
     found = found[: args.limit]
     print(f"{len(found)} fixtures mined", file=sys.stderr)
+    if GIT_FAILURES:
+        print(f"warning: {len(GIT_FAILURES)} git call(s) failed and their commits were skipped. "
+              f"First: {GIT_FAILURES[0]}", file=sys.stderr)
     if args.write_pin:
         Path(args.write_pin).write_text(json.dumps(list(fix_shas), indent=0) + "\n")
     if args.dry_run:
