@@ -420,3 +420,33 @@ def test_harvest_patch_touches_the_cited_line() -> None:
 def test_harvest_refuses_a_repo_that_is_not_allowed(capsys: pytest.CaptureFixture[str]) -> None:
     assert harvest.main(["--repo", "client-org/private-repo"]) == 1
     assert "not an allowed repository" in capsys.readouterr().err
+
+
+# --- judge eval scoring (pure, no network) ---
+
+je = _load("judge_eval")
+
+
+def _judged(fx: Any, findings: list[Finding], *, demote: set[int] | None = None) -> list[Finding]:
+    return [f.model_copy(update={"demoted_to_body": i in (demote or set()), "judge_verdict": "downrank" if i in (demote or set()) else "keep"})
+            for i, f in enumerate(findings)]
+
+
+def test_judge_eval_counts_inline_precision_and_demoted_real_findings() -> None:
+    fx = _fixture([_label()])
+    findings = [_finding(line=11), _finding(file="z.py", line=1)]
+    none = je.score_condition("none", [(fx, findings)])
+    assert (none.inline_matched, none.inline_unlabeled, none.demoted_real) == (1, 1, 0)
+    assert none.inline_precision[0] == 0.5 and none.bugs_inline == 1
+    # Demoting the unlabeled finding raises inline precision and loses no real bug.
+    good = je.score_condition("c", [(fx, _judged(fx, findings, demote={1}))])
+    assert good.inline_precision[0] == 1.0 and good.demoted_real == 0 and good.bugs_inline == 1
+    # Demoting the real finding lowers bugs inline and counts as a demoted real finding.
+    bad = je.score_condition("c", [(fx, _judged(fx, findings, demote={0}))])
+    assert bad.demoted_real == 1 and bad.bugs_inline == 0 and bad.inline_precision[0] == 0.0
+
+
+def test_judge_eval_rejects_an_unknown_condition() -> None:
+    with pytest.raises(ValueError, match="unknown condition"):
+        je._selected("code-sonnet,nonsense")
+    assert [c.name for c in je._selected("")] == ["text-sonnet", "code-sonnet", "text-haiku", "code-haiku"]
