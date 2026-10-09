@@ -370,6 +370,82 @@ class TestVersionBumpsAreNotNew:
         assert [f.severity for f in found] == ["High"]
 
 
+def _unified(path: str, old: str, new: str, context: int) -> str:
+    import difflib
+
+    body = difflib.unified_diff(old.splitlines(), new.splitlines(), f"a/{path}", f"b/{path}", lineterm="", n=context)
+    return f"diff --git a/{path} b/{path}\n" + "\n".join(body) + "\n"
+
+
+def _manifest(deps: dict[str, str]) -> str:
+    return json.dumps({"name": "app", "dependencies": deps}, indent=2) + "\n"
+
+
+def _many(**overrides: str) -> dict[str, str]:
+    deps = {f"dep-{i:02d}": "1" for i in range(30)}
+    deps.update(overrides)
+    return deps
+
+
+def _insert_after(deps: dict[str, str], after: str, name: str) -> dict[str, str]:
+    """Insert a key in the middle. At the end, the previous line gains a comma and is a replacement."""
+    out: dict[str, str] = {}
+    for key, value in deps.items():
+        out[key] = value
+        if key == after:
+            out[name] = "1"
+    return out
+
+
+class TestRebuildBase:
+    """_rebuild_base undoes the hunks. A wrong offset fails quietly, so test each hunk shape."""
+
+    CASES = {
+        "two separate replace hunks": (_many(), _many(**{"dep-03": "2", "dep-25": "2"})),
+        "pure deletion in the middle": (_many(), {k: v for k, v in _many().items() if k != "dep-12"}),
+        "pure addition in the middle": (_many(), _insert_after(_many(), "dep-15", "zzz-new")),
+        "deletion, replacement and addition": (
+            _many(),
+            _insert_after({k: v for k, v in _many(**{"dep-20": "9"}).items() if k != "dep-05"}, "dep-27", "zzz-new"),
+        ),
+        "last line changes": (_many(), {k: v for k, v in _many().items() if k != "dep-29"}),
+        "first dependency changes": (_many(), _many(**{"dep-00": "5"})),
+    }
+
+    @pytest.mark.parametrize("context", [0, 1, 3])
+    @pytest.mark.parametrize("case", list(CASES))
+    def test_rebuilding_gives_back_the_old_file(self, case: str, context: int) -> None:
+        old, new = (_manifest(d) for d in self.CASES[case])
+        hunks = de._hunks_by_file(_unified("package.json", old, new, context))["package.json"]
+        assert de._rebuild_base(new, hunks) == old
+
+    def test_the_fixtures_cover_the_hunk_shapes_the_branches_need(self) -> None:
+        """Without this, difflib could merge hunks and the tests would only cover one hunk."""
+        old, new = (_manifest(d) for d in self.CASES["deletion, replacement and addition"])
+        spaced = de._hunks_by_file(_unified("package.json", old, new, 1))["package.json"]
+        assert len(spaced) >= 3
+        zero_context = de._hunks_by_file(_unified("package.json", old, new, 0))["package.json"]
+        assert any(h.new_count == 0 for h in zero_context), "needs a pure-deletion hunk (new_count == 0)"
+        assert any(not h.old_side for h in zero_context), "needs a pure-addition hunk"
+
+    def test_hunks_that_do_not_fit_the_file_give_none(self) -> None:
+        old, new = (_manifest(d) for d in self.CASES["two separate replace hunks"])
+        hunks = de._hunks_by_file(_unified("package.json", old, new, 1))["package.json"]
+        assert de._rebuild_base(new.replace("dep-25", "dep-xx"), hunks) is None
+        assert de._rebuild_base(new, hunks[::-1]) == old  # order in the diff does not matter
+
+    def test_a_bump_in_a_later_hunk_is_not_looked_up_and_a_new_name_is(self, work: Path, registry: Registry) -> None:
+        old = _manifest(_many(**{"@acme/private": "1"}))
+        new = _manifest(_insert_after(_many(**{"@acme/private": "2", "dep-03": "2"}), "dep-20", "invented-pkg"))
+        assert len(de._hunks_by_file(_unified("package.json", old, new, 1))["package.json"]) >= 2
+        (work / "package.json").write_text(new)
+        diff = work / "d.diff"
+        diff.write_text(_unified("package.json", old, new, 1))
+        found = de._run_dep_exists(_cf("package.json"), diff)
+        assert [f.finding.split("`")[1] for f in found] == ["invented-pkg"]
+        assert {r.url.path for r in registry} == {"/invented-pkg"}
+
+
 class TestFailOpen:
     @pytest.mark.parametrize("status", [301, 302, 403, 429, 500, 503])
     def test_other_statuses_give_no_finding(self, work: Path, registry: Registry, status: int) -> None:
