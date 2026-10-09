@@ -153,3 +153,68 @@ class TestConsumersAgree:
         assert (line, text) in added_lines(self.DIFF)[path]
         window = extract_hunk(self.DIFF, path, line)
         assert f"{line:>5} + {text}" in window
+
+
+def test_compute_diff_ignores_the_users_git_diff_config_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#1032: mnemonic prefixes and quoted non-ASCII paths in the user's git config must not
+    make dep-exists skip a manifest. The test sets both, then runs compute_diff and dep-exists."""
+    import json
+
+    import httpx
+
+    from ai_pr_review.analyzers.native import dep_exists as de
+    from ai_pr_review.diff.compute import compute_diff
+    from ai_pr_review.manifest import ChangedFiles
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "diff.mnemonicPrefix", "true")
+    _git(repo, "config", "core.quotePath", "true")
+    (repo / "pkg-é").mkdir()
+    (repo / "pkg-é/package.json").write_text(json.dumps({"dependencies": {"left-pad": "1"}}, indent=2) + "\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "base")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "checkout", "-qb", "feature")
+    (repo / "pkg-é/package.json").write_text(
+        json.dumps({"dependencies": {"left-pad": "1", "invented-pkg": "1"}}, indent=2) + "\n"
+    )
+    _git(repo, "commit", "-qam", "add a dependency")
+    head = _git(repo, "rev-parse", "HEAD").strip()
+
+    result = compute_diff("main", head, workspace=str(repo), ignore_merge_commits=False)
+    assert result.changed_files == ["pkg-é/package.json"]
+    assert "+++ b/pkg-é/package.json" in result.diff_text
+
+    monkeypatch.chdir(repo)
+    seen: list[str] = []
+    real_client = httpx.Client
+
+    def factory(*args: object, **kwargs: object) -> httpx.Client:
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request.url.path)
+            return httpx.Response(404)
+
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real_client(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(de.httpx, "Client", factory)
+    diff_file = tmp_path / "d.diff"
+    diff_file.write_text(result.diff_text)
+    found = de._run_dep_exists(ChangedFiles(all_files=result.changed_files, manifest_lockfile=result.changed_files), diff_file)
+    assert [f.file for f in found] == ["pkg-é/package.json"]
+    assert seen == ["/invented-pkg"]
+
+
+def test_a_manifest_missing_from_the_diff_is_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    from ai_pr_review.analyzers.native import dep_exists as de
+    from ai_pr_review.manifest import ChangedFiles
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "package.json").write_text("{}")
+    diff_file = tmp_path / "d.diff"
+    diff_file.write_text("diff --git c/other.txt i/other.txt\n--- c/other.txt\n+++ i/other.txt\n@@ -1 +1 @@\n-a\n+b\n")
+    with caplog.at_level("WARNING", logger=de.logger.name):
+        assert de._run_dep_exists(ChangedFiles(all_files=["package.json"], manifest_lockfile=["package.json"]), diff_file) == []
+    assert "package.json is in the changed-file list but not in the diff" in caplog.text

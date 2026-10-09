@@ -383,14 +383,23 @@ def _deps_from_gemfile(path: str, added: list[tuple[int, str]]) -> list[Dep]:
     return deps
 
 
+def _is_checked_manifest(base_name: str) -> bool:
+    return base_name in ("package.json", "composer.json", "Cargo.toml", "Gemfile") or bool(_REQUIREMENTS_FILE.match(base_name))
+
+
 def collect_new_deps(changed_files: ChangedFiles, diff_text: str) -> list[Dep]:
     """New direct dependencies on added lines of the changed manifests."""
     files = parse_diff(diff_text)
     by_file = _added_from(files)
     diff_hunks = {f.new_path: f.hunks for f in files if f.new_path is not None}
     deps: list[Dep] = []
+    in_diff = {f.path for f in files}
     for path in changed_files.manifest_lockfile:
         added = by_file.get(path)
+        if path not in in_diff and _is_checked_manifest(Path(path).name):
+            # A manifest in the changed-file list with no entry in the diff is a skipped check.
+            # Say so, so a path the diff parser could not match cannot turn the check off quietly.
+            logger.warning("[ai-pr-review] dep-exists: %s is in the changed-file list but not in the diff, so its dependencies are not checked", path)
         if not added or not Path(path).is_file():
             continue
         base = Path(path).name
