@@ -74,6 +74,19 @@ class FileDiff:
         return bool(self.old_path and self.new_path and self.old_path != self.new_path)
 
 
+def split_lines(text: str) -> list[str]:
+    """Split text the way git does: on ``\\n`` only, and a trailing ``\\r`` is dropped from each line.
+
+    ``str.splitlines()`` also splits on form feed, ``\\x1c`` to ``\\x1e``, ``\\x85`` and the Unicode
+    line separators. Git does not, so a diff row that holds one of them would turn into several
+    false rows and shift every line number after it.
+    """
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    return [line[:-1] if line.endswith("\r") else line for line in lines]
+
+
 def decode_git_path(raw: str) -> str:
     """Undo git's C-style quoting of a path, for example ``"pkg-\\303\\251/x"``.
 
@@ -159,7 +172,7 @@ def parse_diff(diff_text: str) -> list[FileDiff]:
         header = None
         rows = []
 
-    for raw in diff_text.splitlines():
+    for raw in split_lines(diff_text):
         if raw.startswith("diff --git "):
             close_hunk()
             shared = _header_path(raw)

@@ -41,7 +41,7 @@ from urllib.parse import quote
 
 import httpx
 
-from ai_pr_review.diff.parse import FileDiff, Hunk, parse_diff
+from ai_pr_review.diff.parse import FileDiff, Hunk, parse_diff, split_lines
 from ai_pr_review.findings.models import Finding
 from ai_pr_review.manifest import ChangedFiles
 
@@ -139,7 +139,7 @@ def _rebuild_base(new_text: str, hunks: list[Hunk]) -> str | None:
     ending, a file that is not the one in the diff), the caller treats every
     dependency as new, so an odd diff gets more checking and not less.
     """
-    lines = new_text.splitlines()
+    lines = split_lines(new_text)
     out: list[str] = []
     pos = 0
     for hunk in sorted(hunks, key=lambda h: h.new_start):
@@ -195,7 +195,7 @@ def _declared_names(base_name: str, text: str) -> set[str] | None:
         elif _REQUIREMENTS_FILE.match(base_name):
             if any(flag in text for flag in _PRIVATE_INDEX_FLAGS):
                 return names  # the old file used a private index, so its names were not public
-            for line in text.splitlines():
+            for line in split_lines(text):
                 stripped = line.split("#", 1)[0].strip()
                 if not stripped or stripped.startswith("-") or "://" in stripped or " @ " in stripped:
                     continue
@@ -205,7 +205,7 @@ def _declared_names(base_name: str, text: str) -> set[str] | None:
         elif base_name == "Gemfile":
             if any("rubygems.org" not in src for src in re.findall(r"""^\s*source\s+['"]([^'"]+)['"]""", text, re.MULTILINE)):
                 return names  # the old Gemfile used a private source
-            for line in text.splitlines():
+            for line in split_lines(text):
                 gem = _GEM_LINE.match(line)
                 if gem and not re.search(r"\b(?:git|github|path|source|gist|bitbucket):", gem.group(2)):
                     names.add(gem.group(1))

@@ -289,3 +289,47 @@ def test_a_manifest_under_a_directory_with_a_control_character_is_reported_not_s
         assert de._run_dep_exists(ChangedFiles(all_files=[], manifest_lockfile=[]), diff_file) == []
     assert "1 file(s) in the diff have a path that could not be read, so they are not checked" in caplog.text
     assert "\n::error::" not in caplog.text and "::error::" not in caplog.text
+
+
+class TestLineSplitting:
+    """Git ends a line at \\n only. str.splitlines() also splits on form feed and others."""
+
+    def test_a_form_feed_inside_a_row_does_not_split_the_row(self) -> None:
+        diff = "diff --git a/x.c b/x.c\n--- a/x.c\n+++ b/x.c\n@@ -1,2 +1,2 @@\n a\n-b\x0cq\n+c\x0cr\n"
+        (file,) = parse_diff(diff)
+        assert [(r.old_no, r.new_no, r.marker, r.text) for r in file.hunks[0].rows] == [
+            (1, 1, " ", "a"),
+            (2, None, "-", "b\x0cq"),
+            (None, 2, "+", "c\x0cr"),
+        ]
+
+    @pytest.mark.parametrize("sep", ["\x0b", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"])
+    def test_other_separators_do_not_split_a_context_row(self, sep: str) -> None:
+        diff = f"diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,2 +1,2 @@\n x{sep}y\n-old\n+new\n"
+        (file,) = parse_diff(diff)
+        assert [r.text for r in file.hunks[0].rows] == [f"x{sep}y", "old", "new"]
+
+    def test_crlf_line_endings_are_dropped_from_the_rows(self) -> None:
+        diff = "diff --git a/f b/f\r\n--- a/f\r\n+++ b/f\r\n@@ -1 +1 @@\r\n-a\r\n+b\r\n"
+        (file,) = parse_diff(diff)
+        assert file.path == "f" and [r.text for r in file.hunks[0].rows] == ["a", "b"]
+
+    def test_split_lines_keeps_blank_lines_but_not_the_final_newline(self) -> None:
+        from ai_pr_review.diff.parse import split_lines
+
+        assert split_lines("a\n\nb\n") == ["a", "", "b"] and split_lines("") == [] and split_lines("a") == ["a"]
+
+
+def test_a_form_feed_in_a_manifest_does_not_break_the_base_rebuild() -> None:
+    """The file and the hunks must be split the same way, or the rebuild fails and every bump is checked."""
+    from ai_pr_review.analyzers.native import dep_exists as de
+
+    old = 'name = "app"\x0c\n[dependencies]\nacme = "1"\n'
+    new = 'name = "app"\x0c\n[dependencies]\nacme = "2"\n'
+    import difflib
+
+    from ai_pr_review.diff.parse import split_lines
+
+    body = "\n".join(difflib.unified_diff(split_lines(old), split_lines(new), "a/Cargo.toml", "b/Cargo.toml", lineterm="", n=1))
+    hunks = de._hunks_by_file("diff --git a/Cargo.toml b/Cargo.toml\n" + body + "\n")["Cargo.toml"]
+    assert de._rebuild_base(new, hunks) == old
