@@ -66,7 +66,18 @@ Each analyzer maps its findings to a severity and to one of the 11 categories th
 - It fails open. A timeout, a rate limit, or any status other than 200 or 404 gives no finding.
 - It reads only files in the repository, so it cannot see a private registry that is set in CI settings or a user-level config. A private scoped npm package, or a monorepo package that another package lists by plain version, returns "not found" from the public registry. The result is a High finding, and a High finding makes the review request changes. Set the registry in a file in the repository, or turn the analyzer off.
 - It checks at most 25 new dependencies per run.
+- It reads the paths in the diff with a shared parser (`ai_pr_review/diff/parse.py`). The engine pins the git diff format (`a/` and `b/` prefixes, unquoted non-ASCII paths), so a user's git config cannot hide a manifest. A path that holds a control character is never decoded. The analyzer cannot read such a path and logs a warning with a count of the files it skipped.
 - Turn it off with `exclude-analyzers: dep-exists`.
+
+### What the check does not prove
+
+`dep-exists` is an advisory check, not a control that stops a dependency-confusion attack. It works from the diff and the files on disk. It does not know where a dependency resolves from in your build.
+
+- **What it can catch.** A name that no public registry knows, and a package first published in the last 30 days. Both are signs of a name that a model invented or that an attacker registered.
+- **What it cannot catch.** A name that exists on the public registry and is not the package you mean (a lookalike that is older than 30 days). A name that you also publish on a private registry. A change in a transitive dependency or a lockfile. A Go module.
+- **How it tells a new dependency from an old one.** It rebuilds the old manifest by undoing the diff hunks, which always matches the diff it was given. It does not read the base commit. It checks every added dependency when it cannot trust the old names: the hunks do not fit the file, the manifest moves, the same change edits a registry config file (`.npmrc`, `.yarnrc`, `.cargo/config`), or the old file used a private index or source.
+- **How it fails.** It fails open on a lookup that gets no usable answer, and it logs one warning with the count. A High finding makes the review request changes, so a private package that the public registry does not know can block a pull request. Set the registry in a file in the repository, or turn the analyzer off.
+- **Follow-up work** is tracked in [#1033](https://github.com/tag1consulting/ai-pr-review/issues/1033): read the base manifest from git, an opt-in list of private scopes, and a decision on whether the check may request changes.
 
 ## Documentation checks
 
