@@ -220,3 +220,26 @@ def test_sonnet_5_5_effort_is_capped_at_low() -> None:
 )
 def test_resolve_gemini_thinking_level(model_id: str, expected: str | None) -> None:
     assert resolve_gemini_thinking_level(model_id) == expected
+
+
+# --- Haiku 5.5 (verified live 2026-10-08: temperature is a 400, effort "low" is accepted) ---
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "claude-haiku-5-5",
+        "claude-haiku-5.5",
+        "claude-haiku-5-5-20261001",
+        "anthropic.claude-haiku-5-5",
+        "us.anthropic.claude-haiku-5-5",
+    ],
+)
+def test_haiku_5_5_omits_temperature_and_caps_effort(model_id: str) -> None:
+    assert resolve_temperature(0.3, model_id) is None
+    assert resolve_effort(model_id) == "low"
+
+
+def test_haiku_4_5_keeps_its_temperature_and_gets_no_effort() -> None:
+    assert resolve_temperature(0.3, "claude-haiku-4-5") == 0.3
+    assert resolve_effort("claude-haiku-4-5") is None

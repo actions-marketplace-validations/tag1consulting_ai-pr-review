@@ -1,0 +1,16 @@
+{
+  "clean": false,
+  "source": "seeded",
+  "evidence": "strong",
+  "verified_by": "by construction (tests/canary/corpus/README.md)",
+  "bugs": [
+    {
+      "file": "infra/uploads_bucket.tf",
+      "line_start": 7,
+      "line_end": 7,
+      "category": "authz",
+      "summary": "S3 bucket ACL is public-read, so uploaded files are world readable"
+    }
+  ],
+  "accepted_extra": []
+}
