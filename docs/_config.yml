@@ -19,6 +19,15 @@ search:
 
 heading_anchors: true
 
+# The just-the-docs theme uses Sass features that Dart Sass plans to remove in 3.0.0.
+# The theme code triggers these warnings, not the files in this directory.
+# Remove this block after a theme release that fixes them. See issue #1027.
+sass:
+  silence_deprecations:
+    - import
+    - global-builtin
+    - color-functions
+
 aux_links:
   "View on GitHub":
     - "https://github.com/tag1consulting/ai-pr-review"
