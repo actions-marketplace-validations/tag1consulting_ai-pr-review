@@ -36,6 +36,7 @@
 #   AI_REVIEW_PARALLEL: parallel tiered fan-out (default: true)
 #   AI_REVIEW_IGNORE_MERGE_COMMITS: strip upstream base-branch merge commits (default: true)
 #   AI_REVIEW_FAIL_ON_FINDINGS: exit code 2 on REQUEST_CHANGES/COMMENT, for CI gates (default: true)
+#   AI_REVIEW_SLASH_FAIL_ON_FINDINGS: same gate for rescan and review-full (default: false)
 #   AI_REVIEW_TOKEN_USAGE_DISPLAY: token-usage content in the review comment: compact/full/off (default: compact)
 #   AI_REVIEW_TOKEN_USAGE_WARN_USD: high-usage warning threshold in USD, 0 disables (default: 1.00)
 #   AI_REVIEW_MAX_COST_USD: pre-flight cost ceiling in USD; run aborts before dispatch if the estimate exceeds it, 0 disables (default: 0)
@@ -327,13 +328,14 @@ jobs:
       parallel: ${{ vars.AI_REVIEW_PARALLEL || 'true' }}
       max-tokens-per-agent: ${{ vars.AI_REVIEW_MAX_TOKENS_PER_AGENT || '32768' }}
       enable-suggestions: ${{ vars.AI_REVIEW_ENABLE_SUGGESTIONS || 'true' }}
-      # Deliberately 'false' here, unlike the review job above ('true'): a
-      # non-zero exit on this path fails the workflow run and misfires the
-      # failure-reaction step on a rescan that simply found something,
-      # rather than gating a required check the way it does on the review
-      # job's pull_request trigger. Set AI_REVIEW_FAIL_ON_FINDINGS=true if
-      # you want that gating behavior on rescan/review-full too.
-      fail-on-findings: ${{ vars.AI_REVIEW_FAIL_ON_FINDINGS || 'false' }}
+      # Separate variable from the review job above (AI_REVIEW_FAIL_ON_FINDINGS):
+      # a non-zero exit on this path fails the workflow run and misfires the
+      # failure-reaction step on a rescan that simply found something, rather
+      # than gating a required check the way it does on the pull_request
+      # trigger. A shared variable would turn this on whenever the review
+      # job's gate is on. Set AI_REVIEW_SLASH_FAIL_ON_FINDINGS=true to gate
+      # rescan/review-full too.
+      fail-on-findings: ${{ vars.AI_REVIEW_SLASH_FAIL_ON_FINDINGS || 'false' }}
       feedback-loop: ${{ vars.AI_REVIEW_FEEDBACK_LOOP || 'false' }}
       token-usage-display: ${{ vars.AI_REVIEW_TOKEN_USAGE_DISPLAY || 'compact' }}
       suppress-walkthrough: ${{ vars.AI_REVIEW_SUPPRESS_WALKTHROUGH || 'false' }}
