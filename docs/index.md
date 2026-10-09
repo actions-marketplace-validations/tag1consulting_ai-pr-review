@@ -14,8 +14,8 @@ hero_tagline: "AI-powered pull request review using multiple LLM agents. Posts a
     <p>Up to 9 specialized AI agents analyze your code from different perspectives: architecture, security, edge cases, and more.</p>
   </div>
   <div class="feature">
-    <h3><span class="feature-icon">&#9670;</span> 16 Static Analyzers</h3>
-    <p>Shellcheck, semgrep, trufflehog, ruff, golangci-lint, hadolint, checkov, phpcs, phpstan, kube-linter, and tflint ship as binaries in the container image. ESLint, cve-check, and three documentation analyzers (docs-api-check, docs-ref-check, and docs-drift-check) also run. All 16 run as native Python.</p>
+    <h3><span class="feature-icon">&#9670;</span> 17 Static Analyzers</h3>
+    <p>Shellcheck, semgrep, trufflehog, ruff, golangci-lint, hadolint, checkov, phpcs, phpstan, kube-linter, and tflint ship as binaries in the container image. ESLint, cve-check, dep-exists, and three documentation analyzers (docs-api-check, docs-ref-check, and docs-drift-check) also run. All 17 run as native Python.</p>
   </div>
   <div class="feature">
     <h3><span class="feature-icon">&#9670;</span> Works Everywhere</h3>
@@ -68,6 +68,18 @@ jobs:
 
 Reviews start on the next PR.
 
+## What's new in v2.21.0
+
+**Each finding shows where its evidence came from.** A short label and the confidence score follow the finding text, for example `(corroborated by analyzer, confidence 88)`. It is display text only. Set `finding-badges: 'false'` to hide it.
+
+**A new analyzer checks new dependencies.** `dep-exists` asks the public registry whether each dependency that a diff adds really exists. An unknown name is a High finding, because a model can invent a package name and an attacker can register it. Turn it off with `exclude-analyzers: dep-exists`.
+
+**The review comment says what it did not look at.** A short `Not reviewed:` note lists your `exclude-patterns`, the agents that did not run, and whether the review is incremental.
+
+**Behavior change: the cost estimate is about 2.2 times higher.** The estimate now uses a measured ratio of characters to tokens. A repository that sets `AI_MAX_COST_USD` can see a review skipped that passed before.
+
+See [Version History → v2.21.0](version-history/v2.21.0) for details.
+
 ## What's new in v2.20.0
 
 **`/ai-pr-review full` now works.** It is an alias for `/ai-pr-review review-full`. Both start the same full-mode review and get the same reply, and the `help` reply lists the alias.
@@ -81,12 +93,6 @@ See [Version History → v2.20.0](version-history/v2.20.0) for details.
 **You can now leave the Walkthrough table out of the summary comment.** Set `suppress-walkthrough: 'true'` (the `AI_SUPPRESS_WALKTHROUGH` environment variable on Bitbucket and GitLab). The Summary text, Type and Effort stay. This is most useful on Bitbucket, which cannot collapse the table the way GitHub and GitLab do. The default is `false`, so nothing changes unless you set it. On Bitbucket a summary comment that already has a table loses it on the next run.
 
 See [Version History → v2.19.0](version-history/v2.19.0) for details.
-
-## What's new in v2.18.3
-
-**Bitbucket error messages are clearer.** A failed Bitbucket call now shows the scopes the token has, so a missing-scope error is easy to fix. The warning for a failed account lookup depends on the HTTP status. A 401 means the credentials were rejected or the token has no scopes, and a 403 means the Account:Read scope is missing. The dismiss help line is no longer shown when that lookup failed, because verdict commands are off for that run.
-
-See [Version History → v2.18.3](version-history/v2.18.3) for details.
 
 ## Learn more
 

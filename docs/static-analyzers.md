@@ -141,5 +141,5 @@ See `examples/workflows/sarif-codeql.yml` for a complete CodeQL + AI review pipe
 
 ## Implementation reference
 
-All 16 analyzers are native Python functions in `ai_pr_review/analyzers/native/`. The `analyzers/bridge.py` dispatcher maps each tool name to its Python callable. Each analyzer runs the tool binary with `subprocess.run` and parses the JSON output in Python. Test coverage is in `tests/python/test_analyzer_<tool>.py`. The three docs analyzers use the files `test_analyzer_docs_comments.py` (docs-api-check), `test_analyzer_docs_ref_check.py`, and `test_analyzer_docs_drift_check.py`.
+All 17 analyzers are native Python functions in `ai_pr_review/analyzers/native/`. The `analyzers/bridge.py` dispatcher maps each tool name to its Python callable. Each analyzer runs the tool binary with `subprocess.run` and parses the JSON output in Python. Test coverage is in `tests/python/test_analyzer_<tool>.py`. The three docs analyzers use the files `test_analyzer_docs_comments.py` (docs-api-check), `test_analyzer_docs_ref_check.py`, and `test_analyzer_docs_drift_check.py`.
 

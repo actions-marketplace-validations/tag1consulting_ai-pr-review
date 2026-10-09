@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.21.0] - 2026-10-09
+
 ### Added
 
 - **Each finding now shows where its evidence came from.** A short label and the confidence score appear after the finding text, for example `(corroborated by analyzer, confidence 88)` or `(single agent, unverified, confidence 72)`. The label is one of `corroborated by analyzer`, `analyzer finding`, `judge kept`, `single agent, unverified`, or `single agent, not judged`. The 0 to 100 score is unchanged. It shows on GitHub inline comments and body bullets, GitLab inline discussions and body bullets, and Bitbucket body bullets and Code Insights annotations. It is display text only, and it does not change the approval decision, the finding ids, or the severity and `F` tokens that the comment parsers read. It is on by default. Set `finding-badges: 'false'` (`AI_FINDING_BADGES=false` on Bitbucket) to hide it.
@@ -28,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The published docs are rewritten to ASD-STE100 and checked against the code (#1021, #1028).** Every em dash is gone from `docs/`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, and `examples/`. The live pages under `docs/` use short, active sentences. Release notes and ADRs get punctuation changes only. An audit of each page against the code fixed statements that did not match it, for example the telemetry schema version, the suppression rule fields, which providers keep the learning loop, and the Python version the direct action needs. The analyzers card on the docs homepage is shorter, and the docs build no longer prints Sass deprecation warnings. The homepage and `static-analyzers.md` now count 17 analyzers, because `dep-exists` was added after the audit. About 15 claims could not be checked against the code and are unchanged (#1020).
 - **The pre-flight cost estimate now counts input tokens from a measured ratio, and it is about 2.2 times higher for the same diff.** The estimate used 4 characters per token with a 10% margin. Anthropic's token counting endpoint, run over 56 files this tool sends to a model, reported 1.75 to 2.93 characters per token on Claude Haiku 5.5, Sonnet 5.5, and Opus 5.5 (diffs are the densest at 1.75 to 2.83). The old estimate counted 48% to 81% of the real tokens. `estimate_billed_tokens()` in `review/cost_ceiling.py` now uses 1.8 characters per token with a 10% margin, which does not under-count any measured file and over-counts a typical diff by about 1.5 times. It affects `AI_MAX_COST_USD` (off by default), the `COST_ESTIMATE` log line, and the cost-ceiling skip, so a repo that sets a ceiling can see a review skipped that passed before. Raise the ceiling or compare against the logged estimate. The estimate still leaves out each agent's system prompt, prompt caching, and the judge pass. `context.budget.estimate_tokens()` keeps its 4-characters-per-token default, because the context-enrichment budget is sized by it. The measurement script is `tests/canary/measure_token_ratio.py` and its output is `tests/data/token_ratio_measurements.json`. A new offline test fails if the estimator ever counts fewer tokens than were measured for a file.
 
 ## [2.20.0] - 2026-10-06
