@@ -8,7 +8,7 @@
       "file": "ai_pr_review/analyzers/native/eslint.py",
       "line_start": 37,
       "line_end": 46,
-      "category": "injection",
+      "category": "edge-case",
       "summary": "analyzer runs the eslint binary found in the analyzed checkout node_modules, which a fork pull request controls, so it executes attacker code"
     },
     {

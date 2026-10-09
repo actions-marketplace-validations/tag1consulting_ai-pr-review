@@ -2,7 +2,7 @@
   "clean": false,
   "source": "known-fix",
   "evidence": "strong",
-  "verified_by": "history: introduced by d0afb0774, fixed by 9527d5ccd",
+  "verified_by": "history: introduced by d0afb0774, fixed by 9527d5ccd | second bug introduced by d0afb0774, fixed by dd7b00e (issue 941)",
   "bugs": [
     {
       "file": "ai_pr_review/vcs/_bitbucket_verdicts.py",
@@ -10,6 +10,13 @@
       "line_end": 235,
       "category": "authz",
       "summary": "the repository cross-check tests for a slug field that the permissions response never has, so the check is always false and never runs"
+    },
+    {
+      "file": "ai_pr_review/vcs/_bitbucket_verdicts.py",
+      "line_start": 418,
+      "line_end": 427,
+      "category": "edge-case",
+      "summary": "a degraded permission check leaves the comment un-acked but still queues a reply, so every later run posts a duplicate reply"
     }
   ],
   "accepted_extra": []
