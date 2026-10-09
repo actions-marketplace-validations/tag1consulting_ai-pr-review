@@ -1,9 +1,9 @@
 """Parse a unified diff into files, hunks, and rows.
 
 One parser for the code that needs the text of a change and not only the added
-line numbers (``analyzers/native/dep_exists.py`` and ``findings/hunks.py``). Before
-this module each of them read the headers its own way, so a rename or a quoted path
-was handled differently by each.
+line numbers (``analyzers/native/dep_exists.py`` and the code-aware judge experiment
+in ``tests/canary/judge_code.py``). Before this module each of them read the headers
+its own way, so a rename or a quoted path was handled differently by each.
 
 The parser reads the paths from the ``diff --git`` header, the ``rename from`` and
 ``rename to`` lines, and the ``---`` and ``+++`` lines. It decodes the C-style

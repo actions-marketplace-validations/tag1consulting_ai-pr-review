@@ -74,11 +74,13 @@ def _load(name: str):  # type: ignore[no-untyped-def]
 
 
 pe = _load("precision_eval")
+jc = _load("judge_code")
 
 SONNET = "claude-sonnet-5-5"
 HAIKU = "claude-haiku-5-5"
 TEXT_PROMPT = REPO_ROOT / "prompts" / "finding-judge.md"
-CODE_PROMPT = REPO_ROOT / "prompts" / "finding-judge-code.md"
+PROMPTS_DIR = CANARY_DIR / "judge_prompts"
+CODE_PROMPT = PROMPTS_DIR / "finding-judge-code.md"
 
 
 @dataclass(frozen=True)
@@ -91,7 +93,7 @@ class Condition:
     @property
     def prompt(self) -> Path:
         if self.prompt_file:
-            return REPO_ROOT / "prompts" / self.prompt_file
+            return PROMPTS_DIR / self.prompt_file
         return CODE_PROMPT if self.with_code else TEXT_PROMPT
 
 
@@ -266,10 +268,15 @@ async def run_conditions(per_fixture, conditions, cache, guard):  # type: ignore
                 judged.append((fx, findings))
                 continue
             print(f"  judge {cond.name} :: {fx.name} ({len(findings)} findings)", flush=True)
-            result = await judge_findings(
-                findings, llm_call=llm_call, model=cond.model, prompt_path=cond.prompt,
-                diff_text=fx.diff_path.read_text() if cond.with_code else None,
-            )
+            if cond.with_code:
+                result = await jc.judge_findings_with_code(
+                    findings, llm_call=llm_call, model=cond.model, prompt_path=cond.prompt,
+                    diff_text=fx.diff_path.read_text(),
+                )
+            else:
+                result = await judge_findings(
+                    findings, llm_call=llm_call, model=cond.model, prompt_path=cond.prompt
+                )
             judged.append((fx, result.findings))
         results.append(score_condition(cond.name, judged))
     return results

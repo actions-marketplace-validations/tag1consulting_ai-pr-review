@@ -147,8 +147,19 @@ class TestConsumersAgree:
         [("pkgs/package.json", 2, "one"), ("pkg-é/package.json", 5, "two"), ("x b/y/package.json", 8, "three")],
     )
     def test_the_same_file_and_line_in_both(self, path: str, line: int, text: str) -> None:
+        import importlib.util
+        import sys
+
         from ai_pr_review.analyzers.native.dep_exists import added_lines
-        from ai_pr_review.findings.hunks import extract_hunk
+
+        canary = Path(__file__).resolve().parent.parent / "canary" / "judge_code.py"
+        spec = importlib.util.spec_from_file_location("judge_code", canary)
+        assert spec is not None and spec.loader is not None
+        module = sys.modules.get("judge_code") or importlib.util.module_from_spec(spec)
+        sys.modules["judge_code"] = module
+        if not hasattr(module, "extract_hunk"):
+            spec.loader.exec_module(module)
+        extract_hunk = module.extract_hunk
 
         assert (line, text) in added_lines(self.DIFF)[path]
         window = extract_hunk(self.DIFF, path, line)
