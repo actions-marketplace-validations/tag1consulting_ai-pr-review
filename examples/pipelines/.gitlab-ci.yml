@@ -17,13 +17,13 @@
 #   AI_IGNORE_MERGE_COMMITS (default: true; strip base-branch merges from diff; set to false to include upstream merges)
 #
 # Opt-in capabilities (require the Python engine, which is the default):
-#   AI_CONTEXT_ENRICHMENT  (default: true; tree-sitter symbol-context injection)
+#   AI_CONTEXT_ENRICHMENT  (default: false; tree-sitter symbol-context injection)
 #   AI_FINDING_BADGES      (default: true; set to false to hide the evidence label and
 #                           score beside each finding)
 #   AI_SARIF_PATHS         (default: ''; comma-separated SARIF 2.1.0 file paths
 #                           to merge as findings)
-# Note: AI_FEEDBACK_LOOP (learning loop) is GitHub-only by design: see
-# docs/learning-loop.md. On GitLab it degrades silently to a no-op.
+# Note: AI_FEEDBACK_LOOP (learning loop) works on GitHub and Bitbucket: see
+# docs/learning-loop.md. On GitLab it does nothing.
 #
 # GIT_STRATEGY=clone + GIT_DEPTH=0 are required: the Python engine calls
 # `git fetch origin $BASE_REF` to compute the diff, and the default
