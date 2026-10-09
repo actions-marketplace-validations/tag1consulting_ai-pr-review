@@ -107,10 +107,24 @@ def decode_git_path(raw: str) -> str:
     return out.decode("utf-8", errors="replace")
 
 
+def safe_decode_git_path(raw: str) -> str:
+    """Decode a git path, unless the result holds a control character.
+
+    A path is attacker-controlled text. A decoded newline would let a file name start a new
+    line in a log, for example a line that begins with ``::error::`` in GitHub Actions. A path
+    with a control character is returned in its quoted, escaped form, which is safe to print
+    and matches no file on disk.
+    """
+    decoded = decode_git_path(raw)
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in decoded):
+        return raw
+    return decoded
+
+
 def _strip_prefix(raw: str, prefix: str) -> str | None:
     """A ``---`` or ``+++`` path without its ``a/`` or ``b/`` prefix, or None for /dev/null."""
     raw = raw.split("\t", 1)[0].strip() if not raw.startswith('"') else raw.strip()
-    path = decode_git_path(raw)
+    path = safe_decode_git_path(raw)
     if path == "/dev/null":
         return None
     return path[len(prefix) :] if path.startswith(prefix) else None
@@ -124,7 +138,7 @@ def _header_path(line: str) -> str | None:
     rest = line[len("diff --git ") :]
     quoted = re.match(r'^("(?:[^"\\]|\\.)*") ("(?:[^"\\]|\\.)*")$', rest)
     if quoted:
-        old, new = decode_git_path(quoted.group(1)), decode_git_path(quoted.group(2))
+        old, new = safe_decode_git_path(quoted.group(1)), safe_decode_git_path(quoted.group(2))
         if old.startswith("a/") and new.startswith("b/") and old[2:] == new[2:]:
             return new[2:]
     return None
@@ -187,9 +201,9 @@ def parse_diff(diff_text: str) -> list[FileDiff]:
             continue
         close_hunk()
         if raw.startswith("rename from "):
-            current.old_path = decode_git_path(raw[len("rename from ") :])
+            current.old_path = safe_decode_git_path(raw[len("rename from ") :])
         elif raw.startswith("rename to "):
-            current.new_path = decode_git_path(raw[len("rename to ") :])
+            current.new_path = safe_decode_git_path(raw[len("rename to ") :])
         elif raw.startswith("--- "):
             current.old_path = _strip_prefix(raw[4:], "a/")
         elif raw.startswith("+++ "):

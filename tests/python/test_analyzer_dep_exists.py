@@ -500,7 +500,7 @@ class TestFailOpen:
     ) -> None:
         with caplog.at_level("WARNING", logger=de.logger.name):
             assert _run(work, path, content, ["x"]) == []
-        assert f"cannot parse {path}" in caplog.text
+        assert f"cannot parse {path!r}" in caplog.text
         assert len(registry) == 0
 
 

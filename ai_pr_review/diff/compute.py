@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass, field
 
-from ai_pr_review.diff.parse import decode_git_path
+from ai_pr_review.diff.parse import safe_decode_git_path
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +122,7 @@ def _diff_variants(
     )
     _raise_on_git_diff_error(changed_result, range_spec)
     # core.quotePath=false still quotes a path that holds a quote, a backslash, or a control character.
-    changed_files = [decode_git_path(f) for f in changed_result.stdout.splitlines() if f]
+    changed_files = [safe_decode_git_path(f) for f in changed_result.stdout.splitlines() if f]
 
     stat_result = subprocess.run(
         git + ["diff", *_DIFF_FORMAT_OPTIONS, "--stat", range_spec] + ["--"] + excludes,

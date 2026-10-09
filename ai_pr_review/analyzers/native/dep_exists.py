@@ -263,7 +263,7 @@ def _deps_from_package_json(path: str, added: list[tuple[int, str]]) -> list[Dep
     try:
         data = json.loads(_read(path))
     except ValueError as exc:
-        logger.warning("[ai-pr-review] dep-exists: cannot parse %s, its new dependencies are not checked: %s", path, exc)
+        logger.warning("[ai-pr-review] dep-exists: cannot parse %r, its new dependencies are not checked: %s", path, exc)
         return []
     if not isinstance(data, dict):
         return []
@@ -314,7 +314,7 @@ def _deps_from_cargo_toml(path: str, added: list[tuple[int, str]]) -> list[Dep]:
     try:
         data = tomllib.loads(_read(path))
     except tomllib.TOMLDecodeError as exc:
-        logger.warning("[ai-pr-review] dep-exists: cannot parse %s, its new dependencies are not checked: %s", path, exc)
+        logger.warning("[ai-pr-review] dep-exists: cannot parse %r, its new dependencies are not checked: %s", path, exc)
         return []
     deps: list[Dep] = []
     sections = ("dependencies", "dev-dependencies", "build-dependencies")
@@ -349,7 +349,7 @@ def _deps_from_composer_json(path: str, added: list[tuple[int, str]]) -> list[De
     try:
         data = json.loads(_read(path))
     except ValueError as exc:
-        logger.warning("[ai-pr-review] dep-exists: cannot parse %s, its new dependencies are not checked: %s", path, exc)
+        logger.warning("[ai-pr-review] dep-exists: cannot parse %r, its new dependencies are not checked: %s", path, exc)
         return []
     if not isinstance(data, dict) or data.get("repositories"):
         return []
@@ -394,12 +394,20 @@ def collect_new_deps(changed_files: ChangedFiles, diff_text: str) -> list[Dep]:
     diff_hunks = {f.new_path: f.hunks for f in files if f.new_path is not None}
     deps: list[Dep] = []
     in_diff = {f.path for f in files}
+    unreadable = sum(1 for f in files if f.path is None)
+    if unreadable:
+        # A path the parser could not read (a control character in the name, or an unexpected
+        # prefix) cannot be matched to a file. Say so, with a count only: the path is attacker text.
+        logger.warning(
+            "[ai-pr-review] dep-exists: %d file(s) in the diff have a path that could not be read, so they are not checked",
+            unreadable,
+        )
     for path in changed_files.manifest_lockfile:
         added = by_file.get(path)
         if path not in in_diff and _is_checked_manifest(Path(path).name):
             # A manifest in the changed-file list with no entry in the diff is a skipped check.
             # Say so, so a path the diff parser could not match cannot turn the check off quietly.
-            logger.warning("[ai-pr-review] dep-exists: %s is in the changed-file list but not in the diff, so its dependencies are not checked", path)
+            logger.warning("[ai-pr-review] dep-exists: %r is in the changed-file list but not in the diff, so its dependencies are not checked", path)
         if not added or not Path(path).is_file():
             continue
         base = Path(path).name

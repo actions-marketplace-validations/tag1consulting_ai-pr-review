@@ -228,4 +228,64 @@ def test_a_manifest_missing_from_the_diff_is_reported(tmp_path: Path, monkeypatc
     diff_file.write_text("diff --git c/other.txt i/other.txt\n--- c/other.txt\n+++ i/other.txt\n@@ -1 +1 @@\n-a\n+b\n")
     with caplog.at_level("WARNING", logger=de.logger.name):
         assert de._run_dep_exists(ChangedFiles(all_files=["package.json"], manifest_lockfile=["package.json"]), diff_file) == []
-    assert "package.json is in the changed-file list but not in the diff" in caplog.text
+    assert "'package.json' is in the changed-file list but not in the diff" in caplog.text
+
+
+class TestControlCharactersInPaths:
+    """A path is attacker-controlled text. A decoded newline could forge a log line such as
+    `::error::...` in GitHub Actions, so a path with a control character is never decoded."""
+
+    def test_a_decoded_control_character_is_not_returned(self) -> None:
+        from ai_pr_review.diff.parse import safe_decode_git_path
+
+        assert safe_decode_git_path(r'"a\nb/package.json"') == r'"a\nb/package.json"'
+        assert safe_decode_git_path(r'"a\033[31mb"') == r'"a\033[31mb"'
+        assert safe_decode_git_path(r'"pkg-\303\251/x"') == "pkg-é/x"  # ordinary escapes still decode
+        assert safe_decode_git_path("plain/x") == "plain/x"
+
+    def test_the_parser_keeps_the_escaped_form(self) -> None:
+        diff = (
+            'diff --git "a/x\\n::error::y/package.json" "b/x\\n::error::y/package.json"\n'
+            '--- "a/x\\n::error::y/package.json"\n+++ "b/x\\n::error::y/package.json"\n@@ -1 +1 @@\n-a\n+b\n'
+        )
+        (file,) = parse_diff(diff)
+        assert file.path is None  # a path with a control character is treated as unreadable
+
+    def test_compute_diff_and_the_parser_never_return_a_raw_control_character(self, tmp_path: Path) -> None:
+        from ai_pr_review.diff.compute import compute_diff
+
+        _git(tmp_path, "init", "-q", "-b", "main")
+        (tmp_path / "base.txt").write_text("x\n")
+        _git(tmp_path, "add", ".")
+        _git(tmp_path, "commit", "-qm", "base")
+        _git(tmp_path, "update-ref", "refs/remotes/origin/main", "HEAD")
+        _git(tmp_path, "checkout", "-qb", "feature")
+        (tmp_path / "pkg\n::error::injected.json").write_text("{}\n")
+        _git(tmp_path, "add", ".")
+        _git(tmp_path, "commit", "-qm", "hostile name")
+        head = _git(tmp_path, "rev-parse", "HEAD").strip()
+        result = compute_diff("main", head, workspace=str(tmp_path), ignore_merge_commits=False)
+        assert len(result.changed_files) == 1
+        assert not any(ord(ch) < 32 for name in result.changed_files for ch in name)
+        for file in parse_diff(result.diff_text):
+            assert file.path is None or not any(ord(ch) < 32 for ch in file.path)
+
+
+def test_a_manifest_under_a_directory_with_a_control_character_is_reported_not_skipped_quietly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Naming a directory with a newline must not switch dep-exists off without a trace."""
+    from ai_pr_review.analyzers.native import dep_exists as de
+    from ai_pr_review.manifest import ChangedFiles
+
+    monkeypatch.chdir(tmp_path)
+    diff_file = tmp_path / "d.diff"
+    diff_file.write_text(
+        'diff --git "a/x\n::error::y/package.json" "b/x\n::error::y/package.json"\n'
+        '--- "a/x\n::error::y/package.json"\n+++ "b/x\n::error::y/package.json"\n'
+        '@@ -0,0 +1 @@\n+{"dependencies": {"invented-pkg": "1"}}\n'
+    )
+    with caplog.at_level("WARNING", logger=de.logger.name):
+        assert de._run_dep_exists(ChangedFiles(all_files=[], manifest_lockfile=[]), diff_file) == []
+    assert "1 file(s) in the diff have a path that could not be read, so they are not checked" in caplog.text
+    assert "\n::error::" not in caplog.text and "::error::" not in caplog.text
