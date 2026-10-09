@@ -155,7 +155,8 @@ def _deps_from_package_json(path: str, added: list[tuple[int, str]]) -> list[Dep
         return []
     try:
         data = json.loads(_read(path))
-    except ValueError:
+    except ValueError as exc:
+        logger.warning("[ai-pr-review] dep-exists: cannot parse %s, its new dependencies are not checked: %s", path, exc)
         return []
     if not isinstance(data, dict):
         return []
@@ -205,7 +206,8 @@ def _deps_from_cargo_toml(path: str, added: list[tuple[int, str]]) -> list[Dep]:
         return []
     try:
         data = tomllib.loads(_read(path))
-    except tomllib.TOMLDecodeError:
+    except tomllib.TOMLDecodeError as exc:
+        logger.warning("[ai-pr-review] dep-exists: cannot parse %s, its new dependencies are not checked: %s", path, exc)
         return []
     deps: list[Dep] = []
     sections = ("dependencies", "dev-dependencies", "build-dependencies")
@@ -239,7 +241,8 @@ def _has_private_cargo_registry(directory: Path) -> bool:
 def _deps_from_composer_json(path: str, added: list[tuple[int, str]]) -> list[Dep]:
     try:
         data = json.loads(_read(path))
-    except ValueError:
+    except ValueError as exc:
+        logger.warning("[ai-pr-review] dep-exists: cannot parse %s, its new dependencies are not checked: %s", path, exc)
         return []
     if not isinstance(data, dict) or data.get("repositories"):
         return []
@@ -447,9 +450,21 @@ def _run_dep_exists(changed_files: ChangedFiles, diff_file: Path) -> list[Findin
 
     now = datetime.now(UTC)
     findings: list[Finding] = []
+    unknown = 0
     with httpx.Client(timeout=_HTTP_TIMEOUT, follow_redirects=False, headers={"User-Agent": _USER_AGENT}) as client:
         for dep in unique:
-            finding = _finding(dep, lookup(client, dep.ecosystem, dep.name), now)
+            result = lookup(client, dep.ecosystem, dep.name)
+            if result.status is Lookup.UNKNOWN:
+                unknown += 1
+            finding = _finding(dep, result, now)
             if finding is not None:
                 findings.append(finding)
+    if unknown:
+        # A lookup that fails open adds no finding, so a registry that cannot be
+        # reached would look like a clean run. Say so once at warning level.
+        logger.warning(
+            "[ai-pr-review] dep-exists: %d of %d lookups got no usable answer from the registry "
+            "(timeout, rate limit, or error), so those dependencies are not checked",
+            unknown, len(unique),
+        )
     return findings

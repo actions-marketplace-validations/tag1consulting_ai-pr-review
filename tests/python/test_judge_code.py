@@ -92,11 +92,16 @@ class TestUnsupportedVerdict:
         out, count = _apply_verdicts([_finding(corroborated=True)], [{"id": 0, "verdict": "unsupported"}])
         assert count == 0 and not out[0].demoted_to_body
 
-    def test_an_unknown_verdict_is_kept_and_logged(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_an_unknown_verdict_is_left_unjudged_and_logged(self, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level("WARNING", logger="ai_pr_review.findings.judge"):
             out, _ = _apply_verdicts([_finding()], [{"id": 0, "verdict": "drop"}])
         assert not out[0].demoted_to_body
+        assert out[0].judge_verdict is None
         assert "unrecognized verdict 'drop'" in caplog.text
+
+    def test_an_entry_with_no_verdict_key_is_left_unjudged(self) -> None:
+        out, _ = _apply_verdicts([_finding()], [{"id": 0}])
+        assert out[0].judge_verdict is None and not out[0].demoted_to_body
 
     def test_known_verdicts_do_not_warn(self, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level("WARNING", logger="ai_pr_review.findings.judge"):

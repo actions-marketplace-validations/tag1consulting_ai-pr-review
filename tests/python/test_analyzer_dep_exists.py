@@ -262,6 +262,34 @@ class TestFailOpen:
     def test_an_unreadable_diff_gives_no_finding(self, work: Path) -> None:
         assert de._run_dep_exists(_cf("package.json"), work / "missing.diff") == []
 
+    def test_failed_lookups_are_summarized_in_one_warning(
+        self, work: Path, registry: Registry, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        _set(registry, lambda r: httpx.Response(503))
+        pkg = json.dumps({"dependencies": {"pkg-a": "1", "pkg-b": "1"}})
+        with caplog.at_level("WARNING", logger=de.logger.name):
+            assert _run(work, "package.json", pkg, ['"pkg-a": "1"', '"pkg-b": "1"']) == []
+        assert "2 of 2 lookups got no usable answer" in caplog.text
+
+    def test_a_clean_run_does_not_warn(self, work: Path, registry: Registry, caplog: pytest.LogCaptureFixture) -> None:
+        _set(registry, lambda r: httpx.Response(200, text="{}"))
+        pkg = json.dumps({"dependencies": {"some-pkg": "1"}})
+        with caplog.at_level("WARNING", logger=de.logger.name):
+            _run(work, "package.json", pkg, ['"some-pkg": "1"'])
+        assert "no usable answer" not in caplog.text
+
+    @pytest.mark.parametrize(
+        ("path", "content"),
+        [("package.json", "{<<<<<<< HEAD"), ("Cargo.toml", "[dependencies\nx = "), ("composer.json", "not json")],
+    )
+    def test_an_unparseable_manifest_is_reported(
+        self, work: Path, registry: Registry, caplog: pytest.LogCaptureFixture, path: str, content: str
+    ) -> None:
+        with caplog.at_level("WARNING", logger=de.logger.name):
+            assert _run(work, path, content, ["x"]) == []
+        assert f"cannot parse {path}" in caplog.text
+        assert len(registry) == 0
+
 
 class TestRequestSafety:
     def test_urls_use_only_the_registry_host_and_encode_scoped_names(self) -> None:
