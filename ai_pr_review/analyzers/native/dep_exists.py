@@ -138,6 +138,172 @@ def _read(path: str) -> str:
         return ""
 
 
+@dataclass(frozen=True)
+class _Hunk:
+    new_start: int
+    new_count: int
+    old_side: list[str]
+    new_side: list[str]
+
+
+def _hunks_by_file(diff_text: str) -> dict[str, list[_Hunk]]:
+    """Parse each file's hunks, keeping the old-side and new-side text of every hunk."""
+    result: dict[str, list[_Hunk]] = {}
+    current = ""
+    header: tuple[int, int] | None = None
+    old_side: list[str] = []
+    new_side: list[str] = []
+
+    def flush() -> None:
+        nonlocal header
+        if header is not None and current:
+            result.setdefault(current, []).append(_Hunk(header[0], header[1], old_side[:], new_side[:]))
+        header = None
+        old_side.clear()
+        new_side.clear()
+
+    for raw in diff_text.splitlines():
+        if raw.startswith("diff --git "):
+            flush()
+            current = ""
+            continue
+        if raw.startswith("+++ ") and header is None:
+            path = raw[4:]
+            current = path[2:] if path.startswith("b/") else ""
+            continue
+        match = re.match(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", raw)
+        if match:
+            flush()
+            header = (int(match.group(1)), 1 if match.group(2) is None else int(match.group(2)))
+            continue
+        if header is None or raw.startswith("\\"):
+            continue
+        if raw.startswith("-"):
+            old_side.append(raw[1:])
+        elif raw.startswith("+"):
+            new_side.append(raw[1:])
+        else:
+            old_side.append(raw[1:])
+            new_side.append(raw[1:])
+    flush()
+    return result
+
+
+def _rebuild_base(new_text: str, hunks: list[_Hunk]) -> str | None:
+    """Undo a file's hunks to get its text before the change, or None when they do not fit.
+
+    Each hunk's new-side text must match the file. If it does not (a changed line
+    ending, a file that is not the one in the diff), the caller treats every
+    dependency as new, so an odd diff gets more checking and not less.
+    """
+    lines = new_text.splitlines()
+    out: list[str] = []
+    pos = 0
+    for hunk in sorted(hunks, key=lambda h: h.new_start):
+        idx = hunk.new_start if hunk.new_count == 0 else hunk.new_start - 1
+        if idx < pos or lines[idx : idx + hunk.new_count] != hunk.new_side:
+            return None
+        out += lines[pos:idx] + hunk.old_side
+        pos = idx + hunk.new_count
+    out += lines[pos:]
+    return "\n".join(out) + "\n"
+
+
+def _declared_names(base_name: str, text: str) -> set[str] | None:
+    """Registry dependency names a manifest declares, or None when it cannot be parsed.
+
+    A name counts only when it came from the registry. A dependency that was a local
+    path, a workspace member, or a git source and now names a registry version is a
+    change of source (dependency confusion), so it must not look already declared.
+    """
+    names: set[str] = set()
+    try:
+        if base_name == "package.json":
+            data = json.loads(text)
+            for section in ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies"):
+                table = data.get(section) if isinstance(data, dict) else None
+                if isinstance(table, dict):
+                    names.update(
+                        n
+                        for n, spec in table.items()
+                        if isinstance(spec, str) and not spec.startswith(_NON_REGISTRY_NPM_PREFIXES) and "/" not in spec
+                    )
+        elif base_name == "composer.json":
+            data = json.loads(text)
+            if isinstance(data, dict) and not data.get("repositories"):
+                for section in ("require", "require-dev"):
+                    table = data.get(section)
+                    if isinstance(table, dict):
+                        names.update(n for n in table if "/" in n)
+        elif base_name == "Cargo.toml":
+            data = tomllib.loads(text)
+            toml_sections = ("dependencies", "dev-dependencies", "build-dependencies")
+            tables = [data.get(s) for s in toml_sections]
+            target = data.get("target")
+            if isinstance(target, dict):
+                tables += [p.get(s) for p in target.values() if isinstance(p, dict) for s in toml_sections]
+            for table in tables:
+                if isinstance(table, dict):
+                    names.update(
+                        n
+                        for n, spec in table.items()
+                        if not (isinstance(spec, dict) and any(k in spec for k in ("path", "git", "registry", "package", "workspace")))
+                    )
+        elif _REQUIREMENTS_FILE.match(base_name):
+            if any(flag in text for flag in _PRIVATE_INDEX_FLAGS):
+                return names  # the old file used a private index, so its names were not public
+            for line in text.splitlines():
+                stripped = line.split("#", 1)[0].strip()
+                if not stripped or stripped.startswith("-") or "://" in stripped or " @ " in stripped:
+                    continue
+                match = _REQUIREMENT_NAME.match(stripped)
+                if match:
+                    names.add(re.sub(r"[-_.]+", "-", match.group(1)).lower())
+        elif base_name == "Gemfile":
+            if any("rubygems.org" not in src for src in re.findall(r"""^\s*source\s+['"]([^'"]+)['"]""", text, re.MULTILINE)):
+                return names  # the old Gemfile used a private source
+            for line in text.splitlines():
+                gem = _GEM_LINE.match(line)
+                if gem and not re.search(r"\b(?:git|github|path|source|gist|bitbucket):", gem.group(2)):
+                    names.add(gem.group(1))
+    except (ValueError, tomllib.TOMLDecodeError, AttributeError):
+        return None
+    return names
+
+
+_REGISTRY_CONFIG_NAMES = frozenset({".npmrc", ".yarnrc", ".yarnrc.yml"})
+
+
+def _registry_config_changed(diff_text: str) -> bool:
+    """True when the diff touches a file that can point npm or cargo at a private registry."""
+    for match in re.finditer(r"^diff --git a/(.+?) b/(.+)$", diff_text, re.MULTILINE):
+        for name in match.groups():
+            path = Path(name)
+            if path.name in _REGISTRY_CONFIG_NAMES or (path.parent.name == ".cargo" and path.name in ("config", "config.toml")):
+                return True
+    return False
+
+
+def _renamed_paths(diff_text: str) -> set[str]:
+    """New paths of files the diff renames or moves."""
+    return {
+        new
+        for old, new in re.findall(r"^diff --git a/(.+?) b/(.+)$", diff_text, re.MULTILINE)
+        if old != new
+    }
+
+
+def _already_declared(path: str, diff_hunks: dict[str, list[_Hunk]]) -> set[str]:
+    """Names the manifest declared before this diff. Empty when that cannot be worked out."""
+    hunks = diff_hunks.get(path)
+    if not hunks:
+        return set()
+    base_text = _rebuild_base(_read(path), hunks)
+    if base_text is None:
+        return set()
+    return _declared_names(Path(path).name, base_text) or set()
+
+
 def _added_name_lines(added: list[tuple[int, str]], name: str) -> int | None:
     """First added line that declares *name* as a key, or None."""
     needle = re.compile(r'^\s*"?' + re.escape(name) + r'"?\s*[:=]|^\s*\[[\w.-]*dependencies\.' + re.escape(name) + r"\]")
@@ -279,6 +445,7 @@ def _deps_from_gemfile(path: str, added: list[tuple[int, str]]) -> list[Dep]:
 def collect_new_deps(changed_files: ChangedFiles, diff_text: str) -> list[Dep]:
     """New direct dependencies on added lines of the changed manifests."""
     by_file = added_lines(diff_text)
+    diff_hunks = _hunks_by_file(diff_text)
     deps: list[Dep] = []
     for path in changed_files.manifest_lockfile:
         added = by_file.get(path)
@@ -295,7 +462,17 @@ def collect_new_deps(changed_files: ChangedFiles, diff_text: str) -> list[Dep]:
             deps += _deps_from_composer_json(path, added)
         elif base == "Gemfile":
             deps += _deps_from_gemfile(path, added)
-    return deps
+    # A name the base manifest already declared is a version bump or a move, not a new dependency.
+    # If the same change adds, removes or edits registry config, the old manifest's names may
+    # have come from a private registry. Trust none of them: check every added dependency.
+    # A moved manifest may have left the directory whose registry config its old names relied on.
+    trust_base = not _registry_config_changed(diff_text)
+    renamed = _renamed_paths(diff_text)
+    already = {
+        path: _already_declared(path, diff_hunks) if trust_base and path not in renamed else set()
+        for path in {d.file for d in deps}
+    }
+    return [d for d in deps if d.name not in already[d.file]]
 
 
 # --- registry lookups ----------------------------------------------------

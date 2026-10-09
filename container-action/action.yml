@@ -358,7 +358,8 @@ inputs:
       Allowlist: comma-separated list of static analyzer names to run. When set,
       only the listed analyzers run and exclude-analyzers is ignored. Valid names:
       shellcheck, trufflehog, semgrep, ruff, golangci-lint, hadolint, checkov,
-      phpcs, phpstan, eslint, kube-linter, tflint, cve-check, dep-exists. Empty (default): no
+      phpcs, phpstan, eslint, kube-linter, tflint, cve-check, dep-exists, docs-api-check,
+      docs-ref-check, docs-drift-check. Empty (default): no
       allowlist — all eligible analyzers run. Unknown names are rejected with an
       error. Requires the Python engine.
     required: false
@@ -369,7 +370,8 @@ inputs:
       Denylist: comma-separated list of static analyzer names to skip. Ignored when
       analyzers (allowlist) is set. Valid names: shellcheck, trufflehog, semgrep,
       ruff, golangci-lint, hadolint, checkov, phpcs, phpstan, eslint, kube-linter,
-      tflint, cve-check, dep-exists. Empty (default): no denylist — all eligible analyzers run.
+      tflint, cve-check, dep-exists, docs-api-check, docs-ref-check, docs-drift-check.
+      Empty (default): no denylist — all eligible analyzers run.
       Unknown names are rejected with an error. Requires the Python engine.
     required: false
     default: ''

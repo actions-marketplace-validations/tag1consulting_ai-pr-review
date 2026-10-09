@@ -60,7 +60,7 @@ Each analyzer maps its findings to a severity and to one of the 11 categories th
 
 `dep-exists` asks the public registry whether each dependency this diff adds really exists. A model can invent a package name, and an attacker can register that name and ship malicious code under it. The check makes network calls to `registry.npmjs.org`, `pypi.org`, `crates.io`, `repo.packagist.org`, and `rubygems.org`. It sends only the package name.
 
-- It checks only dependencies on added lines of a direct-dependency manifest. It does not read lockfiles.
+- It checks only dependencies on added lines of a direct-dependency manifest. The analyzer rebuilds the manifest as it was before the change, and a name that the old manifest already declared as a registry dependency (a version bump, or a move between sections) is not new, so it is not checked. A name that was a local path, a workspace member, or a git source and now names a registry version is checked. If the same change touches `.npmrc`, `.yarnrc`, or `.cargo/config`, or moves the manifest, or the old requirements file or Gemfile used a private index or source, every added dependency is checked. If the diff does not match the file, every added dependency is checked. It does not read lockfiles.
 - It does not check Go modules, because a private Go module returns "not found" from the public proxy and would raise a false finding.
 - It skips an ecosystem when the repository sets a private registry (`.npmrc` registry, pip index flags, Cargo registries, composer `repositories`, a non-default Gemfile `source`).
 - It fails open. A timeout, a rate limit, or any status other than 200 or 404 gives no finding.

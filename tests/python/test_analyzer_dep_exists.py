@@ -233,6 +233,143 @@ class TestFindings:
         assert de.valid_name(de._NPM, "requests") and de.valid_name(de._PYPI, "requests")
 
 
+class TestVersionBumpsAreNotNew:
+    """The base manifest is rebuilt from the diff. A name it already declared is not new."""
+
+    @staticmethod
+    def _real_diff(path: str, old: str, new: str) -> str:
+        import difflib
+
+        body = difflib.unified_diff(
+            old.splitlines(), new.splitlines(), f"a/{path}", f"b/{path}", lineterm="", n=1
+        )
+        return f"diff --git a/{path} b/{path}\n" + "\n".join(body) + "\n"
+
+    def _run_change(self, work: Path, path: str, old: str, new: str) -> list:
+        (work / path).write_text(new)
+        diff = work / "d.diff"
+        diff.write_text(self._real_diff(path, old, new))
+        return de._run_dep_exists(_cf(path), diff)
+
+    @staticmethod
+    def _pkg(**deps: str) -> str:
+        return json.dumps({"name": "app", "dependencies": deps}, indent=2) + "\n"
+
+    def test_npm_version_bump_is_not_looked_up(self, work: Path, registry: Registry) -> None:
+        found = self._run_change(work, "package.json", self._pkg(**{"@acme/private": "1.0.0"}), self._pkg(**{"@acme/private": "2.0.0"}))
+        assert found == [] and len(registry) == 0
+
+    def test_requirements_version_bump_is_not_looked_up(self, work: Path, registry: Registry) -> None:
+        found = self._run_change(work, "requirements.txt", "acme-private==1.0\n", "acme-private==2.0\n")
+        assert found == [] and len(registry) == 0
+
+    def test_requirements_bump_matches_across_name_spelling(self, work: Path, registry: Registry) -> None:
+        found = self._run_change(work, "requirements.txt", "acme.private==1.0\n", "Acme_Private==2.0\n")
+        assert found == [] and len(registry) == 0
+
+    def test_cargo_version_bump_is_not_looked_up(self, work: Path, registry: Registry) -> None:
+        old = '[package]\nname = "app"\n\n[dependencies]\nacme-private = "1.0"\n'
+        found = self._run_change(work, "Cargo.toml", old, old.replace('"1.0"', '"2.0"'))
+        assert found == [] and len(registry) == 0
+
+    def test_gemfile_version_bump_is_not_looked_up(self, work: Path, registry: Registry) -> None:
+        found = self._run_change(work, "Gemfile", "gem 'acme-private', '1.0'\n", "gem 'acme-private', '2.0'\n")
+        assert found == [] and len(registry) == 0
+
+    def test_a_move_between_sections_is_not_new(self, work: Path, registry: Registry) -> None:
+        old = json.dumps({"devDependencies": {"acme-private": "1"}}, indent=2) + "\n"
+        new = json.dumps({"dependencies": {"acme-private": "1"}}, indent=2) + "\n"
+        assert self._run_change(work, "package.json", old, new) == [] and len(registry) == 0
+
+    def test_a_new_name_next_to_a_bump_is_still_checked(self, work: Path, registry: Registry) -> None:
+        found = self._run_change(work, "package.json", self._pkg(**{"old-pkg": "1"}), self._pkg(**{"old-pkg": "2", "invented-pkg": "1"}))
+        assert [f.finding.split("`")[1] for f in found] == ["invented-pkg"]
+        assert {r.url.path for r in registry} == {"/invented-pkg"}
+
+    def test_a_removed_script_with_the_same_key_does_not_hide_a_new_dependency(
+        self, work: Path, registry: Registry
+    ) -> None:
+        old = json.dumps({"name": "app", "scripts": {"invented-pkg": "node build.js"}}, indent=2) + "\n"
+        new = json.dumps({"name": "app", "dependencies": {"invented-pkg": "1"}}, indent=2) + "\n"
+        found = self._run_change(work, "package.json", old, new)
+        assert [f.severity for f in found] == ["High"]
+
+    def test_a_removed_unrelated_key_does_not_hide_a_new_dependency_in_requirements(
+        self, work: Path, registry: Registry
+    ) -> None:
+        found = self._run_change(work, "requirements.txt", "# invented-pkg is gone\nreal-pkg==1\n", "real-pkg==1\ninvented-pkg==1\n")
+        assert [f.severity for f in found] == ["High"]
+
+    @pytest.mark.parametrize("spec", ["workspace:*", "file:../lib", "link:../lib", "git+https://example.com/x.git"])
+    def test_a_change_from_a_local_source_to_the_registry_is_checked(
+        self, work: Path, registry: Registry, spec: str
+    ) -> None:
+        """Dependency confusion: the name was local, now it resolves on the public registry."""
+        found = self._run_change(work, "package.json", self._pkg(**{"internal-lib": spec}), self._pkg(**{"internal-lib": "^1.0.0"}))
+        assert [f.severity for f in found] == ["High"]
+
+    def test_cargo_path_to_registry_is_checked(self, work: Path, registry: Registry) -> None:
+        old = '[package]\nname = "app"\n\n[dependencies]\ninternal = { path = "../internal" }\n'
+        new = '[package]\nname = "app"\n\n[dependencies]\ninternal = "1.0"\n'
+        assert [f.severity for f in self._run_change(work, "Cargo.toml", old, new)] == ["High"]
+
+    def test_gemfile_git_to_registry_is_checked(self, work: Path, registry: Registry) -> None:
+        found = self._run_change(work, "Gemfile", "gem 'internal', git: 'https://example.com/i.git'\n", "gem 'internal', '1.0'\n")
+        assert [f.severity for f in found] == ["High"]
+
+    def test_requirements_url_to_registry_is_checked(self, work: Path, registry: Registry) -> None:
+        found = self._run_change(work, "requirements.txt", "internal @ https://example.com/i.whl\n", "internal==1.0\n")
+        assert [f.severity for f in found] == ["High"]
+
+    def test_a_private_index_in_the_old_requirements_file_means_its_names_were_not_public(
+        self, work: Path, registry: Registry
+    ) -> None:
+        old = "--extra-index-url https://pypi.internal.example/simple\ninternal-lib==1.0\n"
+        new = "internal-lib==2.0\n"  # the private index is dropped in the same change
+        assert [f.severity for f in self._run_change(work, "requirements.txt", old, new)] == ["High"]
+
+    def test_a_private_source_in_the_old_gemfile_means_its_names_were_not_public(
+        self, work: Path, registry: Registry
+    ) -> None:
+        old = "source 'https://gems.internal.example'\ngem 'internal', '1.0'\n"
+        new = "source 'https://rubygems.org'\ngem 'internal', '2.0'\n"
+        assert [f.severity for f in self._run_change(work, "Gemfile", old, new)] == ["High"]
+
+    @pytest.mark.parametrize("config", [".npmrc", ".yarnrc.yml", ".cargo/config.toml"])
+    def test_a_registry_config_change_in_the_same_diff_checks_every_added_dependency(
+        self, work: Path, registry: Registry, config: str
+    ) -> None:
+        (work / config).parent.mkdir(parents=True, exist_ok=True)
+        (work / config).write_text("")  # the change emptied the file, so no private registry remains
+        old, new = self._pkg(**{"internal-lib": "1.0.0"}), self._pkg(**{"internal-lib": "2.0.0"})
+        (work / "package.json").write_text(new)
+        diff = work / "d.diff"
+        diff.write_text(
+            f"diff --git a/{config} b/{config}\n--- a/{config}\n+++ b/{config}\n@@ -1 +0,0 @@\n-registry=https://npm.internal.example/\n"
+            + self._real_diff("package.json", old, new)
+        )
+        assert [f.severity for f in de._run_dep_exists(_cf("package.json"), diff)] == ["High"]
+
+    def test_a_moved_manifest_checks_every_added_dependency(self, work: Path, registry: Registry) -> None:
+        """The old directory's registry config no longer governs a manifest that moved."""
+        old, new = self._pkg(**{"internal-lib": "1.0.0"}), self._pkg(**{"internal-lib": "2.0.0"})
+        (work / "pkgs").mkdir()
+        (work / "pkgs/package.json").write_text(new)
+        diff = work / "d.diff"
+        diff.write_text(self._real_diff("package.json", old, new).replace("b/package.json", "b/pkgs/package.json"))
+        assert [f.severity for f in de._run_dep_exists(_cf("pkgs/package.json"), diff)] == ["High"]
+
+    def test_a_diff_that_does_not_match_the_file_checks_everything(self, work: Path, registry: Registry) -> None:
+        (work / "package.json").write_text(self._pkg(**{"old-pkg": "2"}))
+        diff = work / "d.diff"
+        diff.write_text(
+            "diff --git a/package.json b/package.json\n--- a/package.json\n+++ b/package.json\n"
+            '@@ -1,1 +1,1 @@\n-    "old-pkg": "1"\n+    "old-pkg": "9"\n'
+        )
+        found = de._run_dep_exists(_cf("package.json"), diff)
+        assert [f.severity for f in found] == ["High"]
+
+
 class TestFailOpen:
     @pytest.mark.parametrize("status", [301, 302, 403, 429, 500, 503])
     def test_other_statuses_give_no_finding(self, work: Path, registry: Registry, status: int) -> None:

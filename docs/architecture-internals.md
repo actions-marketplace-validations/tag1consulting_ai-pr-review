@@ -247,7 +247,7 @@ The full table and the compact summary of the comment therefore never report dif
 Before any agent runs, `build_review_runtime()` in `review/runtime.py` estimates the total LLM spend of the run. It always logs the estimate as a structured `COST_ESTIMATE` line, with or without a configured ceiling. `estimate_review_cost()` covers the roster that `run_tier` dispatches. `estimate_preflight_agent_cost()` covers the two preflight agents that run separately (`pr-summarizer`, `issue-linker`), when they will run in this review.
 
 The estimate uses these rules:
-- Input tokens come from character counts (the 4-characters-per-token heuristic of `context.budget.estimate_tokens`), not from a real provider tokenizer.
+- Input tokens come from character counts, not from a real provider tokenizer. `estimate_billed_tokens()` in `review/cost_ceiling.py` divides the character count by 1.8 and adds a 10% margin. The ratio comes from measurements in `tests/data/token_ratio_measurements.json`. `context.budget.estimate_tokens` keeps its own 4-characters-per-token default for the context-enrichment budget and does not feed the cost estimate.
 - Output tokens use the full effective cap of each agent. This is an upper bound and not a prediction. Real spend is usually lower.
 - A model with no pricing entry cannot be bounded by the ceiling. The engine leaves it out of the total and logs a warning. Then `enforce_cost_ceiling()` applies `AI_COST_CEILING_UNPRICED` (#977).
 
