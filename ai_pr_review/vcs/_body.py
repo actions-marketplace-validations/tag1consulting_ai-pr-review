@@ -318,6 +318,16 @@ def format_source_tag(finding: Finding) -> str:
     return ""
 
 
+def badge_suffix(finding: Finding) -> str:
+    """Italic evidence label placed after a finding's text, or an empty string.
+
+    The label is built by the pipeline from fixed phrases and a number, so it is
+    not user text. It goes after the severity and ``F`` tokens that the comment
+    parsers read, and after the finding text, so it cannot change those tokens.
+    """
+    return f" _({sanitize_bullet_text(finding.badge)})_" if finding.badge else ""
+
+
 def format_body_finding(
     finding: Finding,
     *,
@@ -373,7 +383,7 @@ def format_body_finding(
         header_parts.append(f"**[F{finding_id}]**")
     if source_tag:
         header_parts.append(source_tag)
-    header_parts.append(sanitize_bullet_text(finding.finding))
+    header_parts.append(sanitize_bullet_text(finding.finding) + badge_suffix(finding))
     out = "- " + " ".join(header_parts)
     if location:
         out += f" *(at `{location}`{location_note})*"

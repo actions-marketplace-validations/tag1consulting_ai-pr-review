@@ -178,7 +178,8 @@ def build_annotation_payload(
     if not finding.file or finding.line is None:
         return None
     token = f"[F{finding_id}] " if finding_id is not None else ""
-    summary = f"{token}{finding.severity}: {finding.finding}"
+    badge = f" ({finding.badge})" if finding.badge else ""
+    summary = f"{token}{finding.severity}: {finding.finding}{badge}"
     if finding.remediation:
         summary = f"{summary}\n\nRemediation: {finding.remediation}"
     return {

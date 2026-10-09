@@ -2715,14 +2715,19 @@ def _build_inline_comment_body(
         classification to reincarnate from once a thread is still open and
         being matched against).
     """
-    from ai_pr_review.vcs._body import format_source_tag, sanitize_bullet_text, severity_icon
+    from ai_pr_review.vcs._body import (
+        badge_suffix,
+        format_source_tag,
+        sanitize_bullet_text,
+        severity_icon,
+    )
     from ai_pr_review.vcs._finding_ids import fingerprint
     from ai_pr_review.vcs.marker import build_inline_meta_marker
 
     icon = severity_icon(f.severity)
     tag = format_source_tag(f)
     id_token = f" **[F{finding_id}]**" if finding_id is not None else ""
-    header = f"{icon} **[{f.severity}]**{id_token} {tag} {sanitize_bullet_text(f.finding)}".strip()
+    header = f"{icon} **[{f.severity}]**{id_token} {tag} {sanitize_bullet_text(f.finding)}{badge_suffix(f)}".strip()
     parts = [header]
     if f.remediation:
         parts.append(f"\n**Remediation:** {sanitize_bullet_text(f.remediation)}")

@@ -371,6 +371,16 @@ inputs:
     required: false
     default: 'false'
 
+  finding-badges:
+    description: >
+      When true, show an evidence label and the confidence score beside each
+      finding, for example "(judge kept, confidence 80)". The label says whether
+      a static analyzer corroborated the finding, the judge kept it, or only one
+      agent reported it. It is display text and never changes the approval
+      decision. Set 'false' to hide it. Default 'true'.
+    required: false
+    default: 'true'
+
   suppress-walkthrough:
     description: >
       When true, leave the Walkthrough section (the per-file table) out of the
@@ -568,6 +578,7 @@ runs:
         AI_FEEDBACK_LOOP: ${{ inputs.feedback-loop }}
         AI_JUDGE_PASS: ${{ inputs.judge-pass }}
         AI_SUPPRESS_WALKTHROUGH: ${{ inputs.suppress-walkthrough }}
+        AI_FINDING_BADGES: ${{ inputs.finding-badges }}
         AI_PROFILE_MAX_TOKENS: ${{ inputs.profile-max-tokens }}
         AI_TOKEN_USAGE_DISPLAY: ${{ inputs.token-usage-display }}
         AI_TOKEN_USAGE_WARN_USD: ${{ inputs.token-usage-warn-usd }}

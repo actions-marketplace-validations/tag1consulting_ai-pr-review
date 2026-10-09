@@ -759,6 +759,7 @@ async def build_review_runtime(
         enable_judge_pass=config.enable_judge_pass,
         judge_model=config.model_standard,
         judge_prompt_path=_judge_prompt_resolved,
+        finding_badges=config.finding_badges,
     )
 
     return ReviewRuntime(
