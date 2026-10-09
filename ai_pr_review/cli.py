@@ -458,7 +458,8 @@ async def _run_review_async(config: ReviewConfig) -> int:
                 pricing_missing=runtime.cost_ceiling_pricing_missing,
                 ceiling_usd=rc.max_cost_usd,
                 check_failed=runtime.cost_ceiling_check_failed,
-            )
+            ),
+            runtime.not_reviewed_notice,
         ]
         if rc.token_usage_display != "off":
             # The high-usage warning is optional. If computing it raises, the

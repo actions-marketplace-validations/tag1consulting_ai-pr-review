@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ai_pr_review.agents.dispatch import LLMCall
+from ai_pr_review.findings.hunks import extract_hunk
 from ai_pr_review.findings.models import Finding
 from ai_pr_review.findings.models import JudgeVerdict as JudgeVerdict  # re-exported
 from ai_pr_review.llm.base import LLMRequest
@@ -39,6 +40,9 @@ from ai_pr_review.llm.base import LLMRequest
 logger = logging.getLogger(__name__)
 
 JUDGE_DOWNRANK_AMOUNT: int = 15
+
+# "unsupported" is returned only by the code-aware prompt.
+_KNOWN_VERDICTS = frozenset({"keep", "downrank", "unsupported"})
 
 
 @dataclass(frozen=True)
@@ -52,8 +56,13 @@ class JudgeResult:
     cache_read_tokens: int = 0
 
 
-def _build_candidate_payload(kept: list[Finding]) -> str:
+def _build_candidate_payload(kept: list[Finding], diff_text: str | None = None) -> str:
     """Serialize findings as a compact JSON array for the judge prompt.
+
+    When *diff_text* is given, each item also carries a ``code`` field: a short
+    window of the hunk the finding cites (empty when the line is not in the
+    diff). The window is untrusted pull request text, so the code-aware prompt
+    tells the judge to treat it as data.
 
     The ``id`` field is the list index in ``kept``. ``_apply_verdicts`` maps
     verdicts back using the same index via ``enumerate``. The two functions
@@ -62,7 +71,7 @@ def _build_candidate_payload(kept: list[Finding]) -> str:
     """
     items = []
     for idx, f in enumerate(kept):
-        items.append({
+        item: dict[str, object] = {
             "id": idx,
             "severity": f.severity,
             "confidence": f.confidence,
@@ -72,7 +81,10 @@ def _build_candidate_payload(kept: list[Finding]) -> str:
             "line": f.line,
             "finding": f.finding,
             "remediation": f.remediation,
-        })
+        }
+        if diff_text is not None:
+            item["code"] = extract_hunk(diff_text, f.file, f.start_line or f.line)
+        items.append(item)
     return json.dumps(items, ensure_ascii=False)
 
 
@@ -140,7 +152,16 @@ def _apply_verdicts(
         # verdict the judge assigned, independent of whether corroboration
         # goes on to override its placement effect below.
         verdict_raw = id_to_verdict.get(idx, "keep")
-        verdict: JudgeVerdict = "downrank" if verdict_raw == "downrank" else "keep"
+        if verdict_raw not in _KNOWN_VERDICTS:
+            # A typo or a new verdict name would otherwise make every finding fall
+            # back to "keep" and the judge look like it worked.
+            logger.warning(
+                "judge: unrecognized verdict %r for finding %d; treating it as keep",
+                verdict_raw, idx,
+            )
+        # "unsupported" comes from the code-aware prompt: the cited code does not show
+        # the problem. It routes the finding the same way as "downrank".
+        verdict: JudgeVerdict = "downrank" if verdict_raw in ("downrank", "unsupported") else "keep"
 
         if finding.corroborated:
             logger.debug(
@@ -174,6 +195,7 @@ async def judge_findings(
     llm_call: LLMCall,
     model: str,
     prompt_path: Path,
+    diff_text: str | None = None,
 ) -> JudgeResult:
     """Run the judge pass: one LLM call to score all candidate findings.
 
@@ -186,7 +208,10 @@ async def judge_findings(
         kept: Final diff-scoped, rolled-up candidate findings (Phase 2.5 output).
         llm_call: The run's bound LLM call (same one used for agents).
         model: The standard (cheap) model to use for judging.
-        prompt_path: Path to ``prompts/finding-judge.md``.
+        prompt_path: Path to ``prompts/finding-judge.md``, or to
+            ``prompts/finding-judge-code.md`` when *diff_text* is given.
+        diff_text: The pull request diff. When given, each finding is sent with
+            the code it cites. When None (the default), the judge sees text only.
     """
     if not kept:
         return JudgeResult(findings=kept)
@@ -197,7 +222,7 @@ async def judge_findings(
         logger.warning("judge: could not read prompt %s: %s", prompt_path, exc)
         return JudgeResult(findings=kept)
 
-    user_message = _build_candidate_payload(kept)
+    user_message = _build_candidate_payload(kept, diff_text)
 
     request = LLMRequest(
         model_id=model,

@@ -1,0 +1,16 @@
+{
+  "clean": false,
+  "source": "known-fix",
+  "evidence": "strong",
+  "verified_by": "history: introduced by fcac60513, fixed by 07ea0df19",
+  "bugs": [
+    {
+      "file": "ai_pr_review/findings/merge.py",
+      "line_start": 83,
+      "line_end": 103,
+      "category": "edge-case",
+      "summary": "a finding with category other is compatible with every category and the check compares only the cluster tail, so other can bridge two different real categories and one finding is dropped"
+    }
+  ],
+  "accepted_extra": []
+}

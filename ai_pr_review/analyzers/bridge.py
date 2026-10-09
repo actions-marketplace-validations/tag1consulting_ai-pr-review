@@ -21,6 +21,7 @@ import anyio
 # ai_pr_review/analyzers/native/ and wired into _ANALYZERS below.
 from ai_pr_review.analyzers.native.checkov import _run_checkov
 from ai_pr_review.analyzers.native.cve_check import _run_cve_check
+from ai_pr_review.analyzers.native.dep_exists import _run_dep_exists
 from ai_pr_review.analyzers.native.docs_comments import _run_docs_api_check
 from ai_pr_review.analyzers.native.docs_drift import _run_docs_drift_check
 from ai_pr_review.analyzers.native.docs_refs import _run_docs_ref_check
@@ -63,6 +64,7 @@ _ANALYZERS: list[AnalyzerSpec] = [
     AnalyzerSpec("kube-linter",   ["iac"],                      _run_kube_linter),
     AnalyzerSpec("tflint",        ["terraform"],                _run_tflint),
     AnalyzerSpec("cve-check",     ["manifest_lockfile"],        _run_cve_check),
+    AnalyzerSpec("dep-exists",    ["manifest_lockfile"],        _run_dep_exists),
     AnalyzerSpec("docs-api-check",     ["source"], _run_docs_api_check),
     AnalyzerSpec("docs-ref-check",     ["docs"],   _run_docs_ref_check),
     # Empty required_file_types = always run — docs-drift-check must fire on

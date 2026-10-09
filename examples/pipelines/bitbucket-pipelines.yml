@@ -4,10 +4,10 @@
 # Cloud repository and enable Pipelines in repository settings.
 #
 # Required repository variables (Repository settings -> Pipelines -> Repository variables):
-#   ANTHROPIC_API_KEY   (secured)  — or OPENAI_API_KEY / GOOGLE_API_KEY etc.
+#   ANTHROPIC_API_KEY   (secured): or OPENAI_API_KEY / GOOGLE_API_KEY etc.
 #                                    depending on AI_PROVIDER.
-#   BITBUCKET_EMAIL     (plain)    — Atlassian account email for the bot user.
-#   BITBUCKET_API_TOKEN (secured)  — Atlassian API token with
+#   BITBUCKET_EMAIL     (plain): Atlassian account email for the bot user.
+#   BITBUCKET_API_TOKEN (secured): Atlassian API token with
 #                                    Repository:Read + PR:Write +
 #                                    Account:Read (read:user:bitbucket)
 #                                    scopes. Without Account:Read the bot
@@ -18,7 +18,7 @@
 #                                    AI_FEEDBACK_LOOP=true below -- see the
 #                                    security note where that variable is
 #                                    documented.
-#   AI_REVIEW_IMAGE_TAG (plain)    — Container tag to pull. Recommended:
+#   AI_REVIEW_IMAGE_TAG (plain): Container tag to pull. Recommended:
 #                                    'latest' (stable), 'dev' (pre-release),
 #                                    or a pinned release like '0.11.0'
 #                                    (image tags strip the 'v' prefix).
@@ -51,8 +51,8 @@
 #                           comment. Bitbucket cannot collapse it.)
 #   AI_BITBUCKET_VERDICTS  (plain, default: false; poll PR comments for
 #                           /ai-pr-review dismiss|false-positive|wont-fix|fixed
-#                           F<n> commands at the start of the next run —
-#                           see docs/configuration.md)
+#                           F<n> commands at the start of the next run.
+#                           See docs/configuration.md)
 #   AI_BITBUCKET_VERDICT_MIN_ROLE (plain, default: write; minimum Bitbucket
 #                           repository permission -- read/write/admin --
 #                           required to apply a verdict command. Only
@@ -77,8 +77,8 @@
 #
 # `clone.depth: full` is required: this step's own `git fetch` below needs the
 # base branch history available locally, and the default shallow Pipelines
-# clone does not always include it. Note ai_pr_review itself never fetches —
-# see the step's `git fetch origin "$BASE_REF"` line (issue #702).
+# clone does not always include it. Note ai_pr_review itself never fetches.
+# See the step's `git fetch origin "$BASE_REF"` line (issue #702).
 
 image:
   # AI_REVIEW_IMAGE_TAG controls which container tag is pulled.
@@ -93,14 +93,14 @@ image:
   # even though it works fine inside `script:`. You must set
   # AI_REVIEW_IMAGE_TAG as a non-secured repository variable; recommended
   # values:
-  #   'latest' — stable
-  #   'dev'    — dogfood pre-release builds
-  #   '0.11.0' (or similar) — pin a specific release.
+  #   'latest': stable
+  #   'dev': dogfood pre-release builds
+  #   '0.11.0' (or similar): pin a specific release.
   #   Note: image tags strip the 'v' prefix from the git tag (publish-image.yml
   #   uses docker/metadata-action's semver pattern), so the git tag v0.11.0
   #   publishes image tags 0.11.0, 0.11, and 0.
   name: ghcr.io/tag1consulting/ai-pr-review:${{AI_REVIEW_IMAGE_TAG}}
-  # For private pulls (ai-pr-review is currently public — use the public
+  # For private pulls (ai-pr-review is currently public: use the public
   # pull below unless/until you host your own mirror). If you fork to a
   # private registry, uncomment and configure:
   # username: $GHCR_USER
@@ -129,7 +129,7 @@ pipelines:
             - export AI_REVIEW_MODE="${AI_REVIEW_MODE:-}"
             - export AI_IGNORE_MERGE_COMMITS="${AI_IGNORE_MERGE_COMMITS:-true}"
             - export AI_FAIL_ON_FINDINGS="${AI_FAIL_ON_FINDINGS:-true}"
-            # Opt-in capabilities (Python engine only — the default)
+            # Opt-in capabilities (Python engine only: the default)
             - export AI_CONTEXT_ENRICHMENT="${AI_CONTEXT_ENRICHMENT:-false}"
             - export AI_SARIF_PATHS="${AI_SARIF_PATHS:-}"
             - export PR_NUMBER="$BITBUCKET_PR_ID"

@@ -1,0 +1,16 @@
+{
+  "clean": false,
+  "source": "known-fix",
+  "evidence": "strong",
+  "verified_by": "history: introduced by 3171aa3c2, fixed by efa3a347f",
+  "bugs": [
+    {
+      "file": "ai_pr_review/vcs/github.py",
+      "line_start": 65,
+      "line_end": 65,
+      "category": "edge-case",
+      "summary": "a file path with a leading slash splits into an empty first segment, so the blob link gets a double slash"
+    }
+  ],
+  "accepted_extra": []
+}
