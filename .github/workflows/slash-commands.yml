@@ -192,6 +192,14 @@ on:
         type: string
         required: false
         default: 'false'
+      finding-badges:
+        description: >
+          'false' hides the evidence label and score beside each finding
+          (forwarded to container-action's finding-badges). Omit to inherit
+          container-action's own default ('true').
+        type: string
+        required: false
+        default: 'true'
       suppress-walkthrough:
         description: >
           'true' leaves the Walkthrough section out of the summary comment
@@ -699,6 +707,7 @@ jobs:
           feedback-loop: ${{ inputs.feedback-loop }}
           token-usage-display: ${{ inputs.token-usage-display }}
           suppress-walkthrough: ${{ inputs.suppress-walkthrough }}
+          finding-badges: ${{ inputs.finding-badges }}
           token-usage-warn-usd: ${{ inputs.token-usage-warn-usd }}
           max-cost-usd: ${{ inputs.max-cost-usd }}
           fail-on-cost-ceiling: ${{ inputs.fail-on-cost-ceiling }}

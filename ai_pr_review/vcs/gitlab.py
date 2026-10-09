@@ -26,6 +26,7 @@ import httpx
 from ai_pr_review.findings.models import Finding
 from ai_pr_review.vcs._body import (
     TOKEN_TABLE_OPEN_MARKER,
+    badge_suffix,
     format_body_finding,
     format_source_tag,
     sanitize_bullet_text,
@@ -798,7 +799,7 @@ class GitLabProvider:
         """Render the markdown body for a GitLab inline discussion."""
         icon = severity_icon(f.severity)
         tag = format_source_tag(f)
-        header = f"{icon} **[{f.severity}]** {tag} {sanitize_bullet_text(f.finding)}".strip()
+        header = f"{icon} **[{f.severity}]** {tag} {sanitize_bullet_text(f.finding)}{badge_suffix(f)}".strip()
         parts = [header]
         if f.remediation:
             parts.append(f"\n**Remediation:** {sanitize_bullet_text(f.remediation)}")
