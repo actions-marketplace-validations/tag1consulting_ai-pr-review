@@ -120,6 +120,14 @@ def decode_git_path(raw: str) -> str:
     return out.decode("utf-8", errors="replace")
 
 
+def _decode_or_none(raw: str) -> str | None:
+    """Decode a git path, or None when the result holds a control character (an unreadable path)."""
+    decoded = decode_git_path(raw)
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in decoded):
+        return None
+    return decoded
+
+
 def safe_decode_git_path(raw: str) -> str:
     """Decode a git path, unless the result holds a control character.
 
@@ -128,33 +136,40 @@ def safe_decode_git_path(raw: str) -> str:
     with a control character is returned in its quoted, escaped form, which is safe to print
     and matches no file on disk.
     """
-    decoded = decode_git_path(raw)
-    if any(ord(ch) < 32 or ord(ch) == 127 for ch in decoded):
-        return raw
-    return decoded
+    decoded = _decode_or_none(raw)
+    return raw if decoded is None else decoded
 
 
 def _strip_prefix(raw: str, prefix: str) -> str | None:
     """A ``---`` or ``+++`` path without its ``a/`` or ``b/`` prefix, or None for /dev/null."""
     raw = raw.split("\t", 1)[0].strip() if not raw.startswith('"') else raw.strip()
-    path = safe_decode_git_path(raw)
-    if path == "/dev/null":
+    path = _decode_or_none(raw)
+    if path is None or path == "/dev/null":
         return None
     return path[len(prefix) :] if path.startswith(prefix) else None
 
 
-def _header_path(line: str) -> str | None:
-    """The shared path of a ``diff --git a/X b/X`` header, decoded, or None when it differs."""
+def _header_paths(line: str) -> tuple[str | None, str | None]:
+    """The old and new path of a ``diff --git`` header, decoded. None where a path is unreadable.
+
+    The header alone is ambiguous when the two paths differ and one holds `` b/``. In that case
+    nothing is returned here, and the ``rename``, ``copy``, ``---`` and ``+++`` lines give the paths.
+    """
     simple = _SIMPLE_HEADER.match(line)
     if simple:
-        return simple.group(1)
+        return simple.group(1), simple.group(1)
     rest = line[len("diff --git ") :]
     quoted = re.match(r'^("(?:[^"\\]|\\.)*") ("(?:[^"\\]|\\.)*")$', rest)
     if quoted:
-        old, new = safe_decode_git_path(quoted.group(1)), safe_decode_git_path(quoted.group(2))
-        if old.startswith("a/") and new.startswith("b/") and old[2:] == new[2:]:
-            return new[2:]
-    return None
+        old, new = _decode_or_none(quoted.group(1)), _decode_or_none(quoted.group(2))
+        return (
+            old[2:] if old is not None and old.startswith("a/") else None,
+            new[2:] if new is not None and new.startswith("b/") else None,
+        )
+    if rest.startswith("a/") and rest.count(" b/") == 1:
+        old, new = rest[2:].split(" b/", 1)
+        return old, new
+    return None, None
 
 
 def parse_diff(diff_text: str) -> list[FileDiff]:
@@ -175,8 +190,8 @@ def parse_diff(diff_text: str) -> list[FileDiff]:
     for raw in split_lines(diff_text):
         if raw.startswith("diff --git "):
             close_hunk()
-            shared = _header_path(raw)
-            current = FileDiff(old_path=shared, new_path=shared)
+            old_path, new_path = _header_paths(raw)
+            current = FileDiff(old_path=old_path, new_path=new_path)
             files.append(current)
             continue
         if current is None:
@@ -213,10 +228,10 @@ def parse_diff(diff_text: str) -> list[FileDiff]:
             old_no, new_no, old_left, new_left = old_start, new_start, old_count, new_count
             continue
         close_hunk()
-        if raw.startswith("rename from "):
-            current.old_path = safe_decode_git_path(raw[len("rename from ") :])
-        elif raw.startswith("rename to "):
-            current.new_path = safe_decode_git_path(raw[len("rename to ") :])
+        if raw.startswith(("rename from ", "copy from ")):
+            current.old_path = _decode_or_none(raw.split(" from ", 1)[1])
+        elif raw.startswith(("rename to ", "copy to ")):
+            current.new_path = _decode_or_none(raw.split(" to ", 1)[1])
         elif raw.startswith("--- "):
             current.old_path = _strip_prefix(raw[4:], "a/")
         elif raw.startswith("+++ "):

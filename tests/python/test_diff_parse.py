@@ -333,3 +333,52 @@ def test_a_form_feed_in_a_manifest_does_not_break_the_base_rebuild() -> None:
     body = "\n".join(difflib.unified_diff(split_lines(old), split_lines(new), "a/Cargo.toml", "b/Cargo.toml", lineterm="", n=1))
     hunks = de._hunks_by_file("diff --git a/Cargo.toml b/Cargo.toml\n" + body + "\n")["Cargo.toml"]
     assert de._rebuild_base(new, hunks) == old
+
+
+class TestHeadersWithDifferentPaths:
+    """F20 and F21 from the AI review of the parser."""
+
+    def test_a_rename_to_a_control_character_path_is_unreadable_not_a_quoted_string(self) -> None:
+        diff = (
+            'diff --git "a/x.json" "b/y\\n::error::z.json"\nsimilarity index 90%\nrename from x.json\n'
+            'rename to "y\\n::error::z.json"\n'
+        )
+        (file,) = parse_diff(diff)
+        assert file.old_path == "x.json"
+        assert file.new_path is None  # not the quoted string
+        assert not file.renamed and file.path == "x.json"
+
+    def test_a_rename_from_a_control_character_path_is_unreadable_too(self) -> None:
+        diff = 'diff --git "a/y\\nz.json" "b/x.json"\nrename from "y\\nz.json"\nrename to x.json\n'
+        (file,) = parse_diff(diff)
+        assert file.old_path is None and file.new_path == "x.json"
+
+    def test_a_binary_rename_with_no_rename_lines_gets_both_paths_from_the_header(self) -> None:
+        diff = "diff --git a/old.bin b/new.bin\nBinary files a/old.bin and b/new.bin differ\n"
+        (file,) = parse_diff(diff)
+        assert (file.old_path, file.new_path, file.renamed) == ("old.bin", "new.bin", True)
+
+    def test_copy_lines_set_the_paths(self) -> None:
+        diff = "diff --git a/a.txt b/b.txt\nsimilarity index 100%\ncopy from a.txt\ncopy to b.txt\n"
+        (file,) = parse_diff(diff)
+        assert (file.old_path, file.new_path) == ("a.txt", "b.txt")
+
+    def test_an_ambiguous_header_waits_for_the_path_lines(self) -> None:
+        diff = (
+            "diff --git a/x b/y b/z b/y\n--- a/x b/y\n+++ b/z b/y\n@@ -1 +1 @@\n-a\n+b\n"
+        )
+        (file,) = parse_diff(diff)
+        assert (file.old_path, file.new_path) == ("x b/y", "z b/y")
+
+    def test_a_binary_rename_does_not_trigger_the_unreadable_path_warning(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from ai_pr_review.analyzers.native import dep_exists as de
+        from ai_pr_review.manifest import ChangedFiles
+
+        monkeypatch.chdir(tmp_path)
+        diff_file = tmp_path / "d.diff"
+        diff_file.write_text("diff --git a/old.bin b/new.bin\nBinary files a/old.bin and b/new.bin differ\n")
+        with caplog.at_level("WARNING", logger=de.logger.name):
+            de._run_dep_exists(ChangedFiles(all_files=["new.bin"], manifest_lockfile=[]), diff_file)
+        assert "could not be read" not in caplog.text
