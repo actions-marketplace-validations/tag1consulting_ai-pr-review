@@ -26,6 +26,7 @@ from ai_pr_review.manifest import ChangedFiles, parse_changed_files_payload
 from ai_pr_review.orchestrate import OrchestrationConfig
 from ai_pr_review.review.compute import run_compute
 from ai_pr_review.review.cost_ceiling import CostCeilingExceeded
+from ai_pr_review.review.not_reviewed import build_not_reviewed_notice
 from ai_pr_review.review.pr_context import build_shared_context_block
 from ai_pr_review.vcs import provider_from_env
 from ai_pr_review.vcs.protocol import DiffContext, VcsProvider
@@ -120,6 +121,10 @@ class ReviewRuntime:
     # review ran on defaults. cli.py shows it in the posted comment: the
     # stderr WARNING alone let a misnamed policy go unnoticed.
     policy_ignored_reason: str | None = None
+    # One-line note on what this review left out (excluded files, agents whose
+    # gate did not fire, incremental scope). cli.py shows it in the posted
+    # comment through the same warning segment as policy_ignored_reason.
+    not_reviewed_notice: str = ""
 
 
 def _merge_allowlist(
@@ -759,6 +764,7 @@ async def build_review_runtime(
         enable_judge_pass=config.enable_judge_pass,
         judge_model=config.model_standard,
         judge_prompt_path=_judge_prompt_resolved,
+        finding_badges=config.finding_badges,
     )
 
     return ReviewRuntime(
@@ -785,4 +791,11 @@ async def build_review_runtime(
         cost_ceiling_pricing_missing=cost_ceiling_pricing_missing,
         cost_ceiling_check_failed=cost_ceiling_check_failed,
         policy_ignored_reason=policy_ignored_reason,
+        not_reviewed_notice=build_not_reviewed_notice(
+            # Only the patterns the user added. The built-in lockfile and vendor
+            # excludes are the same on every run, so listing them is noise.
+            excluded_patterns=config.exclude_patterns,
+            skipped_agents=[a.name for a in mode_filtered if a not in agents],
+            is_incremental=is_incremental,
+        ),
     )

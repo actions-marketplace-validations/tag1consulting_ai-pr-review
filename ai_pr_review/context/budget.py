@@ -42,9 +42,17 @@ _CJK_RANGES = (
 _CJK_RE = re.compile(f"[{_CJK_RANGES}]")
 
 
-def estimate_tokens(text: str) -> int:
+def estimate_tokens(
+    text: str, *, chars_per_token: float = 4.0, margin: float = 1.1
+) -> int:
     """Estimate token count: ~4 chars/token for ASCII-range text, ~1
     token/codepoint for CJK/Hangul/kana text, with a 10% safety margin.
+
+    The defaults suit the context-enrichment budget, which wants a snippet cap
+    that matches its configured size. They under-count the tokens a provider
+    bills, by up to 2x on diffs (measured, see ``review.cost_ceiling``'s
+    ``estimate_billed_tokens``), so cost estimates pass their own
+    ``chars_per_token`` and ``margin``.
 
     For text with no CJK codepoints this is bit-identical to the previous
     ``int(len(text) / 4 * 1.1)`` formula -- ``_CJK_RE.sub`` returns the
@@ -57,7 +65,7 @@ def estimate_tokens(text: str) -> int:
     """
     non_cjk_len = len(_CJK_RE.sub("", text))
     cjk_len = len(text) - non_cjk_len
-    return int((non_cjk_len / 4 + cjk_len) * 1.1)
+    return int((non_cjk_len / chars_per_token + cjk_len) * margin)
 
 
 # Backward-compatible alias for internal callers that used the private name.

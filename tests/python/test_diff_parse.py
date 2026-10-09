@@ -1,0 +1,384 @@
+"""Tests for the shared unified-diff parser in ai_pr_review/diff/parse.py."""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from ai_pr_review.diff.parse import decode_git_path, parse_diff
+
+
+def _git(cwd: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args], cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout
+
+
+class TestDecodeGitPath:
+    def test_a_plain_path_is_unchanged(self) -> None:
+        assert decode_git_path("src/app.py") == "src/app.py"
+
+    def test_octal_escapes_are_utf8_bytes(self) -> None:
+        assert decode_git_path(r'"pkg-\303\251/package.json"') == "pkg-é/package.json"
+
+    def test_standard_escapes(self) -> None:
+        assert decode_git_path(r'"a\tb\\c\"d"') == 'a\tb\\c"d'
+
+
+class TestFiles:
+    def test_a_simple_change_has_rows_with_both_line_numbers(self) -> None:
+        diff = "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1,3 +1,3 @@\n a\n-b\n+B\n c\n"
+        (file,) = parse_diff(diff)
+        assert (file.old_path, file.new_path, file.renamed) == ("x.py", "x.py", False)
+        (hunk,) = file.hunks
+        assert [(r.old_no, r.new_no, r.marker, r.text) for r in hunk.rows] == [
+            (1, 1, " ", "a"),
+            (2, None, "-", "b"),
+            (None, 2, "+", "B"),
+            (3, 3, " ", "c"),
+        ]
+        assert hunk.old_side == ["a", "b", "c"] and hunk.new_side == ["a", "B", "c"]
+
+    def test_a_rename_has_both_paths(self) -> None:
+        diff = (
+            "diff --git a/old/p.json b/new/p.json\nsimilarity index 80%\nrename from old/p.json\nrename to new/p.json\n"
+            "--- a/old/p.json\n+++ b/new/p.json\n@@ -1 +1 @@\n-a\n+b\n"
+        )
+        (file,) = parse_diff(diff)
+        assert (file.old_path, file.new_path, file.renamed) == ("old/p.json", "new/p.json", True)
+
+    def test_a_rename_without_changes_has_no_hunks(self) -> None:
+        diff = "diff --git a/a.txt b/b.txt\nsimilarity index 100%\nrename from a.txt\nrename to b.txt\n"
+        (file,) = parse_diff(diff)
+        assert (file.old_path, file.new_path, file.hunks) == ("a.txt", "b.txt", [])
+
+    def test_a_quoted_path_is_decoded(self) -> None:
+        diff = (
+            'diff --git "a/pkg-\\303\\251/package.json" "b/pkg-\\303\\251/package.json"\n'
+            '--- "a/pkg-\\303\\251/package.json"\n+++ "b/pkg-\\303\\251/package.json"\n@@ -1 +1 @@\n-a\n+b\n'
+        )
+        (file,) = parse_diff(diff)
+        assert file.path == "pkg-é/package.json"
+
+    def test_a_path_with_spaces_and_a_trailing_tab(self) -> None:
+        diff = "diff --git a/my dir/p.json b/my dir/p.json\n--- a/my dir/p.json\t\n+++ b/my dir/p.json\t\n@@ -1 +1 @@\n-a\n+b\n"
+        (file,) = parse_diff(diff)
+        assert file.path == "my dir/p.json"
+
+    def test_a_path_that_contains_b_slash(self) -> None:
+        diff = "diff --git a/x b/y/f b/x b/y/f\n--- a/x b/y/f\n+++ b/x b/y/f\n@@ -1 +1 @@\n-a\n+b\n"
+        (file,) = parse_diff(diff)
+        assert file.path == "x b/y/f"
+
+    def test_new_and_deleted_files(self) -> None:
+        diff = (
+            "diff --git a/n.txt b/n.txt\nnew file mode 100644\n--- /dev/null\n+++ b/n.txt\n@@ -0,0 +1,2 @@\n+one\n+two\n"
+            "diff --git a/d.txt b/d.txt\ndeleted file mode 100644\n--- a/d.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-gone\n"
+        )
+        new, deleted = parse_diff(diff)
+        assert (new.old_path, new.new_path, new.path) == (None, "n.txt", "n.txt")
+        assert (deleted.old_path, deleted.new_path, deleted.path) == ("d.txt", None, "d.txt")
+        assert [r.new_no for r in new.hunks[0].rows] == [1, 2]
+
+    def test_a_removed_line_that_starts_with_dashes_is_a_row_not_a_header(self) -> None:
+        diff = "diff --git a/s.sql b/s.sql\n--- a/s.sql\n+++ b/s.sql\n@@ -1,2 +1,1 @@\n--- a comment\n keep\n"
+        (file,) = parse_diff(diff)
+        assert [(r.marker, r.text) for r in file.hunks[0].rows] == [("-", "-- a comment"), (" ", "keep")]
+        assert file.path == "s.sql"
+
+    def test_a_missing_newline_marker_is_skipped(self) -> None:
+        diff = "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n\\ No newline at end of file\n+b\n\\ No newline at end of file\n"
+        (file,) = parse_diff(diff)
+        assert [r.marker for r in file.hunks[0].rows] == ["-", "+"]
+
+    def test_a_count_of_one_may_be_left_out(self) -> None:
+        diff = "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -5 +5 @@\n-a\n+b\n"
+        (file,) = parse_diff(diff)
+        h = file.hunks[0]
+        assert (h.old_start, h.old_count, h.new_start, h.new_count) == (5, 1, 5, 1)
+
+    def test_several_hunks_and_files(self) -> None:
+        diff = (
+            "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n@@ -10 +10 @@\n-c\n+d\n"
+            "diff --git a/g b/g\n--- a/g\n+++ b/g\n@@ -1 +1 @@\n-e\n+f\n"
+        )
+        f, g = parse_diff(diff)
+        assert [h.new_start for h in f.hunks] == [1, 10] and len(g.hunks) == 1
+
+    def test_text_before_the_first_header_is_ignored(self) -> None:
+        assert parse_diff("noise\n@@ -1 +1 @@\n-a\n+b\n") == []
+
+    def test_an_empty_diff(self) -> None:
+        assert parse_diff("") == []
+
+
+@pytest.mark.parametrize("mnemonic", [False, True])
+def test_a_real_git_diff_with_a_non_ascii_directory(tmp_path: Path, mnemonic: bool) -> None:
+    """Parse what git writes. The prefixes are pinned the way the engine pins them."""
+    _git(tmp_path, "init", "-q")
+    (tmp_path / "pkg-é").mkdir()
+    (tmp_path / "pkg-é/package.json").write_text('{"a": 1}\n')
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-qm", "base")
+    (tmp_path / "pkg-é/package.json").write_text('{"a": 2}\n')
+    flags = ["-c", f"diff.mnemonicPrefix={'true' if mnemonic else 'false'}", "diff", "--src-prefix=a/", "--dst-prefix=b/"]
+    diff = _git(tmp_path, *flags)
+    assert '"a/pkg-\\303\\251/package.json"' in diff  # git quoted the path
+    (file,) = parse_diff(diff)
+    assert file.path == "pkg-é/package.json"
+
+
+class TestConsumersAgree:
+    """dep-exists and the judge window read one diff through one parser (follow-up to F3)."""
+
+    DIFF = (
+        "diff --git a/old/package.json b/pkgs/package.json\nsimilarity index 70%\nrename from old/package.json\n"
+        "rename to pkgs/package.json\n--- a/old/package.json\n+++ b/pkgs/package.json\n@@ -1,2 +1,3 @@\n a\n+one\n b\n"
+        'diff --git "a/pkg-\\303\\251/package.json" "b/pkg-\\303\\251/package.json"\n'
+        '--- "a/pkg-\\303\\251/package.json"\n+++ "b/pkg-\\303\\251/package.json"\n@@ -4,2 +4,3 @@\n c\n+two\n d\n'
+        "diff --git a/x b/y/package.json b/x b/y/package.json\n--- a/x b/y/package.json\n+++ b/x b/y/package.json\n"
+        "@@ -7 +7,2 @@\n e\n+three\n"
+    )
+
+    @pytest.mark.parametrize(
+        ("path", "line", "text"),
+        [("pkgs/package.json", 2, "one"), ("pkg-é/package.json", 5, "two"), ("x b/y/package.json", 8, "three")],
+    )
+    def test_the_same_file_and_line_in_both(self, path: str, line: int, text: str) -> None:
+        import importlib.util
+        import sys
+
+        from ai_pr_review.analyzers.native.dep_exists import added_lines
+
+        canary = Path(__file__).resolve().parent.parent / "canary" / "judge_code.py"
+        spec = importlib.util.spec_from_file_location("judge_code", canary)
+        assert spec is not None and spec.loader is not None
+        module = sys.modules.get("judge_code") or importlib.util.module_from_spec(spec)
+        sys.modules["judge_code"] = module
+        if not hasattr(module, "extract_hunk"):
+            spec.loader.exec_module(module)
+        extract_hunk = module.extract_hunk
+
+        assert (line, text) in added_lines(self.DIFF)[path]
+        window = extract_hunk(self.DIFF, path, line)
+        assert f"{line:>5} + {text}" in window
+
+
+def test_compute_diff_ignores_the_users_git_diff_config_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#1032: mnemonic prefixes and quoted non-ASCII paths in the user's git config must not
+    make dep-exists skip a manifest. The test sets both, then runs compute_diff and dep-exists."""
+    import json
+
+    import httpx
+
+    from ai_pr_review.analyzers.native import dep_exists as de
+    from ai_pr_review.diff.compute import compute_diff
+    from ai_pr_review.manifest import ChangedFiles
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "diff.mnemonicPrefix", "true")
+    _git(repo, "config", "core.quotePath", "true")
+    (repo / "pkg-é").mkdir()
+    (repo / "pkg-é/package.json").write_text(json.dumps({"dependencies": {"left-pad": "1"}}, indent=2) + "\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "base")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "checkout", "-qb", "feature")
+    (repo / "pkg-é/package.json").write_text(
+        json.dumps({"dependencies": {"left-pad": "1", "invented-pkg": "1"}}, indent=2) + "\n"
+    )
+    _git(repo, "commit", "-qam", "add a dependency")
+    head = _git(repo, "rev-parse", "HEAD").strip()
+
+    result = compute_diff("main", head, workspace=str(repo), ignore_merge_commits=False)
+    assert result.changed_files == ["pkg-é/package.json"]
+    assert "+++ b/pkg-é/package.json" in result.diff_text
+
+    monkeypatch.chdir(repo)
+    seen: list[str] = []
+    real_client = httpx.Client
+
+    def factory(*args: object, **kwargs: object) -> httpx.Client:
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request.url.path)
+            return httpx.Response(404)
+
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real_client(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(de.httpx, "Client", factory)
+    diff_file = tmp_path / "d.diff"
+    diff_file.write_text(result.diff_text)
+    found = de._run_dep_exists(ChangedFiles(all_files=result.changed_files, manifest_lockfile=result.changed_files), diff_file)
+    assert [f.file for f in found] == ["pkg-é/package.json"]
+    assert seen == ["/invented-pkg"]
+
+
+def test_a_manifest_missing_from_the_diff_is_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    from ai_pr_review.analyzers.native import dep_exists as de
+    from ai_pr_review.manifest import ChangedFiles
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "package.json").write_text("{}")
+    diff_file = tmp_path / "d.diff"
+    diff_file.write_text("diff --git c/other.txt i/other.txt\n--- c/other.txt\n+++ i/other.txt\n@@ -1 +1 @@\n-a\n+b\n")
+    with caplog.at_level("WARNING", logger=de.logger.name):
+        assert de._run_dep_exists(ChangedFiles(all_files=["package.json"], manifest_lockfile=["package.json"]), diff_file) == []
+    assert "'package.json' is in the changed-file list but not in the diff" in caplog.text
+
+
+class TestControlCharactersInPaths:
+    """A path is attacker-controlled text. A decoded newline could forge a log line such as
+    `::error::...` in GitHub Actions, so a path with a control character is never decoded."""
+
+    def test_a_decoded_control_character_is_not_returned(self) -> None:
+        from ai_pr_review.diff.parse import safe_decode_git_path
+
+        assert safe_decode_git_path(r'"a\nb/package.json"') == r'"a\nb/package.json"'
+        assert safe_decode_git_path(r'"a\033[31mb"') == r'"a\033[31mb"'
+        assert safe_decode_git_path(r'"pkg-\303\251/x"') == "pkg-é/x"  # ordinary escapes still decode
+        assert safe_decode_git_path("plain/x") == "plain/x"
+
+    def test_the_parser_keeps_the_escaped_form(self) -> None:
+        diff = (
+            'diff --git "a/x\\n::error::y/package.json" "b/x\\n::error::y/package.json"\n'
+            '--- "a/x\\n::error::y/package.json"\n+++ "b/x\\n::error::y/package.json"\n@@ -1 +1 @@\n-a\n+b\n'
+        )
+        (file,) = parse_diff(diff)
+        assert file.path is None  # a path with a control character is treated as unreadable
+
+    def test_compute_diff_and_the_parser_never_return_a_raw_control_character(self, tmp_path: Path) -> None:
+        from ai_pr_review.diff.compute import compute_diff
+
+        _git(tmp_path, "init", "-q", "-b", "main")
+        (tmp_path / "base.txt").write_text("x\n")
+        _git(tmp_path, "add", ".")
+        _git(tmp_path, "commit", "-qm", "base")
+        _git(tmp_path, "update-ref", "refs/remotes/origin/main", "HEAD")
+        _git(tmp_path, "checkout", "-qb", "feature")
+        (tmp_path / "pkg\n::error::injected.json").write_text("{}\n")
+        _git(tmp_path, "add", ".")
+        _git(tmp_path, "commit", "-qm", "hostile name")
+        head = _git(tmp_path, "rev-parse", "HEAD").strip()
+        result = compute_diff("main", head, workspace=str(tmp_path), ignore_merge_commits=False)
+        assert len(result.changed_files) == 1
+        assert not any(ord(ch) < 32 for name in result.changed_files for ch in name)
+        for file in parse_diff(result.diff_text):
+            assert file.path is None or not any(ord(ch) < 32 for ch in file.path)
+
+
+def test_a_manifest_under_a_directory_with_a_control_character_is_reported_not_skipped_quietly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Naming a directory with a newline must not switch dep-exists off without a trace."""
+    from ai_pr_review.analyzers.native import dep_exists as de
+    from ai_pr_review.manifest import ChangedFiles
+
+    monkeypatch.chdir(tmp_path)
+    diff_file = tmp_path / "d.diff"
+    diff_file.write_text(
+        'diff --git "a/x\n::error::y/package.json" "b/x\n::error::y/package.json"\n'
+        '--- "a/x\n::error::y/package.json"\n+++ "b/x\n::error::y/package.json"\n'
+        '@@ -0,0 +1 @@\n+{"dependencies": {"invented-pkg": "1"}}\n'
+    )
+    with caplog.at_level("WARNING", logger=de.logger.name):
+        assert de._run_dep_exists(ChangedFiles(all_files=[], manifest_lockfile=[]), diff_file) == []
+    assert "1 file(s) in the diff have a path that could not be read, so they are not checked" in caplog.text
+    assert "\n::error::" not in caplog.text and "::error::" not in caplog.text
+
+
+class TestLineSplitting:
+    """Git ends a line at \\n only. str.splitlines() also splits on form feed and others."""
+
+    def test_a_form_feed_inside_a_row_does_not_split_the_row(self) -> None:
+        diff = "diff --git a/x.c b/x.c\n--- a/x.c\n+++ b/x.c\n@@ -1,2 +1,2 @@\n a\n-b\x0cq\n+c\x0cr\n"
+        (file,) = parse_diff(diff)
+        assert [(r.old_no, r.new_no, r.marker, r.text) for r in file.hunks[0].rows] == [
+            (1, 1, " ", "a"),
+            (2, None, "-", "b\x0cq"),
+            (None, 2, "+", "c\x0cr"),
+        ]
+
+    @pytest.mark.parametrize("sep", ["\x0b", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"])
+    def test_other_separators_do_not_split_a_context_row(self, sep: str) -> None:
+        diff = f"diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,2 +1,2 @@\n x{sep}y\n-old\n+new\n"
+        (file,) = parse_diff(diff)
+        assert [r.text for r in file.hunks[0].rows] == [f"x{sep}y", "old", "new"]
+
+    def test_crlf_line_endings_are_dropped_from_the_rows(self) -> None:
+        diff = "diff --git a/f b/f\r\n--- a/f\r\n+++ b/f\r\n@@ -1 +1 @@\r\n-a\r\n+b\r\n"
+        (file,) = parse_diff(diff)
+        assert file.path == "f" and [r.text for r in file.hunks[0].rows] == ["a", "b"]
+
+    def test_split_lines_keeps_blank_lines_but_not_the_final_newline(self) -> None:
+        from ai_pr_review.diff.parse import split_lines
+
+        assert split_lines("a\n\nb\n") == ["a", "", "b"] and split_lines("") == [] and split_lines("a") == ["a"]
+
+
+def test_a_form_feed_in_a_manifest_does_not_break_the_base_rebuild() -> None:
+    """The file and the hunks must be split the same way, or the rebuild fails and every bump is checked."""
+    from ai_pr_review.analyzers.native import dep_exists as de
+
+    old = 'name = "app"\x0c\n[dependencies]\nacme = "1"\n'
+    new = 'name = "app"\x0c\n[dependencies]\nacme = "2"\n'
+    import difflib
+
+    from ai_pr_review.diff.parse import split_lines
+
+    body = "\n".join(difflib.unified_diff(split_lines(old), split_lines(new), "a/Cargo.toml", "b/Cargo.toml", lineterm="", n=1))
+    hunks = de._hunks_by_file("diff --git a/Cargo.toml b/Cargo.toml\n" + body + "\n")["Cargo.toml"]
+    assert de._rebuild_base(new, hunks) == old
+
+
+class TestHeadersWithDifferentPaths:
+    """F20 and F21 from the AI review of the parser."""
+
+    def test_a_rename_to_a_control_character_path_is_unreadable_not_a_quoted_string(self) -> None:
+        diff = (
+            'diff --git "a/x.json" "b/y\\n::error::z.json"\nsimilarity index 90%\nrename from x.json\n'
+            'rename to "y\\n::error::z.json"\n'
+        )
+        (file,) = parse_diff(diff)
+        assert file.old_path == "x.json"
+        assert file.new_path is None  # not the quoted string
+        assert not file.renamed and file.path == "x.json"
+
+    def test_a_rename_from_a_control_character_path_is_unreadable_too(self) -> None:
+        diff = 'diff --git "a/y\\nz.json" "b/x.json"\nrename from "y\\nz.json"\nrename to x.json\n'
+        (file,) = parse_diff(diff)
+        assert file.old_path is None and file.new_path == "x.json"
+
+    def test_a_binary_rename_with_no_rename_lines_gets_both_paths_from_the_header(self) -> None:
+        diff = "diff --git a/old.bin b/new.bin\nBinary files a/old.bin and b/new.bin differ\n"
+        (file,) = parse_diff(diff)
+        assert (file.old_path, file.new_path, file.renamed) == ("old.bin", "new.bin", True)
+
+    def test_copy_lines_set_the_paths(self) -> None:
+        diff = "diff --git a/a.txt b/b.txt\nsimilarity index 100%\ncopy from a.txt\ncopy to b.txt\n"
+        (file,) = parse_diff(diff)
+        assert (file.old_path, file.new_path) == ("a.txt", "b.txt")
+
+    def test_an_ambiguous_header_waits_for_the_path_lines(self) -> None:
+        diff = (
+            "diff --git a/x b/y b/z b/y\n--- a/x b/y\n+++ b/z b/y\n@@ -1 +1 @@\n-a\n+b\n"
+        )
+        (file,) = parse_diff(diff)
+        assert (file.old_path, file.new_path) == ("x b/y", "z b/y")
+
+    def test_a_binary_rename_does_not_trigger_the_unreadable_path_warning(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from ai_pr_review.analyzers.native import dep_exists as de
+        from ai_pr_review.manifest import ChangedFiles
+
+        monkeypatch.chdir(tmp_path)
+        diff_file = tmp_path / "d.diff"
+        diff_file.write_text("diff --git a/old.bin b/new.bin\nBinary files a/old.bin and b/new.bin differ\n")
+        with caplog.at_level("WARNING", logger=de.logger.name):
+            de._run_dep_exists(ChangedFiles(all_files=["new.bin"], manifest_lockfile=[]), diff_file)
+        assert "could not be read" not in caplog.text

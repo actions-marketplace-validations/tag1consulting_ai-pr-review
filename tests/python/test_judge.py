@@ -142,11 +142,13 @@ def test_apply_verdicts_corroborated_exempt_from_downrank() -> None:
     assert count == 0
 
 
-def test_apply_verdicts_missing_id_defaults_to_keep() -> None:
+def test_apply_verdicts_missing_id_is_left_unjudged() -> None:
+    """An omitted id keeps its placement but gets no verdict, so no "judge kept" badge."""
     f = _finding(confidence=80)
     result, count = _apply_verdicts([f], [])  # no verdict for id=0
-    assert result[0] is not f
-    assert result[0].judge_verdict == "keep"
+    assert result[0] == f
+    assert result[0].judge_verdict is None
+    assert result[0].demoted_to_body is False
     assert count == 0
 
 
@@ -352,3 +354,18 @@ async def test_judge_llm_request_has_correct_model(tmp_path: Path) -> None:
     assert captured[0].model_id == "claude-haiku-test"
     assert captured[0].temperature == 0.0
     assert captured[0].max_tokens == 4096
+
+
+def test_an_unjudged_finding_is_not_badged_as_judge_kept() -> None:
+    """The judge omitted id 0 and gave id 1 an unknown verdict: neither may read "judge kept"."""
+    from ai_pr_review.findings.badge import finding_label
+
+    result, _ = _apply_verdicts(
+        [_finding(), _finding(), _finding()],
+        [{"id": 1, "verdict": "drop"}, {"id": 2, "verdict": "keep"}],
+    )
+    assert [finding_label(f) for f in result] == [
+        "single agent, not judged",
+        "single agent, not judged",
+        "judge kept",
+    ]

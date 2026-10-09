@@ -1,0 +1,60 @@
+diff --git a/ai_pr_review/agents/dispatch.py b/ai_pr_review/agents/dispatch.py
+index eb89333..c6e6de8 100644
+--- a/ai_pr_review/agents/dispatch.py
++++ b/ai_pr_review/agents/dispatch.py
+@@ -141,6 +141,7 @@ class DispatchContext:
+     enable_context_enrichment: bool = False
+     context_max_tokens: int = 8192
+     context_lookup_lines: int = 8
++    context_max_queries: int = 200
+     repo_root: Path = field(default_factory=Path.cwd)
+     changed_files: list[str] = field(default_factory=list)
+     # --- Feedback loop ---
+@@ -429,6 +430,7 @@ def _compute_context_enrichment_block(
+             context.changed_files,
+             language=language,
+             lookup_lines=context.context_lookup_lines,
++            max_queries=context.context_max_queries,
+         )
+         ctx_text = build_context_block(defs, max_tokens=context.context_max_tokens)
+         if not ctx_text:
+diff --git a/ai_pr_review/config.py b/ai_pr_review/config.py
+index b83c660..aac73d2 100644
+--- a/ai_pr_review/config.py
++++ b/ai_pr_review/config.py
+@@ -47,6 +47,7 @@ _KNOWN_AI_VARS: frozenset[str] = frozenset(
+         "AI_CONTEXT_ENRICHMENT",
+         "AI_CONTEXT_MAX_TOKENS",
+         "AI_CONTEXT_LOOKUP_LINES",
++        "AI_CONTEXT_MAX_QUERIES",
+         # --- SARIF ingestion ---
+         "AI_SARIF_PATHS",
+         # --- Diff exclude patterns ---
+@@ -199,6 +200,7 @@ class ReviewConfig(BaseModel):
+     enable_context_enrichment: bool = True
+     context_max_tokens: int = 8192
+     context_lookup_lines: int = 8
++    context_max_queries: int = 200
+ 
+     # --- SARIF ingestion ---
+     sarif_paths: tuple[str, ...] = ()
+@@ -459,6 +461,7 @@ class ReviewConfig(BaseModel):
+             enable_context_enrichment=_bool("AI_CONTEXT_ENRICHMENT", True),
+             context_max_tokens=_int("AI_CONTEXT_MAX_TOKENS", 8192),
+             context_lookup_lines=_int("AI_CONTEXT_LOOKUP_LINES", 8),
++            context_max_queries=_int("AI_CONTEXT_MAX_QUERIES", 200),
+             sarif_paths=tuple(
+                 p.strip()
+                 for p in os.environ.get("AI_SARIF_PATHS", "").split(",")
+diff --git a/ai_pr_review/review/runtime.py b/ai_pr_review/review/runtime.py
+index 2fc7a97..0a74f10 100644
+--- a/ai_pr_review/review/runtime.py
++++ b/ai_pr_review/review/runtime.py
+@@ -202,6 +202,7 @@ async def build_review_runtime(
+         enable_context_enrichment=config.enable_context_enrichment,
+         context_max_tokens=config.context_max_tokens,
+         context_lookup_lines=config.context_lookup_lines,
++        context_max_queries=config.context_max_queries,
+         repo_root=Path("."),
+         changed_files=_changed_list,
+         feedback_addendum=feedback_addendum,

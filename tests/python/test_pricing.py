@@ -647,7 +647,10 @@ def test_sonnet_5_5_priced_and_labeled_separately_from_sonnet_5() -> None:
     assert sonnet_5_5.display_name == "Sonnet 5.5"
     assert sonnet_5_5.input_rate == 2000000
     assert sonnet_5_5.output_rate == 10000000
-    assert sonnet_5_5.cache_read_rate == 200000
+    # Anthropic's pricing page: a Sonnet 5.5 cache hit is $0.10 per million
+    # tokens (0.05x the input price), half of Sonnet 5's $0.20.
+    assert sonnet_5_5.cache_read_rate == 100000
+    assert sonnet_5.cache_read_rate == 200000
     assert sonnet_5.display_name == "Sonnet 5"
 
 
@@ -667,3 +670,207 @@ def test_sonnet_5_5_anchor_does_not_match_hypothetical_sibling() -> None:
 def test_sonnet_5_dated_snapshot_still_priced_as_sonnet_5() -> None:
     pricing_data = load_pricing(str(_REAL_PRICING_FILE))
     assert model_pricing("claude-sonnet-5-20260601", pricing_data).display_name == "Sonnet 5"
+
+
+# --- Opus 5.5, Sonnet 5.5, Haiku 5.5: golden prices from Anthropic's pricing page
+# (https://platform.claude.com/docs/en/about-claude/pricing, fetched 2026-10-08).
+# Cost units are $0.0001, so $1.00 is 10_000 units. ---
+
+_MILLION = 1_000_000
+
+
+def _real_rates(model_id: str) -> ModelRates:
+    return model_pricing(model_id, load_pricing(str(_REAL_PRICING_FILE)))
+
+
+def test_opus_5_5_golden_prices() -> None:
+    rates = _real_rates("claude-opus-5-5")
+    # $4 in, $20 out per million tokens.
+    assert token_cost_units(rates, input_tokens=_MILLION, output_tokens=0) == 40_000
+    assert token_cost_units(rates, input_tokens=0, output_tokens=_MILLION) == 200_000
+    # $5 5-minute cache write, $0.20 cache hit.
+    assert token_cost_units(
+        rates, input_tokens=0, output_tokens=0, cache_creation_tokens=_MILLION,
+    ) == 50_000
+    assert token_cost_units(
+        rates, input_tokens=0, output_tokens=0, cache_read_tokens=_MILLION,
+    ) == 2_000
+
+
+def test_sonnet_5_5_golden_prices() -> None:
+    rates = _real_rates("claude-sonnet-5-5")
+    # $2 in, $10 out, $2.50 cache write, $0.10 cache hit per million tokens.
+    assert token_cost_units(rates, input_tokens=_MILLION, output_tokens=0) == 20_000
+    assert token_cost_units(rates, input_tokens=0, output_tokens=_MILLION) == 100_000
+    assert token_cost_units(
+        rates, input_tokens=0, output_tokens=0, cache_creation_tokens=_MILLION,
+    ) == 25_000
+    assert token_cost_units(
+        rates, input_tokens=0, output_tokens=0, cache_read_tokens=_MILLION,
+    ) == 1_000
+
+
+def test_sonnet_5_5_has_no_long_prompt_tier() -> None:
+    """Only Haiku 5.5 is priced by prompt length. A 2M-token Sonnet 5.5 call
+    costs exactly twice a 1M-token one."""
+    rates = _real_rates("claude-sonnet-5-5")
+    assert rates.long_prompt is None
+    one = token_cost_units(rates, input_tokens=_MILLION, output_tokens=0)
+    two = token_cost_units(rates, input_tokens=2 * _MILLION, output_tokens=0)
+    assert one is not None and two == 2 * one
+
+
+def test_haiku_5_5_priced_and_labeled() -> None:
+    pricing_data = load_pricing(str(_REAL_PRICING_FILE))
+    for model_id in (
+        "claude-haiku-5-5",
+        "claude-haiku-5.5",
+        "anthropic.claude-haiku-5-5",
+        "us.anthropic.claude-haiku-5-5",
+        "claude-haiku-5-5-20261001",
+    ):
+        assert model_pricing(model_id, pricing_data).display_name == "Haiku 5.5", model_id
+
+
+def test_haiku_5_5_anchor_does_not_match_hypothetical_sibling() -> None:
+    """Same anchoring as the Sonnet and Opus 5.5 rows: "claude-haiku-5-59" must
+    stay unpriced, not silently priced as Haiku 5.5."""
+    rates = _real_rates("claude-haiku-5-59")
+    assert rates.display_name != "Haiku 5.5"
+    assert token_cost_units(rates, input_tokens=1, output_tokens=1) is None
+
+
+def test_haiku_4_5_still_priced_as_haiku_4_5() -> None:
+    rates = _real_rates("claude-haiku-4-5")
+    assert rates.display_name == "Haiku 4.5"
+    assert rates.input_rate == 1_000_000
+    assert rates.long_prompt is None
+
+
+def test_haiku_5_5_short_prompt_golden_prices() -> None:
+    """Prompt up to 100,000 tokens: $0.10 in, $0.50 out, $0.125 cache write,
+    $0.01 cache hit per million tokens."""
+    rates = _real_rates("claude-haiku-5-5")
+    # 100,000 input tokens is NOT over the threshold: $0.01 in plus
+    # 100,000 output tokens at $0.50 per million = $0.05.
+    assert token_cost_units(rates, input_tokens=100_000, output_tokens=100_000) == 100 + 500
+    assert token_cost_units(
+        rates, input_tokens=0, output_tokens=0, cache_creation_tokens=80_000,
+    ) == 100
+    assert token_cost_units(
+        rates, input_tokens=0, output_tokens=0, cache_read_tokens=50_000,
+    ) == 5
+
+
+def test_haiku_5_5_long_prompt_golden_prices() -> None:
+    """Prompt over 100,000 tokens: $0.50 in, $2.50 out, $0.625 cache write,
+    $0.05 cache hit per million tokens. The output rate also rises."""
+    rates = _real_rates("claude-haiku-5-5")
+    # 200,000 in at $0.50/M = $0.10 (1,000 units), 100,000 out at $2.50/M =
+    # $0.25 (2,500 units).
+    assert token_cost_units(rates, input_tokens=200_000, output_tokens=100_000) == 1_000 + 2_500
+    # 200,000 cache-read tokens at $0.05/M = $0.01 (100 units).
+    assert token_cost_units(
+        rates, input_tokens=0, output_tokens=0, cache_read_tokens=200_000,
+    ) == 100
+
+
+def test_haiku_5_5_tier_boundary_is_strictly_over_100k() -> None:
+    rates = _real_rates("claude-haiku-5-5")
+    at_threshold = token_cost_units(rates, input_tokens=100_000, output_tokens=100_000)
+    just_over = token_cost_units(rates, input_tokens=100_001, output_tokens=100_000)
+    assert at_threshold == 600
+    # 100,001 in at $0.50/M floors to 500 units, plus 100,000 out at $2.50/M.
+    assert just_over == 500 + 2_500
+
+
+def test_haiku_5_5_cached_tokens_count_toward_the_tier() -> None:
+    """Cached tokens are part of the prompt, so 60,000 input plus 60,000 cache
+    read is a 120,000-token prompt and uses the long-prompt rates."""
+    rates = _real_rates("claude-haiku-5-5")
+    cost = token_cost_units(
+        rates, input_tokens=60_000, output_tokens=0, cache_read_tokens=60_000,
+    )
+    # 60,000 in at $0.50/M = 300 units, 60,000 cache read at $0.05/M = 30 units.
+    assert cost == 300 + 30
+
+
+def test_token_row_applies_the_tier_per_call() -> None:
+    """A token-log row is one call, so _row_cost uses that call's own size."""
+    rates = _real_rates("claude-haiku-5-5")
+    small = TokenEntry(agent="a", model="claude-haiku-5-5", input_tokens=90_000, output_tokens=1_000)
+    big = TokenEntry(agent="b", model="claude-haiku-5-5", input_tokens=150_000, output_tokens=1_000)
+    assert _row_cost(small, rates) == token_cost_units(rates, input_tokens=90_000, output_tokens=1_000)
+    assert _row_cost(big, rates) == token_cost_units(rates, input_tokens=150_000, output_tokens=1_000)
+    # Two 90,000-token calls are each under the threshold, so the log total is
+    # twice one row, not a long-prompt charge on a summed 180,000.
+    totals = compute_totals([small, small], load_pricing(str(_REAL_PRICING_FILE)))
+    assert totals.cost_units == 2 * (_row_cost(small, rates) or 0)
+
+
+def test_unpriced_model_still_returns_none() -> None:
+    """The fail-closed signal the eval spend guard depends on: a model with no
+    pricing row has zero rates and token_cost_units returns None."""
+    assert token_cost_units(_real_rates("claude-haiku-9-9"), input_tokens=1, output_tokens=1) is None
+
+
+@pytest.mark.parametrize(
+    "bad_tier",
+    [
+        "not an object",
+        {"threshold": 0, "input_rate": 500000, "output_rate": 2500000},
+        {"threshold": 100000, "input_rate": 0, "output_rate": 2500000},
+        {"threshold": 100000, "input_rate": 500000, "output_rate": 0},
+        {"input_rate": 500000, "output_rate": 2500000},
+        {},
+    ],
+)
+def test_malformed_long_prompt_tier_makes_the_model_unpriced(
+    bad_tier: object, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A present-but-unusable long_prompt tier must not fall back to the base
+    rates, which would under-count a model that is dearer for long prompts."""
+    data: list[dict[str, object]] = [
+        {
+            "patterns": ["claude-test-tier"],
+            "display_name": "Test Tier",
+            "input_rate": 100000,
+            "output_rate": 500000,
+            "long_prompt": bad_tier,
+        }
+    ]
+    rates = model_pricing("claude-test-tier", data)
+    assert token_cost_units(rates, input_tokens=1, output_tokens=1) is None
+    assert "malformed long_prompt" in capsys.readouterr().err
+
+
+def test_entry_without_long_prompt_key_is_unchanged() -> None:
+    rates = model_pricing("claude-sonnet-4-6", _SAMPLE_PRICING)
+    assert rates.long_prompt is None
+    assert token_cost_units(rates, input_tokens=_MILLION, output_tokens=0) == 30_000
+
+
+def test_pricing_file_golden_snapshot_matches_the_official_page() -> None:
+    """One table that mirrors the published page for the three models this repo
+    uses by default or evaluates. If Anthropic changes a price, update the page
+    snapshot here and the JSON together. The check reads dollars per million
+    tokens from the JSON rates (rate / 1,000,000)."""
+    expected = {
+        # model id: (input, output, cache write 5m, cache hit)
+        "claude-opus-5-5": (4.0, 20.0, 5.0, 0.20),
+        "claude-sonnet-5-5": (2.0, 10.0, 2.50, 0.10),
+        "claude-haiku-5-5": (0.10, 0.50, 0.125, 0.01),
+    }
+    for model_id, (inp, out, cw, cr) in expected.items():
+        rates = _real_rates(model_id)
+        assert rates.input_rate / _MILLION == pytest.approx(inp), model_id
+        assert rates.output_rate / _MILLION == pytest.approx(out), model_id
+        assert rates.cache_write_rate / _MILLION == pytest.approx(cw), model_id
+        assert rates.cache_read_rate / _MILLION == pytest.approx(cr), model_id
+    long_prompt = _real_rates("claude-haiku-5-5").long_prompt
+    assert long_prompt is not None
+    assert long_prompt.threshold == 100_000
+    assert long_prompt.input_rate / _MILLION == pytest.approx(0.50)
+    assert long_prompt.output_rate / _MILLION == pytest.approx(2.50)
+    assert long_prompt.cache_write_rate / _MILLION == pytest.approx(0.625)
+    assert long_prompt.cache_read_rate / _MILLION == pytest.approx(0.05)

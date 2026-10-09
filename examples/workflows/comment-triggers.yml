@@ -1,4 +1,4 @@
-# AI PR Review — standalone slash command trigger
+# AI PR Review: standalone slash command trigger
 #
 # ── You probably do not need this file ───────────────────────────────────────
 #
@@ -8,7 +8,7 @@
 #
 # This file is kept for existing consumers who already have a two-file setup
 # (ai-pr-review.yml + ai-pr-review-commands.yml).  It continues to work
-# unchanged — the reusable workflow it calls has not changed.  No migration is
+# unchanged: the reusable workflow it calls has not changed.  No migration is
 # required.  If you prefer a single file, copy pr-review.yml over your existing
 # ai-pr-review.yml and delete ai-pr-review-commands.yml.
 #
@@ -22,16 +22,16 @@
 # secrets and optional provider configuration below.
 #
 # Supported commands (post as a PR comment):
-#   /ai-pr-review rescan                  — force full diff, re-run review
-#   /ai-pr-review review-full             — run in full mode (all agents)
-#   /ai-pr-review skip                    — add skip-ai-review label to suppress next review
-#   /ai-pr-review dismiss                 — reply to an INLINE finding to dismiss it
-#   /ai-pr-review dismiss F<n>            — dismiss a BODY-LEVEL finding by its stable ID
+#   /ai-pr-review rescan: force full diff, re-run review
+#   /ai-pr-review review-full: run in full mode (all agents)
+#   /ai-pr-review skip: add skip-ai-review label to suppress next review
+#   /ai-pr-review dismiss: reply to an INLINE finding to dismiss it
+#   /ai-pr-review dismiss F<n>: dismiss a BODY-LEVEL finding by its stable ID
 #                                           (e.g. /ai-pr-review dismiss F1)
-#   /ai-pr-review fixed [F<n>] [sha]      — mark a finding fixed in code; same resolve/dismiss
+#   /ai-pr-review fixed [F<n>] [sha]: mark a finding fixed in code; same resolve/dismiss
 #                                           mechanics as dismiss, but never auto-approves and
 #                                           never writes to the learning loop
-#   /ai-pr-review help                    — post the command list as a reply
+#   /ai-pr-review help: post the command list as a reply
 #
 # Body-level findings (in "### Findings not attached to specific lines") carry stable
 # per-PR IDs (**[F1]**, **[F2]**, etc.) that persist across review cycles. Use F<n>
@@ -39,24 +39,24 @@
 #
 # Learning-loop commands (require enable-feedback-loop: 'true' below, plus
 # a GH_TOKEN with contents:write on the ai-pr-review-bot branch; OWNER/MEMBER only):
-#   /ai-pr-review false-positive [F<n>] [reason] — persist a false-positive verdict
-#   /ai-pr-review wont-fix [F<n>] [reason]       — persist a "won't fix" verdict
-#   /ai-pr-review feedback <text>                — persist free-form feedback
-#   /ai-pr-review explain [F<n>]                 — request an expanded explanation (stub)
-#   /ai-pr-review revise [F<n>] <hint>           — request a revised verdict (stub)
+#   /ai-pr-review false-positive [F<n>] [reason]: persist a false-positive verdict
+#   /ai-pr-review wont-fix [F<n>] [reason]: persist a "won't fix" verdict
+#   /ai-pr-review feedback <text>: persist free-form feedback
+#   /ai-pr-review explain [F<n>]: request an expanded explanation (stub)
+#   /ai-pr-review revise [F<n>] <hint>: request a revised verdict (stub)
 #
 # Requirements:
 #   - ANTHROPIC_API_KEY secret (or your provider's key)
 #   - GH_TOKEN secret: a PAT with repo scope (classic) or pull_requests:write +
 #     metadata:read (fine-grained). GITHUB_TOKEN cannot resolve review threads
-#     from pull_request_review_comment events — the dismiss command requires a PAT.
+#     from pull_request_review_comment events: the dismiss command requires a PAT.
 #   - Only users with write access to this repo can trigger commands
 #
 # Optional repo variables (Settings -> Variables -> New repository variable):
-#   AI_REVIEW_ANALYZERS          — allowlist of analyzers to run (comma-separated)
-#   AI_REVIEW_EXCLUDE_ANALYZERS  — denylist of analyzers to skip (e.g. 'phpstan,phpcs')
-#   AI_REVIEW_AGENTS             — allowlist of review agents to run (comma-separated)
-#   AI_REVIEW_EXCLUDE_AGENTS     — denylist of review agents to skip
+#   AI_REVIEW_ANALYZERS: allowlist of analyzers to run (comma-separated)
+#   AI_REVIEW_EXCLUDE_ANALYZERS: denylist of analyzers to skip (e.g. 'phpstan,phpcs')
+#   AI_REVIEW_AGENTS: allowlist of review agents to run (comma-separated)
+#   AI_REVIEW_EXCLUDE_AGENTS: denylist of review agents to skip
 #   Setting these here ensures rescan and review-full honor the same filtering as the
 #   main PR-triggered review. Leave unset to run all eligible analyzers and agents.
 #
@@ -64,7 +64,7 @@
 # the default branch only. Changes to this file take effect only after they are
 # merged to the default branch.
 
-name: AI PR Review — slash commands
+name: AI PR Review, slash commands
 
 on:
   issue_comment:
@@ -158,6 +158,7 @@ jobs:
       feedback-loop: ${{ vars.AI_REVIEW_FEEDBACK_LOOP || 'false' }}
       token-usage-display: ${{ vars.AI_REVIEW_TOKEN_USAGE_DISPLAY || 'compact' }}
       suppress-walkthrough: ${{ vars.AI_REVIEW_SUPPRESS_WALKTHROUGH || 'false' }}
+      finding-badges: ${{ vars.AI_REVIEW_FINDING_BADGES || 'true' }}
       token-usage-warn-usd: ${{ vars.AI_REVIEW_TOKEN_USAGE_WARN_USD || '1.00' }}
       max-cost-usd: ${{ vars.AI_REVIEW_MAX_COST_USD || '0' }}
       fail-on-cost-ceiling: ${{ vars.AI_REVIEW_FAIL_ON_COST_CEILING || 'false' }}
@@ -169,7 +170,7 @@ jobs:
       analyzer-diff-scope: ${{ vars.AI_REVIEW_ANALYZER_DIFF_SCOPE || 'cap' }}
     secrets:
       api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-      # GH_TOKEN must be a PAT (repo scope) or GitHub App token — not GITHUB_TOKEN.
+      # GH_TOKEN must be a PAT (repo scope) or GitHub App token: not GITHUB_TOKEN.
       # Required only for the dismiss command's resolveReviewThread mutation.
       # See: docs/slash-commands.md#pat-requirement
       github-token: ${{ secrets.GH_TOKEN }}

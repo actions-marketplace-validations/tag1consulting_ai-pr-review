@@ -1,0 +1,23 @@
+{
+  "clean": false,
+  "source": "seeded",
+  "evidence": "strong",
+  "verified_by": "by construction (tests/canary/corpus/README.md)",
+  "bugs": [
+    {
+      "file": "internal/storage/sync.go",
+      "line_start": 15,
+      "line_end": 15,
+      "category": "edge-case",
+      "summary": "deferred f.Close() return value is ignored on a file that was written, so a failed flush goes unreported"
+    },
+    {
+      "file": "internal/storage/sync.go",
+      "line_start": 29,
+      "line_end": 29,
+      "category": "edge-case",
+      "summary": "unchecked type assertion raw[key].(string) panics when the key is missing or not a string"
+    }
+  ],
+  "accepted_extra": []
+}
