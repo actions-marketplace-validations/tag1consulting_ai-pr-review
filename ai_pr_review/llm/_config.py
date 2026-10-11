@@ -15,17 +15,23 @@ import sys
 # explicit instead of relying on substring luck (see issue tracking the Opus
 # 5.5 rollout).
 #
-# The trailing lookahead is `(?![-.]\d(?!\d))`, not the simpler `(?![-.\d])`:
-# a plain `(?![-.\d])` also rejects a dated snapshot suffix like
-# "-20260915" (Anthropic's own model-naming convention, and AI_MODEL_STANDARD/
-# AI_MODEL_PREMIUM are free-form env vars a user could set to one), which is a
-# real multi-digit run, not a single sibling-version digit -- that would
-# silently stop stripping temperature and stop capping effort for a
-# dated Opus 5 snapshot, reintroducing the HTTP-400/180s-timeout failures this
-# module exists to prevent. `(?![-.]\d(?!\d))` excludes only a single trailing
-# version digit (matches opus-5-9, rejects it) while still accepting a
-# multi-digit date suffix (opus-5-20260915 matches the opus-5 family).
-_OPUS_5_FAMILY_RE = re.compile(r"opus-5(?:[-.]5)?(?![-.]\d(?!\d))")
+# The trailing lookahead is `(?!\d)(?![-.]\d(?!\d))`, not the simpler
+# `(?![-.\d])`:
+#   * A plain `(?![-.\d])` also rejects a dated snapshot suffix like
+#     "-20260915" (Anthropic's own model-naming convention, and
+#     AI_MODEL_STANDARD/AI_MODEL_PREMIUM are free-form env vars a user could
+#     set to one), which is a real multi-digit run, not a single
+#     sibling-version digit -- that would silently stop stripping temperature
+#     and stop capping effort for a dated Opus 5 snapshot, reintroducing the
+#     HTTP-400/180s-timeout failures this module exists to prevent.
+#   * `(?![-.]\d(?!\d))` alone excludes a single trailing version digit
+#     reached through a separator (matches opus-5-9, rejects it) while still
+#     accepting a multi-digit date suffix (opus-5-20260915 matches the
+#     opus-5 family) -- but it does NOT catch a digit appended with no
+#     separator at all, e.g. "opus-59" (same class of gap fixed in
+#     config/model-pricing.json's Opus 5.5 patterns). The leading `(?!\d)`
+#     closes that gap.
+_OPUS_5_FAMILY_RE = re.compile(r"opus-5(?:[-.]5)?(?!\d)(?![-.]\d(?!\d))")
 
 
 def _is_opus_5_family(lower_model_id: str) -> bool:
@@ -90,6 +96,12 @@ def resolve_temperature(raw: float, model_id: str) -> float | None:
     claude-opus-5-5 becomes the default (see the model-change verification
     process in this repo's CLAUDE.md).
 
+    claude-haiku-5-5 was verified live on 2026-10-08 with an explicit
+    temperature of 0.3: HTTP 400 `temperature` is deprecated for this model.
+    With temperature omitted the same call returned HTTP 200. The "haiku-5"
+    substring check below covers it. claude-haiku-4-5 does not contain
+    "haiku-5" and keeps its temperature.
+
     gpt-5.6-* (luna/terra/sol) and gpt-6* (luna/sol/astra, gpt-6.1-sol) are
     included for the same reason as gpt-5.5: these reasoning models accept only
     the default temperature of 1, per third-party reports, NOT live-verified
@@ -119,6 +131,7 @@ def resolve_temperature(raw: float, model_id: str) -> float | None:
         or "opus-4-7" in lower
         or "opus-4.7" in lower
         or "sonnet-5" in lower
+        or "haiku-5" in lower
         or lower.startswith("o1")
         or lower.startswith("o3")
         or lower.startswith("o4")
@@ -162,6 +175,16 @@ def resolve_effort(model_id: str) -> str | None:
     NOT that it is necessary (nothing was run uncapped) and NOT that it is the
     best setting for review quality.
 
+    claude-haiku-5-5 also has adaptive thinking on by default (default effort
+    "medium"). Live run 2026-10-08, tests/canary/stress_diff.txt, code-reviewer
+    and silent-failure-hunter, max_tokens 32768, no effort cap: both ended with
+    stop_reason=end_turn, spent 4,422 and 4,260 thinking tokens (of 5,694 and
+    6,445 output tokens), and took 26s and 31s. With effort="low" the API
+    accepted the parameter and both ended with end_turn again, with 2,482 and
+    2,994 thinking tokens (of 3,523 and 4,592 output tokens) and 17s and 22s.
+    So "low" is accepted and bounds thinking on this diff. That is one diff and
+    two agents, not a general guarantee, and "low" is not shown to be optimal.
+
     claude-opus-5-5 cannot disable thinking at all (per Anthropic's docs,
     unlike Opus 5 which could disable it below effort "xhigh"), and its
     default effort is "medium" (one step below Opus 5's default "high") --
@@ -176,7 +199,7 @@ def resolve_effort(model_id: str) -> str | None:
     general guarantee.
     """
     lower = model_id.lower()
-    if "sonnet-5" in lower or _is_opus_5_family(lower):
+    if "sonnet-5" in lower or "haiku-5" in lower or _is_opus_5_family(lower):
         return "low"
     return None
 

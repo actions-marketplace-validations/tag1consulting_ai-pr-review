@@ -1,4 +1,4 @@
-# AI PR Review — repo-local review policy
+# AI PR Review: repo-local review policy
 #
 # Copy this file to .ai-pr-review/policy.yml in your repo and edit to
 # taste. (.github/ai-pr-review/policy.yml still works as a fallback for
@@ -8,7 +8,7 @@
 # ── How this is loaded ────────────────────────────────────────────────────
 #
 # Read via `git show origin/{base-ref}:.ai-pr-review/policy.yml` (falling
-# back to .github/ai-pr-review/policy.yml) — from the PR's BASE branch,
+# back to .github/ai-pr-review/policy.yml) from the PR's BASE branch,
 # never from the PR's own working tree. A PR
 # that edits this file has no effect on its own review; the file that
 # governs a PR's review is whatever is committed on the target branch.
@@ -23,7 +23,7 @@
 #   3. This file's route matching
 #   4. Engine default (quick mode, no agent/analyzer restriction)
 #
-# A repo with no policy.yml sees no behavior change at all — this file is
+# A repo with no policy.yml sees no behavior change at all: this file is
 # entirely opt-in.
 #
 # ── Requiring a tier before merge (GitHub only) ───────────────────────────
@@ -31,7 +31,7 @@
 # A route can set `require: <policy-name>` to post a GitHub check run named
 # ai-pr-review/policy-gate: 'success' once a run at that tier (or full
 # mode) has completed for the current commit, 'action_required' (never
-# 'failure') otherwise — an unmet requirement on an ordinary automatic
+# 'failure') otherwise: an unmet requirement on an ordinary automatic
 # push is an unactioned manual step, not a defect, but it still blocks
 # merge: GitHub treats 'neutral' as satisfying a required status check,
 # so 'action_required' is used instead of 'neutral' to actually gate.
@@ -53,14 +53,14 @@
 
 version: 1
 
-# Named policies. `extends` is either a built-in base ('quick' or 'full' —
+# Named policies. `extends` is either a built-in base ('quick' or 'full',
 # reproducing today's roster exactly) or another policy defined below.
 # `agents` / `exclude-agents` / `analyzers` / `exclude-analyzers` override
 # the extended base for that field only; an unset field inherits from
 # `extends`. Omitting `extends` implies 'quick'.
 policies:
   # Near-zero-cost review for content-only changes (e.g. a static site's
-  # copy/content directories). Runs no agents and no static analyzers —
+  # copy/content directories). Runs no agents and no static analyzers,
   # useful when a route matches paths that are never code.
   content:
     agents: []
@@ -80,13 +80,13 @@ policies:
     extends: quick
     agents: [code-reviewer, silent-failure-hunter, edge-case-hunter]
 
-  # Full mode, unmodified — the deepest tier available. Pair with `require`
+  # Full mode, unmodified: the deepest tier available. Pair with `require`
   # below to gate merge on this tier having run at least once.
   deep:
     extends: full
 
 # Ordered routes. The first route whose `when` matches the PR wins. Each
-# route must constrain at least one of paths/base-branch/head-branch — an
+# route must constrain at least one of paths/base-branch/head-branch: an
 # unconstrained route would match every PR and silently shadow every route
 # after it, so the file is rejected if one is found.
 routes:
@@ -97,7 +97,7 @@ routes:
 
   # PRs targeting a staging-* branch get the integration smoke-test tier,
   # and MUST have a 'deep' (full-mode) review run at least once before
-  # merge — `require` posts the ai-pr-review/policy-gate check run; add it
+  # merge: `require` posts the ai-pr-review/policy-gate check run; add it
   # as a required branch-protection check on staging-* to enforce it. An
   # automatic push only satisfies `require` if it happens to run at 'deep'
   # or full mode; otherwise a maintainer runs `/ai-pr-review review-full`
@@ -106,7 +106,7 @@ routes:
     policy: integration
     require: deep
 
-  # Release-branch escalation — replaces a hand-rolled
+  # Release-branch escalation: replaces a hand-rolled
   # startsWith(head.ref, 'release/') workflow expression.
   - when: {head-branch: 'release/*'}
     policy: deep

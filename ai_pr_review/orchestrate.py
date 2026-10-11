@@ -116,6 +116,9 @@ class OrchestrationConfig:
     enable_judge_pass: bool = True
     judge_model: str = ""
     judge_prompt_path: Path | None = None
+    # Show an evidence label and score beside each finding (findings/badge.py).
+    # Display only. Mirrors ReviewConfig.finding_badges.
+    finding_badges: bool = False
 
 
 TokenRenderer = Callable[
@@ -302,6 +305,12 @@ async def run_review(
             logger.warning(
                 "judge pass raised unexpectedly (fail-soft): %s", exc, exc_info=True
             )
+
+    # Phase 2.8: evidence labels. Display text only. Runs after the judge so the
+    # label can use the judge verdict, and before outcome classification, which
+    # never reads it.
+    if cfg.finding_badges and kept:
+        kept = [f.model_copy(update={"show_badge": True}) for f in kept]
 
     # Phase 3: outcome classification.
     # classify_review_outcome's Protocol declares severity: str; Finding's

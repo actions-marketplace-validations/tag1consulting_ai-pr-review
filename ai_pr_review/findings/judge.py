@@ -40,6 +40,8 @@ logger = logging.getLogger(__name__)
 
 JUDGE_DOWNRANK_AMOUNT: int = 15
 
+_KNOWN_VERDICTS = frozenset({"keep", "downrank"})
+
 
 @dataclass(frozen=True)
 class JudgeResult:
@@ -93,11 +95,12 @@ def _apply_verdicts(
       set demoted_to_body=True so the finding routes to the review body, and
       set judge_verdict="downrank". Severity is intentionally untouched.
     - ``keep`` → unchanged apart from judge_verdict="keep".
-    - Missing verdict id defaults to ``keep`` (placement-wise, this is the
-      correct fail-soft default). A verdict id the judge's response omitted
-      entirely is logged as a coverage gap — see the warning below — so it
-      stays distinguishable in logs from a genuine "keep" verdict, even
-      though both persist the same ``judge_verdict="keep"`` value today.
+    - A finding with no usable verdict (the response omitted its id, or gave a
+      verdict name that is not known) is returned unchanged. Placement is the
+      same as ``keep``, which is the correct fail-soft default, but
+      ``judge_verdict`` stays ``None`` so the finding is not shown as
+      "judge kept" and the feedback store does not record a verdict the judge
+      never gave. Both cases are logged as warnings.
 
     Note: the judge pass runs on ``kept`` *after* ``apply_diff_scope`` (see
     orchestrate.py's pipeline order), so a finding can legitimately reach this
@@ -119,7 +122,7 @@ def _apply_verdicts(
             if not (0 <= vid < len(kept)):
                 logger.warning("judge: verdict id %d out of range [0, %d); skipping", vid, len(kept))
                 continue
-            verdict_str = str(v.get("verdict", "keep"))
+            verdict_str = str(v.get("verdict"))
             id_to_verdict[vid] = verdict_str
         except (KeyError, TypeError, ValueError):
             continue
@@ -127,8 +130,7 @@ def _apply_verdicts(
     if len(id_to_verdict) < len(kept):
         logger.warning(
             "judge: response covered %d/%d candidate id(s); %d finding(s) "
-            "will persist judge_verdict=\"keep\" with no way to distinguish "
-            "an omitted id from a genuine keep verdict",
+            "get no judge verdict and are left unjudged",
             len(id_to_verdict), len(kept), len(kept) - len(id_to_verdict),
         )
 
@@ -139,7 +141,20 @@ def _apply_verdicts(
         # Computed for every finding, corroborated or not: this is the raw
         # verdict the judge assigned, independent of whether corroboration
         # goes on to override its placement effect below.
-        verdict_raw = id_to_verdict.get(idx, "keep")
+        verdict_raw = id_to_verdict.get(idx)
+        if verdict_raw is None:
+            # Omitted id: already counted in the coverage warning above.
+            result.append(finding)
+            continue
+        if verdict_raw not in _KNOWN_VERDICTS:
+            # A typo or a new verdict name must not look like the judge kept the
+            # finding. Leave it unjudged: same placement as keep, no verdict.
+            logger.warning(
+                "judge: unrecognized verdict %r for finding %d; leaving it unjudged",
+                verdict_raw, idx,
+            )
+            result.append(finding)
+            continue
         verdict: JudgeVerdict = "downrank" if verdict_raw == "downrank" else "keep"
 
         if finding.corroborated:

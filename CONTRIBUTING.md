@@ -84,13 +84,13 @@ def _run_yourtool(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]
 ```
 
 Key rules (see any file in `ai_pr_review/analyzers/native/` for the full pattern, e.g. `ruff.py`):
-- Signature is exactly `(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]` — this is the `NativeAnalyzerFn` type alias in `bridge.py`. `ChangedFiles` (from `ai_pr_review/manifest.py`) is the pre-categorized, typed set of changed files; filter to the relevant typed list (`changed_files.python`, `changed_files.go`, `changed_files.source`, etc.) rather than re-deriving file types yourself.
+- Signature is exactly `(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]` (this is the `NativeAnalyzerFn` type alias in `bridge.py`). `ChangedFiles` (from `ai_pr_review/manifest.py`) is the pre-categorized, typed set of changed files; filter to the relevant typed list (`changed_files.python`, `changed_files.go`, `changed_files.source`, etc.) rather than re-deriving file types yourself.
 - `Finding` comes from `ai_pr_review.findings.models`, not `ai_pr_review.models` (no such module exists).
-- Return `[]` and log a `logger.warning("[ai-pr-review] WARNING: ...")` if the binary is missing (`shutil.which`), on a `subprocess.TimeoutExpired`, on an `OSError`, or on any other failure to run — every guard rail fails soft, never raises.
+- Return `[]` and log a `logger.warning("[ai-pr-review] WARNING: ...")` if the binary is missing (`shutil.which`), on a `subprocess.TimeoutExpired`, on an `OSError`, or on any other failure to run: every guard rail fails soft, never raises.
 - Wrap each `Finding(...)` construction in its own `try/except (ValueError, TypeError)` so one malformed item doesn't drop the whole run.
 - Hard-code the `source` field to your tool name as a module-level `_SOURCE` constant.
 - Match the severity mapping used by existing analyzers: `"Critical"` → `"High"` → `"Medium"` → `"Low"`, with a module-level `_CONFIDENCE` constant (see the table in `docs/static-analyzers.md` for the range other analyzers use, roughly 80-95 by tool maturity).
-- **`Finding.file` must be repo-relative**, matching the diff and the `changed_files` manifest it's built from (see `manifest.py`). Many CLI tools (ruff, eslint, phpcs, phpstan) resolve reported paths to absolute regardless of how the file was named on the command line. If your tool does this, strip the prefix with `ai_pr_review.analyzers.native._paths.strip_workspace_prefix()` before constructing the `Finding` — it prefers `GITHUB_WORKSPACE` when set, falling back to `os.getcwd()`, so it works whether cwd is the checkout root (local/dev) or not (the container case). Do not hand-roll a `str(Path.cwd()) + "/"` strip: that leaks an absolute path whenever cwd != `GITHUB_WORKSPACE`, silently downgrading every such finding's diff-scope match to out-of-diff/Low (see issue #713, and its recurrence at #846) — `findings/scope.py`'s `apply_diff_scope` logs a warning when this happens, so check the run log for `"absolute file path"` if a new analyzer's findings look suspiciously all-Low.
+- **`Finding.file` must be repo-relative**, matching the diff and the `changed_files` manifest it's built from (see `manifest.py`). Many CLI tools (ruff, eslint, phpcs, phpstan) resolve reported paths to absolute regardless of how the file was named on the command line. If your tool does this, strip the prefix with `ai_pr_review.analyzers.native._paths.strip_workspace_prefix()` before constructing the `Finding`. It prefers `GITHUB_WORKSPACE` when set, falling back to `os.getcwd()`, so it works whether cwd is the checkout root (local/dev) or not (the container case). Do not hand-roll a `str(Path.cwd()) + "/"` strip: that leaks an absolute path whenever cwd != `GITHUB_WORKSPACE`, silently downgrading every such finding's diff-scope match to out-of-diff/Low (see issue #713, and its recurrence at #846). `findings/scope.py`'s `apply_diff_scope` logs a warning when this happens, so check the run log for `"absolute file path"` if a new analyzer's findings look suspiciously all-Low.
 
 ### 2. Register in the bridge
 
@@ -105,7 +105,7 @@ _ANALYZERS: list[AnalyzerSpec] = [
 ]
 ```
 
-`AnalyzerSpec`'s second field is `required_file_types`: a list of `ChangedFiles` attribute names (e.g. `["python"]`, `["go"]`) that gates eligibility — the analyzer only runs when at least one of those lists is non-empty. Pass `[]` to always run (like `semgrep`/`trufflehog`/`docs-drift-check`). `ANALYZER_NAMES` (used by the `analyzers`/`exclude-analyzers` allowlist validation) derives automatically from this list — no separate registration needed there.
+`AnalyzerSpec`'s second field is `required_file_types`: a list of `ChangedFiles` attribute names (e.g. `["python"]`, `["go"]`) that gates eligibility: the analyzer only runs when at least one of those lists is non-empty. Pass `[]` to always run (like `semgrep`/`trufflehog`/`docs-drift-check`). `ANALYZER_NAMES` (used by the `analyzers`/`exclude-analyzers` allowlist validation) derives automatically from this list: no separate registration needed there.
 
 **Also add your analyzer's name to `_ANALYZER_PREFIXES` in `ai_pr_review/findings/scope.py`.** This is a second, easy-to-miss registration site: without it, your analyzer's findings are never diff-scoped, never rolled up, and never counted as corroborating an LLM agent's finding on the same issue.
 
@@ -127,7 +127,7 @@ Create `prompts/<agent-name>.md`. The prompt must instruct the model to output a
 
 ### 2. Register in the agent roster
 
-Add an `AgentSpec` entry to `ai_pr_review/agents/roster.py` with the agent name, prompt path, tier (1 or 2 — controls parallel dispatch group), `max_output_tokens`, `full_mode_only` flag, `conditional_trigger` (file-pattern or `None`), and `context_enrichment_eligible` flag. `max_output_tokens` is this agent's default output-token budget — anyone can raise or lower it per-run without editing code via `AI_MAX_TOKENS_<AGENT_NAME_UPPER_SNAKE>` (issue #191), so pick a value that reflects the agent's typical output size rather than a defensive maximum. If the agent composes its own `LLMRequest` outside the tier-dispatch path (as `pr-summarizer`/`issue-linker` do), resolve its default from `get_agent("<name>").max_output_tokens` rather than hardcoding a literal — issue #847 was exactly this drift (a hand-typed `4096` silently diverged from the roster's own `16384`).
+Add an `AgentSpec` entry to `ai_pr_review/agents/roster.py` with the agent name, prompt path, tier (1 or 2: controls parallel dispatch group), `max_output_tokens`, `full_mode_only` flag, `conditional_trigger` (file-pattern or `None`), and `context_enrichment_eligible` flag. `max_output_tokens` is this agent's default output-token budget. Anyone can raise or lower it per-run without editing code via `AI_MAX_TOKENS_<AGENT_NAME_UPPER_SNAKE>` (issue #191), so pick a value that reflects the agent's typical output size rather than a defensive maximum. If the agent composes its own `LLMRequest` outside the tier-dispatch path (as `pr-summarizer`/`issue-linker` do), resolve its default from `get_agent("<name>").max_output_tokens` rather than hardcoding a literal. Issue #847 was exactly this drift (a hand-typed `4096` silently diverged from the roster's own `16384`).
 
 ### 3. Add conditional gate logic (if needed)
 
@@ -147,7 +147,7 @@ If your agent produces concrete line-level fixes, set `suggestion_eligible=True`
 
 ## Adding a language profile
 
-1. Create `language-profiles/<language>.md` — the filename (without `.md`) must match the lowercase language key returned by `detect_language()` in `ai_pr_review/languages.py`.
+1. Create `language-profiles/<language>.md`: the filename (without `.md`) must match the lowercase language key returned by `detect_language()` in `ai_pr_review/languages.py`.
 2. Register the new extension(s) in `ai_pr_review/languages.py:_EXT_MAP` if they are not already mapped.
 3. The file content is injected verbatim into the agent prompt context when that language is detected in the diff.
 4. See [CLAUDE.md](CLAUDE.md#adding-a-language-profile) for the full extension-to-language mapping.
@@ -186,17 +186,17 @@ Feature and issue PRs target the current release branch (`release/vX.Y.Z`), not 
 
 Before opening a pull request:
 
-- [ ] `python -m pytest tests/python/ -q` — all tests pass
-- [ ] `ruff check ai_pr_review/` and `mypy ai_pr_review/` — no new lint or type errors
+- [ ] `python -m pytest tests/python/ -q`: all tests pass
+- [ ] `ruff check ai_pr_review/` and `mypy ai_pr_review/`: no new lint or type errors
 - [ ] Update `CLAUDE.md` if you changed interfaces (new env vars, changed function signatures)
-- [ ] If you added an `AI_*` env var, register it in `_KNOWN_AI_VARS` in `ai_pr_review/config.py` and add a `from_env()` field — otherwise the engine raises `ConfigError` at startup
+- [ ] If you added an `AI_*` env var, register it in `_KNOWN_AI_VARS` in `ai_pr_review/config.py` and add a `from_env()` field. Otherwise the engine raises `ConfigError` at startup
 - [ ] If you added an input to `container-action/action.yml` (or `action.yml`), also forward it to `container-action` from `.github/workflows/slash-commands.yml`'s review-dispatch step, unless it's genuinely GitHub-context/connection plumbing rather than a review-tuning knob. Issues #516 and #863 both shipped an input that worked on the automatic `pull_request`-triggered review but silently had no effect on `/ai-pr-review rescan`/`review-full` because this step was skipped. `tests/python/test_slash_commands_container_action_parity.py` enforces this for every input not explicitly exempted there: add a new input to its exemption list (with a reason) only if it's genuinely not a review-tuning knob
 - [ ] Update `README.md` and `docs/` pages if you changed user-facing behavior
-- [ ] `CHANGELOG.md` entries describe merged code in this PR only — never planned or intended follow-up work tracked on a separate issue. If a PR's own description promises a future pass, do not write that pass's outcome into the changelog until it actually merges
+- [ ] `CHANGELOG.md` entries describe merged code in this PR only: never planned or intended follow-up work tracked on a separate issue. If a PR's own description promises a future pass, do not write that pass's outcome into the changelog until it actually merges
 - [ ] Run `/comprehensive-review --quick` to catch issues before the CI review
 
 ## Code style
 
 - Python code follows PEP 8; ruff enforces E, F, W, I, UP, B, and SIM rule sets
-- Native analyzer modules use the mock env var pattern for testing — never call real binaries in tests
+- Native analyzer modules use the mock env var pattern for testing: never call real binaries in tests
 - Findings JSON uses the schema documented in [docs/architecture-internals.md](docs/architecture-internals.md#agent-output-schema)

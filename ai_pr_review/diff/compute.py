@@ -7,6 +7,8 @@ import subprocess
 import tempfile
 from dataclasses import dataclass, field
 
+from ai_pr_review.diff.parse import safe_decode_git_path
+
 logger = logging.getLogger(__name__)
 
 
@@ -90,6 +92,19 @@ def _raise_on_git_diff_error(result: subprocess.CompletedProcess[str], range_spe
         )
 
 
+# Pin the output format of every `git diff` the engine runs. The user's git config can change
+# it: core.quotePath quotes non-ASCII paths, diff.mnemonicPrefix and diff.noprefix change the
+# a/ and b/ prefixes, and diff.relative changes the paths. The diff parser (diff/parse.py) and
+# the changed-file list must see the same paths, so all three variants use the same pins.
+_GIT_FORMAT_CONFIG = [
+    "-c", "core.quotePath=false",
+    "-c", "diff.mnemonicPrefix=false",
+    "-c", "diff.noprefix=false",
+    "-c", "diff.relative=false",
+]
+_DIFF_FORMAT_OPTIONS = ["--src-prefix=a/", "--dst-prefix=b/", "--no-color", "--no-ext-diff"]
+
+
 def _diff_variants(
     git: list[str], range_spec: str, excludes: list[str]
 ) -> tuple[list[str], str, str]:
@@ -99,16 +114,18 @@ def _diff_variants(
         GitDiffError: if any of the three subprocesses exits non-zero (e.g.
             range_spec references a ref that doesn't exist locally).
     """
+    git = git + _GIT_FORMAT_CONFIG
     changed_result = subprocess.run(
-        git + ["diff", "--name-only", range_spec] + ["--"] + excludes,
+        git + ["diff", *_DIFF_FORMAT_OPTIONS, "--name-only", range_spec] + ["--"] + excludes,
         capture_output=True,
         text=True,
     )
     _raise_on_git_diff_error(changed_result, range_spec)
-    changed_files = [f for f in changed_result.stdout.splitlines() if f]
+    # core.quotePath=false still quotes a path that holds a quote, a backslash, or a control character.
+    changed_files = [safe_decode_git_path(f) for f in changed_result.stdout.splitlines() if f]
 
     stat_result = subprocess.run(
-        git + ["diff", "--stat", range_spec] + ["--"] + excludes,
+        git + ["diff", *_DIFF_FORMAT_OPTIONS, "--stat", range_spec] + ["--"] + excludes,
         capture_output=True,
         text=True,
     )
@@ -116,7 +133,7 @@ def _diff_variants(
     diff_stat = stat_result.stdout.strip().splitlines()[-1] if stat_result.stdout.strip() else ""
 
     diff_result = subprocess.run(
-        git + ["diff", range_spec] + ["--"] + excludes,
+        git + ["diff", *_DIFF_FORMAT_OPTIONS, range_spec] + ["--"] + excludes,
         capture_output=True,
         text=True,
     )

@@ -8,22 +8,15 @@ render_with_liquid: false
 
 # Installation: Direct action reference
 
-Use this installation method if you prefer to run without Docker. The root
-composite action installs shellcheck on the runner automatically but does
-**not** install other static analyzer binaries (semgrep, trufflehog, ruff,
-golangci-lint, hadolint, checkov, phpcs, phpstan, kube-linter, tflint, or
-eslint). See [Static analyzers](static-analyzers) for details. Each
-analyzer is a graceful no-op when its binary is absent.
+Use this installation method to run without Docker. The root composite action installs shellcheck on the runner automatically. It does **not** install other static analyzer binaries (semgrep, trufflehog, ruff, golangci-lint, hadolint, checkov, phpcs, phpstan, kube-linter, tflint, or eslint). See [Static analyzers](static-analyzers) for details. Each analyzer does nothing, without an error, when its binary is absent.
 
-For most new installs, prefer the
-[container action](getting-started) — it ships all analyzer binaries
-pre-installed at pinned versions.
+For most new installs, use the [container action](getting-started). It ships the analyzer binaries pre-installed at pinned versions.
 
 ## Prerequisites
 
-In this repo's settings, go to **Settings → Actions → General → Access** and
-set it to **"Accessible from repositories in the 'tag1consulting'
-organization"**. This allows other repos in the org to use it as an action.
+The `tag1consulting/ai-pr-review` repository is public. You do not need to change any Actions access setting to use it as an action.
+
+If you use a private fork or mirror, set its access in **Settings → Actions → General → Access**. Choose the option that lets your other repositories use the action.
 
 ## 1. Create the workflow
 
@@ -46,9 +39,9 @@ concurrency:
 
 jobs:
   review:
-    # head.repo.full_name check is defense-in-depth against fork PRs, which
-    # cannot access secrets anyway but should not trigger review jobs that
-    # hold pull-requests: write.
+    # The head.repo.full_name check is defense in depth against fork PRs.
+    # Fork PRs cannot access secrets anyway. They also should not start review
+    # jobs that hold pull-requests: write.
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.draft == false &&
@@ -86,8 +79,8 @@ jobs:
           ignore-merge-commits: ${{ vars.AI_REVIEW_IGNORE_MERGE_COMMITS || 'true' }}
           fail-on-findings: ${{ vars.AI_REVIEW_FAIL_ON_FINDINGS || 'true' }}
 
-  # Always attempt to remove the ai-review-rescan label after the review,
-  # even if the review job was cancelled by the concurrency rule on a new push.
+  # Always try to remove the ai-review-rescan label after the review.
+  # This also runs if the concurrency rule cancelled the review job on a new push.
   cleanup-rescan-label:
     needs: review
     if: >-
@@ -109,19 +102,18 @@ jobs:
             || true
 ```
 
-The snippet above uses the `@v4` tag for readability. To pin third-party actions to commit SHAs (recommended), copy [`examples/workflows/pr-review.yml`](https://github.com/tag1consulting/ai-pr-review/blob/main/examples/workflows/pr-review.yml), which is kept pinned and updated by Renovate.
+The snippet above uses the `@v4` tag for readability. To pin third-party actions to commit SHAs (recommended), copy [`examples/workflows/pr-review.yml`](https://github.com/tag1consulting/ai-pr-review/blob/main/examples/workflows/pr-review.yml). Renovate keeps that file pinned and up to date.
 
-Pin to a specific version by replacing `@main` with a tag or commit SHA
-(e.g. `@v2.4.5` or `@cb9d7ee`).
+To pin a specific version, replace `@main` with a tag or commit SHA (for example `@v2.21.0` or `@cb9d7ee`).
 
 ## 2. Configure secrets and variables
 
 In the **consuming** repository's settings:
 
 **Secrets:**
-- `AI_REVIEW_API_KEY` — API key for your chosen LLM provider
+- `AI_REVIEW_API_KEY`: API key for your chosen LLM provider
 
-**Variables** (optional) — set in Settings → Secrets and variables → Actions → Variables:
+**Variables** (optional): Set these in Settings → Secrets and variables → Actions → Variables.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -130,22 +122,18 @@ In the **consuming** repository's settings:
 | `AI_REVIEW_MODEL_STANDARD` | Per-provider default | Override the standard model ID |
 | `AI_REVIEW_MODEL_PREMIUM` | Per-provider default | Override the premium model ID (full mode only) |
 | `AI_REVIEW_MAX_DIFF_LINES` | `5000` | Skip review when diff exceeds this many lines |
-| `AI_REVIEW_MAX_INLINE` | `25` | Max inline comments per run; excess routed to the summary body |
+| `AI_REVIEW_MAX_INLINE` | `25` | Max inline comments per run. The summary body holds the excess |
 | `AI_REVIEW_MAX_TOKENS_PER_AGENT` | `32768` | Output token budget per LLM agent call |
 | `AI_REVIEW_ENABLE_SUGGESTIONS` | `true` | Enable "Apply suggestion" buttons on inline comments |
-| `AI_REVIEW_PARALLEL` | `true` | Parallel tiered fan-out; set `false` if you hit provider rate limits |
+| `AI_REVIEW_PARALLEL` | `true` | Parallel tiered fan-out. Set to `false` if you hit provider rate limits |
 | `AI_REVIEW_IGNORE_MERGE_COMMITS` | `true` | Strip upstream base-branch merges from the diff before review |
-| `AI_REVIEW_FAIL_ON_FINDINGS` | `true` | Exit code 2 when Critical/High findings block approval, failing the workflow step. **Note**: `action.yml`'s own `fail-on-findings` input defaults to `'false'` — the workflow example above sets it explicitly to `true` to match the container-action starter templates' fail-closed default. Omitting it from a hand-rolled workflow leaves CI green even on a REQUEST_CHANGES outcome. Set to `false` to always exit 0. |
+| `AI_REVIEW_FAIL_ON_FINDINGS` | `true` | Exit with code 2 when the review outcome is `REQUEST_CHANGES` or `COMMENT` (incomplete or unknown risk). This fails the workflow step. **Note**: The `fail-on-findings` input in `action.yml` defaults to `'false'`. The workflow example above sets it to `true` to match the fail-closed default of the container-action starter templates. If you omit it from your own workflow, CI stays green even on a `REQUEST_CHANGES` outcome. Set to `false` to always exit 0. |
 
-This table lists the inputs most consuming repos need. `action.yml` has many more (SARIF ingestion, analyzer/agent allowlist-denylist, context enrichment, cost ceiling, judge pass, token-usage display, `approval-ceiling`, and others) — see [Configuration → Repository variables](configuration#repository-variables) for the full reference.
+This table lists the inputs most consuming repositories need. `action.yml` has many more (SARIF ingestion, analyzer and agent allowlists and denylists, context enrichment, cost ceiling, judge pass, token-usage display, `approval-ceiling`, and others). For the full reference, see [Configuration → Repository variables](configuration#repository-variables).
 
 ## Runtime dependencies
 
-The root composite action installs `shellcheck` automatically if it is not
-already present on the runner. All other static analyzers must be installed by
-the consuming workflow if you want their findings. The action degrades
-gracefully if any binary is absent — it emits a WARNING on stderr and continues
-without those findings.
+The root composite action installs `shellcheck` automatically if the runner does not have it. To get findings from the other static analyzers, install them in the consuming workflow. If a binary is absent, the action writes a WARNING to stderr and continues without those findings.
 
 | Analyzer | Language/files | Install |
 |----------|---------------|---------|
@@ -159,7 +147,6 @@ without those findings.
 | phpstan | PHP | `composer global require phpstan/phpstan` |
 | kube-linter | Kubernetes manifests | Download from [GitHub releases](https://github.com/stackrox/kube-linter/releases) |
 | tflint | Terraform | Download from [GitHub releases](https://github.com/terraform-linters/tflint/releases) |
-| eslint | JS/TS | Uses the project's own `node_modules/.bin/eslint` or `npx`; no-op if no config present |
+| eslint | JS/TS | Uses the project's own `node_modules/.bin/eslint` or `npx`. It does nothing if no config is present |
 
-> For pinned, SHA-verified installs use the container action instead — it ships
-> all analyzer binaries (except eslint) at fixed versions without any workflow setup.
+> For pinned, SHA-verified installs, use the container action. It ships the analyzer binaries (except eslint) at fixed versions, and you do not need to set up the workflow.

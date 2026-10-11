@@ -77,6 +77,11 @@ class Finding(BaseModel):
     # source — independent corroboration of the same file+line region.
     # Internal-only: not serialised by to_dict().
     corroborated: bool = False
+    # Display preference only: when True, the renderers show the evidence label and
+    # score beside the finding. The label is computed from this finding's own fields
+    # when it is rendered (findings/badge.py), so it cannot go stale. The orchestrator
+    # sets this when AI_FINDING_BADGES is on. It never enters an approval decision.
+    show_badge: bool = False
     # Set by judge._apply_verdicts to the judge's raw per-finding verdict
     # ("keep" or "downrank"), or left at the default `None` when this finding
     # never went through the judge pass at all (AI_JUDGE_PASS=false, no

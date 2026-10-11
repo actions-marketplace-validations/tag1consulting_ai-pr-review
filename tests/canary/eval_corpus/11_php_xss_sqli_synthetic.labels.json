@@ -1,0 +1,23 @@
+{
+  "clean": false,
+  "source": "seeded",
+  "evidence": "strong",
+  "verified_by": "by construction (tests/canary/corpus/README.md)",
+  "bugs": [
+    {
+      "file": "src/Controller/ProfileController.php",
+      "line_start": 32,
+      "line_end": 33,
+      "category": "injection",
+      "summary": "display name and bio are concatenated into HTML without escaping, which is cross-site scripting"
+    },
+    {
+      "file": "src/Controller/ProfileController.php",
+      "line_start": 44,
+      "line_end": 44,
+      "category": "injection",
+      "summary": "user input is interpolated into the SQL statement, which is SQL injection"
+    }
+  ],
+  "accepted_extra": []
+}

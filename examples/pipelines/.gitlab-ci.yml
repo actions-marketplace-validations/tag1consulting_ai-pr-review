@@ -3,25 +3,27 @@
 # Copy this file to `.gitlab-ci.yml` at the root of your GitLab repository.
 #
 # Required CI/CD variables (Settings -> CI/CD -> Variables):
-#   ANTHROPIC_API_KEY   (masked)  — or OPENAI_API_KEY / GOOGLE_API_KEY etc.
+#   ANTHROPIC_API_KEY   (masked): or OPENAI_API_KEY / GOOGLE_API_KEY etc.
 #                                    depending on AI_PROVIDER.
-#   GITLAB_TOKEN        (masked)  — Project access token with `api` scope.
+#   GITLAB_TOKEN        (masked): Project access token with `api` scope.
 #                                    Falls back to CI_JOB_TOKEN (limited scopes).
 #
 # Optional CI/CD variables:
 #   AI_PROVIDER             (default: anthropic)
 #   AI_REVIEW_MODE          (default: quick; set to 'full' for deep agents)
 #   AI_REVIEW_IMAGE_TAG     (default: latest; set to 'dev' to dogfood pre-release
-#                            builds, or pin to a release like '0.11.0' — image
+#                            builds, or pin to a release like '0.11.0': image
 #                            tags strip the 'v' prefix from the git tag)
 #   AI_IGNORE_MERGE_COMMITS (default: true; strip base-branch merges from diff; set to false to include upstream merges)
 #
 # Opt-in capabilities (require the Python engine, which is the default):
 #   AI_CONTEXT_ENRICHMENT  (default: false; tree-sitter symbol-context injection)
+#   AI_FINDING_BADGES      (default: true; set to false to hide the evidence label and
+#                           score beside each finding)
 #   AI_SARIF_PATHS         (default: ''; comma-separated SARIF 2.1.0 file paths
 #                           to merge as findings)
-# Note: AI_FEEDBACK_LOOP (learning loop) is GitHub-only by design — see
-# docs/learning-loop.md. On GitLab it degrades silently to a no-op.
+# Note: AI_FEEDBACK_LOOP (learning loop) works on GitHub and Bitbucket: see
+# docs/learning-loop.md. On GitLab it does nothing.
 #
 # GIT_STRATEGY=clone + GIT_DEPTH=0 are required: the Python engine calls
 # `git fetch origin $BASE_REF` to compute the diff, and the default
@@ -35,7 +37,7 @@ image:
   # AI_REVIEW_IMAGE_TAG controls which container tag is pulled.  Defaulted
   # below in the `variables:` block to 'latest'; override by setting the
   # variable in project CI/CD settings (e.g. 'dev' to dogfood pre-release
-  # builds, or '0.11.0' to pin a release — image tags strip the 'v' prefix
+  # builds, or '0.11.0' to pin a release: image tags strip the 'v' prefix
   # from the git tag, per docker/metadata-action's semver pattern in
   # publish-image.yml).
   #
@@ -61,7 +63,7 @@ ai-review:
     # matching if present, else 'quick'. Set AI_REVIEW_MODE=full to override.
     - export AI_REVIEW_MODE="${AI_REVIEW_MODE:-}"
     - export AI_IGNORE_MERGE_COMMITS="${AI_IGNORE_MERGE_COMMITS:-true}"
-    # Opt-in capabilities (Python engine only — the default)
+    # Opt-in capabilities (Python engine only: the default)
     - export AI_CONTEXT_ENRICHMENT="${AI_CONTEXT_ENRICHMENT:-false}"
     - export AI_SARIF_PATHS="${AI_SARIF_PATHS:-}"
     - export PR_NUMBER="$CI_MERGE_REQUEST_IID"

@@ -3,22 +3,23 @@ layout: default
 title: Static Analyzers
 parent: Configuration
 nav_order: 2
+render_with_liquid: false
 ---
 
 # Static Analyzers
 
-The action runs deterministic analyzers alongside the LLM agents. Their findings flow through the same dedup, suppress, and render pipeline as LLM findings. All analyzers run concurrently in the parallel path and fall back to sequential when `parallel: false`. If a binary is missing, the native analyzer emits a WARNING to stderr and returns an empty findings array — the review is never blocked.
+The action runs deterministic analyzers alongside the LLM agents. Their findings flow through the same dedup, suppress, and render pipeline as LLM findings. All analyzers run concurrently in the parallel path. They run one at a time when `parallel: false`. If a binary is missing, the native analyzer writes a WARNING to stderr and returns an empty findings array. A missing binary never blocks the review.
 
-The container action ships all analyzer binaries pre-installed. For the direct-action or submodule paths, install the binaries you need; see [runtime dependencies](installation-direct-action#runtime-dependencies).
+The container action includes all analyzer binaries. For the direct-action or submodule paths, install the binaries you need. See [runtime dependencies](installation-direct-action#runtime-dependencies).
 
 ## Controlling which analyzers run
 
-The `analyzers` (allowlist) and `exclude-analyzers` (denylist) settings control which analyzers run. Both accept a comma-separated list of the names in the **Analyzer** column below. Empty (default) means all eligible analyzers run. When `analyzers` is set, `exclude-analyzers` is ignored (allowlist takes precedence). Unknown names are rejected with an error and a suggestion.
+The `analyzers` (allowlist) and `exclude-analyzers` (denylist) settings control which analyzers run. Both accept a comma-separated list of the names in the **Analyzer** column below. An empty value (default) means all eligible analyzers run. When `analyzers` is set, the action ignores `exclude-analyzers` (the allowlist takes precedence). The action rejects unknown names with an error and a suggestion.
 
-These can be set in three places, in precedence order (highest wins):
+You can set these in three places. The list shows them in precedence order (highest wins):
 
-1. **`/ai-pr-review review-full` slash command** — always runs the full roster, ignoring any allowlist/denylist for that one run.
-2. **Action input or repo variable** — set directly in the calling workflow, or via the `AI_ANALYZERS`/`AI_EXCLUDE_ANALYZERS` env vars (see [Configuration → Analyzer and agent selection](configuration#analyzer-and-agent-selection)):
+1. **`/ai-pr-review review-full` slash command**: always runs the full roster and ignores any allowlist or denylist for that one run.
+2. **Action input or repo variable**: set it directly in the calling workflow, or with the `AI_ANALYZERS`/`AI_EXCLUDE_ANALYZERS` env vars (see [Configuration → Analyzer and agent selection](configuration#analyzer-and-agent-selection)):
 
    ```yaml
    - uses: tag1consulting/ai-pr-review@main
@@ -27,13 +28,13 @@ These can be set in three places, in precedence order (highest wins):
        # exclude-analyzers: 'checkov,tflint'  # or: run everything except checkov and tflint
    ```
 
-3. **`.github/ai-pr-review/policy.yml`** — a named policy's `analyzers`/`exclude-analyzers` fields, routed by changed-file path, base branch, or head branch, so different PRs can get different analyzer sets without editing the workflow file. See [Policies](policy) for the full schema.
+3. **`.github/ai-pr-review/policy.yml`**: the `analyzers` and `exclude-analyzers` fields of a named policy. The action routes by changed-file path, base branch, or head branch. Different PRs can get different analyzer sets without a change to the workflow file. See [Policies](policy) for the full schema.
 
-An explicit action input or repo variable always wins over a `policy.yml` route match; a route match wins over the engine's hard-coded default (all eligible analyzers run). The same three-place precedence applies to the `agents`/`exclude-agents` allowlist/denylist for review agents.
+An explicit action input or repo variable always wins over a `policy.yml` route match. A route match wins over the engine default (all eligible analyzers run). The same three-place precedence applies to the `agents` and `exclude-agents` allowlist and denylist for review agents.
 
 ## Category mapping
 
-In addition to severity, every analyzer maps its findings onto the same 11-value category taxonomy used by the LLM agents (`authz`, `injection`, `dependency-cve`, `secret`, `architecture-coupling`, `test-gap`, `edge-case`, `observability`, `docs`, `lint`, `other`). This lets an analyzer finding corroborate an LLM-agent finding on the same issue — corroborated findings are exempt from the LLM judge pass's down-ranking and get a confidence boost. Findings the analyzer can't confidently classify map to `"other"`, which never blocks corroboration with a real category but also never falsely matches one.
+Each analyzer maps its findings to a severity and to one of the 11 categories that the LLM agents also use (`authz`, `injection`, `dependency-cve`, `secret`, `architecture-coupling`, `test-gap`, `edge-case`, `observability`, `docs`, `lint`, `other`). An analyzer finding can then corroborate an LLM-agent finding on the same issue. The LLM judge pass does not down-rank corroborated findings, and they get a confidence boost. If the analyzer cannot classify a finding with confidence, it maps the finding to `"other"`. That category never blocks corroboration with a real category, and it never matches one by mistake.
 
 | Analyzer | Language gate | Severity mapping | Confidence | Source tag |
 |----------|--------------|-----------------|------------|------------|
@@ -43,52 +44,83 @@ In addition to severity, every analyzer maps its findings onto the same 11-value
 | **ruff** | `.py` files | `F`/`E` prefix→High, `W`/`C`→Medium, else→Low | 90 | `ruff` |
 | **golangci-lint** | `.go` files | `errcheck`/`govet`/`staticcheck`→High, others→Medium | 90 | `golangci-lint` |
 | **hadolint** | `Dockerfile*`, `*.dockerfile` | `error`→High, `warning`→Medium, else→Low | 90 | `hadolint` |
-| **checkov** | `.tf`, `.tfvars`, `.yaml`, `.yml`, `Dockerfile*`, `.json` | `CKV2_*` and `CKV_SECRET_*`→High; all other checks→Medium | 80 | `checkov` |
-| **phpcs** | `.php`, `.module`, `.inc`, `.theme`, `.install`, `.profile` | `ERROR`→High, `WARNING`→Medium; Drupal+DrupalPractice standard when available, else PSR12 | 90 | `phpcs` |
-| **eslint** | `.js`, `.jsx`, `.ts`, `.tsx`, `.mjs`, `.cjs` | severity 2→High, severity 1→Medium; uses consumer's config — no-op if no `eslint.config.*` or `.eslintrc.*` found | 90 | `eslint` |
-| **phpstan** | `.php`, `.module`, `.inc`, `.theme`, `.install`, `.profile` | All findings→High; always runs at level `PHPSTAN_LEVEL` (default 3) — a project's own `phpstan.neon`/`phpstan.neon.dist` is never auto-discovered, since the analyzed workspace may be untrusted fork-PR content | 85 | `phpstan` |
+| **checkov** | `.tf`, `.tfvars`, `.yaml`, `.yml`, `Dockerfile*`, `.json` | `CKV2_*` and `CKV_SECRET_*`→High, all other checks→Medium | 80 | `checkov` |
+| **phpcs** | `.php`, `.module`, `.inc`, `.theme`, `.install`, `.profile` | `ERROR`→High, `WARNING`→Medium. Uses Drupal+DrupalPractice standard when available, else PSR12 | 90 | `phpcs` |
+| **eslint** | `.js`, `.jsx`, `.ts`, `.tsx`, `.mjs`, `.cjs` | severity 2→High, severity 1→Medium. Uses the consumer's config, and does nothing if no `eslint.config.*` or `.eslintrc.*` exists | 90 | `eslint` |
+| **phpstan** | `.php`, `.module`, `.inc`, `.theme`, `.install`, `.profile` | Severity depends on `PHPSTAN_LEVEL`: 8–9→High, 5–7→Medium, 0–4→Low (default level 3→Low). The analyzer always runs at that level. It never auto-discovers a project's own `phpstan.neon` or `phpstan.neon.dist`, because the analyzed workspace can hold untrusted fork-PR content | 85 | `phpstan` |
 | **kube-linter** | `.yaml`, `.yml`, `.json` with `apiVersion:` + `kind:` headers | All findings→Medium (reliability-focused: missing probes, resource limits, etc.) | 85 | `kube-linter` |
-| **tflint** | `.tf`, `.tfvars` | `error`→High, `warning`→Medium, `notice`→Low; runs per Terraform module directory | 90 | `tflint` |
+| **tflint** | `.tf`, `.tfvars` | `error`→High, `warning`→Medium, `notice`→Low. Runs per Terraform module directory | 90 | `tflint` |
+| **dep-exists** | Newly added dependencies in `package.json`, `requirements*.txt`, `Cargo.toml`, `composer.json`, `Gemfile` | A dependency the public registry does not know→High, a package first published under 30 days ago (npm, PyPI, crates.io)→Medium | 85 / 65 | `dep-exists` |
 | **docs-api-check** | Python + `@param`-family languages (JS/TS, Java, Kotlin, C#, Ruby, C++, Scala) | A documented parameter not in the signature, or vice versa, always→Medium | 90 (Python, via ruff) / 80 (tree-sitter engine) | `docs-api-check` |
 | **docs-ref-check** | Changed `.md` files | A broken relative link or heading anchor, always→Medium | 80 | `docs-ref-check` |
 | **docs-drift-check** | Any file (runs unconditionally, like semgrep/trufflehog) | A doc reference to a file this PR deletes, always→Low | 80 | `docs-drift-check` |
+| **cve-check** | Dependency manifests and lockfiles (see [Dependency vulnerability check](#dependency-vulnerability-check)) | CVSS >= 9.0→Critical, 7.0–8.9→High, 4.0–6.9→Medium, below 4.0→Low, unscored→High | 90 (70 when unscored) | `osv` |
+
+## Dependency existence check
+
+`dep-exists` asks the public registry whether each dependency this diff adds really exists. A model can invent a package name, and an attacker can register that name and ship malicious code under it. The check makes network calls to `registry.npmjs.org`, `pypi.org`, `crates.io`, `repo.packagist.org`, and `rubygems.org`. It sends only the package name.
+
+- It checks only dependencies on added lines of a direct-dependency manifest. The analyzer rebuilds the manifest as it was before the change, and a name that the old manifest already declared as a registry dependency (a version bump, or a move between sections) is not new, so it is not checked. A name that was a local path, a workspace member, or a git source and now names a registry version is checked. If the same change touches `.npmrc`, `.yarnrc`, or `.cargo/config`, or moves the manifest, or the old requirements file or Gemfile used a private index or source, every added dependency is checked. If the diff does not match the file, every added dependency is checked. It does not read lockfiles.
+- It does not check Go modules, because a private Go module returns "not found" from the public proxy and would raise a false finding.
+- It skips an ecosystem when the repository sets a private registry (`.npmrc` registry, pip index flags, Cargo registries, composer `repositories`, a non-default Gemfile `source`).
+- It fails open. A timeout, a rate limit, or any status other than 200 or 404 gives no finding.
+- It reads only files in the repository, so it cannot see a private registry that is set in CI settings or a user-level config. A private scoped npm package, or a monorepo package that another package lists by plain version, returns "not found" from the public registry. The result is a High finding, and a High finding makes the review request changes. Set the registry in a file in the repository, or turn the analyzer off.
+- It checks `peerDependencies` too, because npm 7 and later installs them. A peer is therefore looked up on the public registry like any other dependency, and a private peer package gets the same High finding. A name that moves from `peerDependencies` to `dependencies` is looked up, because a peer is not always installed.
+- It checks at most 25 new dependencies per run.
+- It reads the paths in the diff with a shared parser (`ai_pr_review/diff/parse.py`). The engine pins the git diff format (`a/` and `b/` prefixes, unquoted non-ASCII paths), so a user's git config cannot hide a manifest. A path that holds a control character is never decoded. The analyzer cannot read such a path and logs a warning with a count of the files it skipped.
+- Turn it off with `exclude-analyzers: dep-exists`.
+
+### What the check does not prove
+
+`dep-exists` is an advisory check, not a control that stops a dependency-confusion attack. It works from the diff and the files on disk. It does not know where a dependency resolves from in your build.
+
+- **What it can catch.** A name that no public registry knows, and a package first published in the last 30 days. Both are signs of a name that a model invented or that an attacker registered.
+- **What it cannot catch.** A name that exists on the public registry and is not the package you mean (a lookalike that is older than 30 days). A name that you also publish on a private registry. A change in a transitive dependency or a lockfile. A Go module.
+- **How it tells a new dependency from an old one.** It rebuilds the old manifest by undoing the diff hunks, which always matches the diff it was given. It does not read the base commit. It checks every added dependency when it cannot trust the old names: the hunks do not fit the file, the manifest moves, the same change edits a registry config file (`.npmrc`, `.yarnrc`, `.cargo/config`), or the old file used a private index or source.
+- **How it fails.** It fails open on a lookup that gets no usable answer, and it logs one warning with the count. A High finding makes the review request changes, so a private package that the public registry does not know can block a pull request. Set the registry in a file in the repository, or turn the analyzer off.
+- **Follow-up work** is tracked in [#1033](https://github.com/tag1consulting/ai-pr-review/issues/1033): read the base manifest from git, an opt-in list of private scopes, and a decision on whether the check may request changes.
 
 ## Documentation checks
 
-Three analyzers catch documentation mismatch and drift for zero LLM tokens. None can block a PR on their own (`docs-api-check` and `docs-ref-check` are Medium; `docs-drift-check` is Low, and Medium/Low both resolve to `APPROVE`).
+Three analyzers find documentation mismatch and drift for zero LLM tokens. None can block a PR alone. `docs-api-check` and `docs-ref-check` report Medium, `docs-drift-check` reports Low, and Medium and Low both resolve to `APPROVE`.
 
-- **`docs-api-check`** compares a function's documented parameters against its actual signature. Python uses the already-installed `ruff` binary with `--isolated` (so results never depend on the consumer's own ruff config); every other supported language uses a shared tree-sitter traversal (JSDoc, JavaDoc, KDoc, YARD, Doxygen, and C# XML doc comment styles are all recognized). A function with a destructured or rest parameter is skipped entirely rather than guessed at.
-- **`docs-ref-check`** and **`docs-drift-check`** are pure-Python, offline, no network calls ever: broken relative links/heading anchors in changed Markdown, and doc references to a file the current PR deletes, respectively.
+- **`docs-api-check`** compares the documented parameters of a function with its actual signature. Python uses the installed `ruff` binary with `--isolated`, so the results never depend on the consumer's ruff config. Every other supported language uses a shared tree-sitter traversal. The traversal recognizes the JSDoc, JavaDoc, KDoc, YARD, Doxygen, and C# XML doc comment styles. The analyzer skips a function with a destructured or rest parameter and does not guess.
+- **`docs-ref-check`** finds broken relative links and heading anchors in changed Markdown.
+- **`docs-drift-check`** finds doc references to a file that the current PR deletes.
 
-PHP is deliberately excluded from `docs-api-check` — `phpcs` already covers doc-comment mismatch on both the Drupal and PSR12 paths (see the `phpcs` row above). See `docs/adr/0001-tree-sitter-not-node-for-doc-mismatch.md` and `docs/adr/0002-hand-rolled-doc-ref-checker-not-lychee.md` in the repo for why these are hand-rolled rather than built on an existing tool.
+`docs-ref-check` and `docs-drift-check` are pure Python and offline. They never make network calls.
 
-A fourth analyzer, **`docs-missing-check`**, flagged a newly-added public function or method with no doc comment at all (diff-gated to symbols genuinely added in the current diff), with Go checked via a dedicated `golangci-lint --enable-only=godoclint` invocation. It was removed in issue #815: Low severity only, and judged not worth its maintenance surface (a separate ruff rule-set, that dedicated Go linter invocation, and a second tree-sitter presence check) relative to its review value. Unlike `docs-api-check` (which only fires once a doc comment already exists but mismatches the signature), it was not actually redundant with the other three analyzers in what it caught — see the #815 PR description for the fuller reasoning. The name is still accepted as a deprecated no-op in `analyzers`/`exclude-analyzers` config, removed for real in v3.0.0.
+`docs-api-check` excludes PHP on purpose, because `phpcs` already covers doc-comment mismatch on both the Drupal and PSR12 paths (see the `phpcs` row above). See `docs/adr/0001-tree-sitter-not-node-for-doc-mismatch.md` and `docs/adr/0002-hand-rolled-doc-ref-checker-not-lychee.md` in the repo for the reasons these analyzers are hand-written and do not use an existing tool.
+
+A fourth analyzer, **`docs-missing-check`**, flagged a newly added public function or method that had no doc comment. It checked only symbols that the current diff added. It checked Go with a dedicated `golangci-lint --enable-only=godoclint` invocation. The maintainers removed it in issue #815. It reported Low severity only, and its maintenance cost (a separate ruff rule set, the dedicated Go linter invocation, and a second tree-sitter presence check) was too high for its review value. It was not redundant with the other three analyzers. `docs-api-check` fires only when a doc comment already exists and does not match the signature. See the #815 PR description for the full reasoning. The `analyzers` and `exclude-analyzers` settings still accept the name as a deprecated no-op. The v3.0.0 release removes it.
 
 ## Dependency vulnerability check
 
-When a PR modifies a supported dependency manifest, the action queries [OSV.dev](https://osv.dev/) for known vulnerabilities affecting the declared versions and surfaces them as findings alongside the LLM review.
+The analyzer name for `analyzers` and `exclude-analyzers` is `cve-check`. When a PR modifies a supported dependency manifest or lockfile, the action queries [OSV.dev](https://osv.dev/) for known vulnerabilities in the declared versions. It reports them as findings next to the LLM review. The action prefers lockfiles to range manifests when both exist.
 
-| Manifest | Ecosystem |
-|----------|-----------|
-| `go.mod` | Go |
-| `package.json` | npm |
-| `requirements.txt` | PyPI |
-| `composer.json` | Packagist |
+| Ecosystem | Supported files |
+|-----------|-----------------|
+| Go | `go.mod` |
+| npm | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` |
+| Python | `poetry.lock`, `Pipfile.lock`, `uv.lock`, `requirements*.txt` (exact pins only) |
+| PHP | `composer.lock`, `composer.json` |
+| Rust | `Cargo.lock` |
+| Ruby | `Gemfile.lock` |
 
-Findings are mapped from CVSS score: >= 9.0 → Critical, 7.0–8.9 → High, 4.0–6.9 → Medium, below 4.0 → Low. Unscored or unparseable CVEs map to **High** (fail-safe — matches the native CVE analyzer's own severity-mapping logic, `ai_pr_review/analyzers/native/cve_check.py`). Critical and High findings trigger `REQUEST_CHANGES` on the PR review just like any other high-severity finding.
+The analyzer maps CVSS scores to severity: >= 9.0 → Critical, 7.0–8.9 → High, 4.0–6.9 → Medium, below 4.0 → Low. Unscored or unparseable CVEs map to **High** as a fail-safe (see `_cvss_to_severity` in `ai_pr_review/analyzers/native/cve_check.py`). The source tag is `osv`. Confidence is 90, or 70 when the CVE has no score. Critical and High findings trigger `REQUEST_CHANGES` on the PR review, like any other high-severity finding.
 
-No configuration is required — the check runs automatically when a manifest file is in the diff. The OSV.dev API is unauthenticated and free. If the API is unreachable, the check emits a warning and continues — the review is never blocked by CVE-lookup failures.
+The check needs no configuration. It runs when a manifest file is in the diff. The OSV.dev API is unauthenticated and free. If the API is unreachable, the check logs a warning and continues. A CVE-lookup failure never blocks the review.
 
-To accept a specific CVE (e.g. a library used only in a test fixture), add a suppression rule matching the CVE or GHSA ID. See [Suppression rules](suppression#suppressing-cve-findings) for the schema and a worked example.
+To accept a specific CVE (for example, a library that only a test fixture uses), add a suppression rule that matches the CVE or GHSA ID. See [Suppression rules](suppression#suppressing-cve-findings) for the schema and a worked example.
 
 ## SARIF ingestion
 
-In addition to the built-in analyzers, the Python engine can ingest SARIF 2.1.0 output from any external tool (CodeQL, Semgrep Pro, Trivy, Snyk, custom scanners).
+The Python engine can also read SARIF 2.1.0 output from any external tool (CodeQL, Semgrep Pro, Trivy, Snyk, custom scanners).
 
 ### Setup
 
-1. Run your SARIF-producing tool as a prior step (e.g. CodeQL, Trivy).
-2. Pass the output path(s) via the `sarif-paths` input:
+1. Run your SARIF-producing tool as an earlier step (for example, CodeQL or Trivy).
+2. Pass the output paths in the `sarif-paths` input:
 
 ```yaml
 - uses: tag1consulting/ai-pr-review@main
@@ -111,16 +143,16 @@ See `examples/workflows/sarif-codeql.yml` for a complete CodeQL + AI review pipe
 
 ### Behavior
 
-- Source tag: `sarif:<driver.name>` (e.g. `sarif:CodeQL`, `sarif:trivy`).
+- Source tag: `sarif:<driver.name>` (for example, `sarif:CodeQL`, `sarif:trivy`).
 - Default confidence: 90.
 - Remediation text: taken from the rule's `help.text` field when present.
 - File URI prefixes (`file:///`, `file://`) are stripped from location paths.
-- Findings from SARIF files are merged into the same dedup/suppress pipeline as findings from native analyzers and LLM agents.
-- Unreadable or malformed SARIF files emit a `WARNING` log and are skipped (fail-soft).
+- Findings from SARIF files go through the same dedup and suppress pipeline as findings from native analyzers and LLM agents.
+- The engine logs a `WARNING` for an unreadable or malformed SARIF file and skips it (fail-soft).
 
 ---
 
 ## Implementation reference
 
-All 16 analyzers are implemented as native Python functions in `ai_pr_review/analyzers/native/`. The `analyzers/bridge.py` dispatcher maps each tool name to its Python callable. Each analyzer invokes the tool binary directly via `subprocess.run` and parses the JSON output in Python. See `tests/python/test_analyzer_<tool>.py` for each tool's test coverage.
+All 17 analyzers are native Python functions in `ai_pr_review/analyzers/native/`. The `analyzers/bridge.py` dispatcher maps each tool name to its Python callable. Each analyzer runs the tool binary with `subprocess.run` and parses the JSON output in Python. Test coverage is in `tests/python/test_analyzer_<tool>.py`. The three docs analyzers use the files `test_analyzer_docs_comments.py` (docs-api-check), `test_analyzer_docs_ref_check.py`, and `test_analyzer_docs_drift_check.py`.
 

@@ -96,7 +96,7 @@ jobs:
       # --- Ruff (Python) ---
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.14'
+          python-version: '3.15'
       - name: Install ruff
         run: pip install --quiet ruff
       - name: Ruff (SARIF)
@@ -390,13 +390,14 @@ jobs:
       parallel: ${{ vars.AI_REVIEW_PARALLEL || 'true' }}
       max-tokens-per-agent: ${{ vars.AI_REVIEW_MAX_TOKENS_PER_AGENT || '32768' }}
       enable-suggestions: ${{ vars.AI_REVIEW_ENABLE_SUGGESTIONS || 'true' }}
-      # Deliberately 'false' here, unlike the review job above ('true'): a
-      # non-zero exit on this path fails the workflow run and misfires the
-      # failure-reaction step on a rescan that simply found something,
-      # rather than gating a required check the way it does on the review
-      # job's pull_request trigger. Set AI_REVIEW_FAIL_ON_FINDINGS=true if
-      # you want that gating behavior on rescan/review-full too.
-      fail-on-findings: ${{ vars.AI_REVIEW_FAIL_ON_FINDINGS || 'false' }}
+      # Separate variable from the review job above (AI_REVIEW_FAIL_ON_FINDINGS):
+      # a non-zero exit on this path fails the workflow run and misfires the
+      # failure-reaction step on a rescan that simply found something, rather
+      # than gating a required check the way it does on the pull_request
+      # trigger. A shared variable would turn this on whenever the review
+      # job's gate is on. Set AI_REVIEW_SLASH_FAIL_ON_FINDINGS=true to gate
+      # rescan/review-full too.
+      fail-on-findings: ${{ vars.AI_REVIEW_SLASH_FAIL_ON_FINDINGS || 'false' }}
       approval-ceiling: ${{ vars.AI_REVIEW_APPROVAL_CEILING || 'approve' }}
       feedback-loop: ${{ vars.AI_REVIEW_FEEDBACK_LOOP || 'false' }}
       token-usage-display: ${{ vars.AI_REVIEW_TOKEN_USAGE_DISPLAY || 'compact' }}

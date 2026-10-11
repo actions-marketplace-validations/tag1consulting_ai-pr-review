@@ -74,6 +74,14 @@ def test_resolve_temperature_rejected_for_dated_opus_5_snapshot() -> None:
     assert resolve_temperature(0.3, "claude-opus-5-20260915") is None
 
 
+def test_resolve_temperature_accepted_for_hypothetical_opus_59_no_separator() -> None:
+    """Explicit-match regression lock: a hypothetical claude-opus-59 (a digit
+    appended with no "-"/"." separator) is NOT treated as opus-5 family --
+    same class of gap as config/model-pricing.json's Opus 5.5 patterns, which
+    needed the same fix (see that file's `(?!\\d)` prefix)."""
+    assert resolve_temperature(0.3, "claude-opus-59") == 0.3
+
+
 def test_resolve_temperature_accepted_for_sonnet_4_6() -> None:
     """Regression lock: Sonnet 4.6 still accepts a non-default temperature."""
     assert resolve_temperature(0.3, "claude-sonnet-4-6") == 0.3
@@ -164,6 +172,13 @@ def test_resolve_effort_low_for_bedrock_opus_5_5() -> None:
     assert resolve_effort("global.anthropic.claude-opus-5-5") == "low"
 
 
+def test_resolve_effort_omitted_for_hypothetical_opus_59_no_separator() -> None:
+    """Explicit-match regression lock: a hypothetical claude-opus-59 (a digit
+    appended with no "-"/"." separator) does not inherit the opus-5 effort
+    cap -- same class of gap as config/model-pricing.json's Opus 5.5 patterns."""
+    assert resolve_effort("claude-opus-59") is None
+
+
 def test_resolve_effort_omitted_for_hypothetical_opus_5_9() -> None:
     """Explicit-match regression lock: a hypothetical claude-opus-5-9 does not
     inherit the opus-5/opus-5-5 effort cap just because it shares the
@@ -205,3 +220,26 @@ def test_sonnet_5_5_effort_is_capped_at_low() -> None:
 )
 def test_resolve_gemini_thinking_level(model_id: str, expected: str | None) -> None:
     assert resolve_gemini_thinking_level(model_id) == expected
+
+
+# --- Haiku 5.5 (verified live 2026-10-08: temperature is a 400, effort "low" is accepted) ---
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "claude-haiku-5-5",
+        "claude-haiku-5.5",
+        "claude-haiku-5-5-20261001",
+        "anthropic.claude-haiku-5-5",
+        "us.anthropic.claude-haiku-5-5",
+    ],
+)
+def test_haiku_5_5_omits_temperature_and_caps_effort(model_id: str) -> None:
+    assert resolve_temperature(0.3, model_id) is None
+    assert resolve_effort(model_id) == "low"
+
+
+def test_haiku_4_5_keeps_its_temperature_and_gets_no_effort() -> None:
+    assert resolve_temperature(0.3, "claude-haiku-4-5") == 0.3
+    assert resolve_effort("claude-haiku-4-5") is None

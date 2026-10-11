@@ -4,7 +4,7 @@
 # so findings from both are merged into a single review comment.
 #
 # Requirements:
-#   - Python engine — SARIF ingestion is implemented in the Python pipeline
+#   - Python engine: SARIF ingestion is implemented in the Python pipeline
 #     only.  Because the Python engine ships in the
 #     container image, this workflow uses `container-action` rather than
 #     the root composite action (which would need pip + Python deps on the

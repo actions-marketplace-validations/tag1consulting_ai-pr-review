@@ -2058,6 +2058,13 @@ class TestTokenUsageDisplayModeSelection:
         assert "Cost ceiling not enforced" in notice
         assert "High token usage" in rest
 
+    def test_not_reviewed_note_reaches_the_posted_warning_segment(self, tmp_path: Path) -> None:
+        out = self._run_and_capture(
+            tmp_path, token_usage_display="off", exclude_patterns=("docs/generated/*",),
+        )
+        assert "Not reviewed" in out["usage_warning"]  # type: ignore[operator]
+        assert "`docs/generated/*`" in out["usage_warning"]  # type: ignore[operator]
+
     def test_only_the_notice_when_high_usage_warning_is_disabled(self, tmp_path: Path) -> None:
         out = self._run_and_capture(
             tmp_path, token_usage_display="compact", token_usage_warn_usd=0,

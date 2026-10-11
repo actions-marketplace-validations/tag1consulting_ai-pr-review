@@ -43,7 +43,7 @@ The container image entrypoint invokes the Python engine (`python3 -m ai_pr_revi
 
 This invariant is the load-bearing safety control for consumers that use the action under `pull_request_target` (so the job has repository secrets in scope) while also checking out the PR head SHA. Examples include:
 
-- [tag1consulting/pulumi-lagoon-provider#222](https://github.com/tag1consulting/pulumi-lagoon-provider/issues/222) — `pull_request_target` + checkout of fork PR head with `AI_REVIEW_API_KEY` and a write-scoped token in scope.
+- [tag1consulting/pulumi-lagoon-provider#222](https://github.com/tag1consulting/pulumi-lagoon-provider/issues/222): `pull_request_target` + checkout of fork PR head with `AI_REVIEW_API_KEY` and a write-scoped token in scope.
 
 If the action ever executed working-tree content under `pull_request_target`, a fork PR author could exfiltrate those secrets. Several Tag1 consumer repos intentionally reference `tag1consulting/ai-pr-review/container-action@main` (a mutable ref) as a dogfooding/canary policy. That choice is only safe **because** this invariant holds and is enforced here.
 

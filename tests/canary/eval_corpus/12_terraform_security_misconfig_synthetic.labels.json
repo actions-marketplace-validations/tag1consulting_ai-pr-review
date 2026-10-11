@@ -1,0 +1,30 @@
+{
+  "clean": false,
+  "source": "seeded",
+  "evidence": "strong",
+  "verified_by": "by construction (tests/canary/corpus/README.md)",
+  "bugs": [
+    {
+      "file": "infra/data_layer.tf",
+      "line_start": 9,
+      "line_end": 9,
+      "category": "secret",
+      "summary": "database password is hardcoded in plain text"
+    },
+    {
+      "file": "infra/data_layer.tf",
+      "line_start": 11,
+      "line_end": 11,
+      "category": "authz",
+      "summary": "database instance is publicly accessible"
+    },
+    {
+      "file": "infra/data_layer.tf",
+      "line_start": 22,
+      "line_end": 22,
+      "category": "authz",
+      "summary": "security group opens the database port to 0.0.0.0/0"
+    }
+  ],
+  "accepted_extra": []
+}

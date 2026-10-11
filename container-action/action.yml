@@ -231,6 +231,16 @@ inputs:
     required: false
     default: 'false'
 
+  finding-badges:
+    description: >
+      When true, show an evidence label and the confidence score beside each
+      finding, for example "(judge kept, confidence 80)". The label says whether
+      a static analyzer corroborated the finding, the judge kept it, or only one
+      agent reported it. It is display text and never changes the approval
+      decision. Set 'false' to hide it. Default 'true'.
+    required: false
+    default: 'true'
+
   suppress-walkthrough:
     description: >
       When true, leave the Walkthrough section (the per-file table) out of the
@@ -348,7 +358,8 @@ inputs:
       Allowlist: comma-separated list of static analyzer names to run. When set,
       only the listed analyzers run and exclude-analyzers is ignored. Valid names:
       shellcheck, trufflehog, semgrep, ruff, golangci-lint, hadolint, checkov,
-      phpcs, phpstan, eslint, kube-linter, tflint, cve-check. Empty (default): no
+      phpcs, phpstan, eslint, kube-linter, tflint, cve-check, dep-exists, docs-api-check,
+      docs-ref-check, docs-drift-check. Empty (default): no
       allowlist — all eligible analyzers run. Unknown names are rejected with an
       error. Requires the Python engine.
     required: false
@@ -359,7 +370,8 @@ inputs:
       Denylist: comma-separated list of static analyzer names to skip. Ignored when
       analyzers (allowlist) is set. Valid names: shellcheck, trufflehog, semgrep,
       ruff, golangci-lint, hadolint, checkov, phpcs, phpstan, eslint, kube-linter,
-      tflint, cve-check. Empty (default): no denylist — all eligible analyzers run.
+      tflint, cve-check, dep-exists, docs-api-check, docs-ref-check, docs-drift-check.
+      Empty (default): no denylist — all eligible analyzers run.
       Unknown names are rejected with an error. Requires the Python engine.
     required: false
     default: ''
@@ -457,6 +469,7 @@ runs:
         AI_FEEDBACK_LOOP: ${{ inputs.feedback-loop }}
         AI_JUDGE_PASS: ${{ inputs.judge-pass }}
         AI_SUPPRESS_WALKTHROUGH: ${{ inputs.suppress-walkthrough }}
+        AI_FINDING_BADGES: ${{ inputs.finding-badges }}
         AI_FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings == 'true' && 'true' || '' }}
         AI_APPROVAL_CEILING: ${{ inputs.approval-ceiling }}
         AI_PROFILE_MAX_TOKENS: ${{ inputs.profile-max-tokens }}
@@ -591,6 +604,7 @@ runs:
           -e AI_FEEDBACK_LOOP \
           -e AI_JUDGE_PASS \
           -e AI_SUPPRESS_WALKTHROUGH \
+          -e AI_FINDING_BADGES \
           ${AI_FAIL_ON_FINDINGS:+-e AI_FAIL_ON_FINDINGS} \
           -e AI_APPROVAL_CEILING \
           -e AI_PROFILE_MAX_TOKENS \

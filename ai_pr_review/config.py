@@ -83,6 +83,8 @@ _KNOWN_AI_VARS: frozenset[str] = frozenset(
         "AI_SUPPRESS_WALKTHROUGH",
         # --- Judge pass ---
         "AI_JUDGE_PASS",
+        # --- Finding badges ---
+        "AI_FINDING_BADGES",
         # --- Fail-on-findings ---
         "AI_FAIL_ON_FINDINGS",
         # --- Approval ceiling (#858) ---
@@ -546,6 +548,12 @@ class ReviewConfig(BaseModel):
     # posted summary (Summary, Type and Effort stay). Off by default.
     suppress_walkthrough: bool = False
 
+    # --- Finding badges ---
+    # Show an evidence label and the confidence score beside each finding, for
+    # example "(judge kept, confidence 80)". Display only: it never changes the
+    # approval decision. On by default. Set AI_FINDING_BADGES=false to hide it.
+    finding_badges: bool = True
+
     # --- Judge pass ---
     # On by default per explicit decision (session 2026-06-22). Adds one cheap-model
     # LLM call per review. Set AI_JUDGE_PASS=false to disable.
@@ -934,6 +942,7 @@ class ReviewConfig(BaseModel):
             analyzer_diff_scope=os.environ.get("AI_ANALYZER_DIFF_SCOPE", "cap"),
             suppress_walkthrough=_bool("AI_SUPPRESS_WALKTHROUGH"),
             enable_judge_pass=_bool("AI_JUDGE_PASS", True),
+            finding_badges=_bool("AI_FINDING_BADGES", True),
             fail_on_findings=_bool("AI_FAIL_ON_FINDINGS"),
             approval_ceiling=os.environ.get("AI_APPROVAL_CEILING", "approve").strip() or "approve",
             token_usage_display=os.environ.get("AI_TOKEN_USAGE_DISPLAY", "compact").strip() or "compact",
