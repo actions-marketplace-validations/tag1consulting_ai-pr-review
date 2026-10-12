@@ -26,7 +26,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - WPCS (the WordPress standard) is not in the image, because WPCS 3.4.1 needs phpcs 3 and `drupal/coder` 9 needs phpcs 4 (#1043).
 - Rule-level `type="relative"` exclude patterns are passed to phpcs, which does not apply them to files given on the command line.
-||||||| b37d766
 
 ## [2.21.0] - 2026-10-09
 
