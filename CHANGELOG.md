@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Bugfixes now land directly on `main`.** A defect fix that deserves a patch release no longer goes through a `release/vX.Y.Z` branch. The maintainer cuts the patch release from `main`. Features and other planned changes still use the release branch. This is a process change only, with no engine or workflow code changes. See "Bugfix path" in `CLAUDE.md`.
+
 ## [2.21.0] - 2026-10-09
 
 ### Added
