@@ -902,3 +902,54 @@ class TestRepoRulesetIsDataOnly:
         )
         assert run.xml is not None
         assert "bootstrap" not in run.xml
+
+
+class TestRelativePatternMatcher:
+    """The Python matcher for relative exclude patterns must stay linear and agree with phpcs's regex reading (#1042)."""
+
+    @pytest.mark.parametrize(
+        ("pattern", "path"),
+        [
+            ("*a*a*b", "a" * 4000),
+            ("^*a*a*a$", "a" * 4000 + "b"),
+            ("a*a*b|x*y", "a" * 4000),
+            ("*.*.*", "." * 4000),
+        ],
+    )
+    def test_hostile_pattern_and_long_path_finish_fast(self, pattern: str, path: str) -> None:
+        import time
+
+        from ai_pr_review.analyzers.native.phpcs import _pattern_ok, _relative_pattern_matches
+
+        assert _pattern_ok(pattern)
+        started = time.monotonic()
+        _relative_pattern_matches(pattern, path)
+        assert time.monotonic() - started < 1.0
+
+    def test_more_than_three_wildcards_is_rejected(self) -> None:
+        from ai_pr_review.analyzers.native.phpcs import _pattern_ok
+
+        assert not _pattern_ok("*a*a*a*a")
+        assert not _pattern_ok("a^b")
+        assert not _pattern_ok("a$b")
+
+    @pytest.mark.parametrize(
+        ("pattern", "path", "expected"),
+        [
+            ("^tests/*", "tests/a.php", True),
+            ("^tests/*", "src/tests/a.php", False),
+            ("tests/*", "src/tests/a.php", True),
+            ("\\.min\\.js$", "web/app.min.js", True),
+            ("\\.min\\.js$", "web/app.min.json", False),
+            ("vendor/*|node_modules/*", "node_modules/x/y.php", True),
+            ("^a*b*c$", "aXbYc", True),
+            ("^a*b*c$", "aXbYcZ", False),
+            ("TESTS/*", "tests/a.php", True),
+            ("a.c", "abc", True),
+            ("a\\.c", "abc", False),
+        ],
+    )
+    def test_matches_like_phpcs(self, pattern: str, path: str, expected: bool) -> None:
+        from ai_pr_review.analyzers.native.phpcs import _relative_pattern_matches
+
+        assert _relative_pattern_matches(pattern, path) is expected

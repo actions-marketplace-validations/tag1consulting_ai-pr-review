@@ -93,12 +93,15 @@ _DOCTYPE_RE = re.compile(rb"<!\s*(DOCTYPE|ENTITY)", re.IGNORECASE)
 _REF_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_]+){0,3}$")
 _PROP_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 # phpcs treats exclude patterns as regex fragments (`*` becomes `.*`). Only
-# plain path characters, `|`, anchors, and escaped `.`, `-`, `/`, `,` are
-# accepted. No groups, classes, or quantifiers other than `*`, so a pattern
-# from the workspace cannot cause catastrophic backtracking.
+# plain path characters, `|`, a leading `^`, a trailing `$`, and escaped `.`,
+# `-`, `/`, `,` are accepted. No groups, classes, or quantifiers other than
+# `*`, and at most three `*`. The copy handed to phpcs is therefore cheap for
+# PCRE. The copy applied here is matched without a backtracking regex (see
+# `_relative_pattern_matches`), because a hostile repo controls both the
+# pattern and the file names (ReDoS).
 _PATTERN_ESCAPE_RE = re.compile(r"\\[.\-/,]")
-_PATTERN_BODY_RE = re.compile(r"^[A-Za-z0-9_./*|,^$\-]{1,200}$")
-_MAX_PATTERN_STARS = 8
+_PATTERN_BODY_RE = re.compile(r"^\^?[A-Za-z0-9_./*|,\-]*\$?$")
+_MAX_PATTERN_STARS = 3
 _PATTERN_TYPES = frozenset({"absolute", "relative"})
 _DRUPAL_EXTENSIONS = frozenset({".module", ".install", ".theme", ".profile"})
 # Drupal 7 modules describe themselves with a plain `<name>.info` file (no
@@ -174,7 +177,10 @@ def _installed_standards() -> set[str]:
 
 
 def _pattern_ok(pattern: str) -> bool:
-    if pattern.count("*") > _MAX_PATTERN_STARS:
+    if not pattern or len(pattern) > 200 or pattern.count("*") > _MAX_PATTERN_STARS:
+        return False
+    # `^` and `$` are accepted only at the very start and end of an alternative.
+    if any(part.count("^") > 1 or part.count("$") > 1 for part in pattern.split("|")):
         return False
     return bool(_PATTERN_BODY_RE.match(_PATTERN_ESCAPE_RE.sub("", pattern)))
 
@@ -381,16 +387,72 @@ def _parse_repo_ruleset(path: Path, installed: set[str]) -> _RepoRuleset | None:
     )
 
 
+def _segment_regex(segment: str) -> re.Pattern[str]:
+    """Compile one `*`-free piece of a pattern. No quantifier, so matching is linear per position."""
+    out: list[str] = []
+    i = 0
+    while i < len(segment):
+        ch = segment[i]
+        if ch == "\\" and i + 1 < len(segment):
+            out.append(re.escape(segment[i + 1]))
+            i += 2
+            continue
+        out.append("." if ch == "." else re.escape(ch))
+        i += 1
+    return re.compile("".join(out), re.IGNORECASE)
+
+
+def _alternative_matches(alt: str, path: str) -> bool:
+    """Match one `|`-free alternative the way phpcs reads it: `*` is `.*`, search semantics.
+
+    Matches the `*`-separated pieces left to right with the earliest match of
+    each. A piece has a fixed length, so the earliest match is also the
+    earliest end, which is what makes this greedy walk exact. The cost is
+    linear in the path length per piece.
+    """
+    anchored_start = alt.startswith("^")
+    anchored_end = alt.endswith("$") and not alt.endswith("\\$")
+    body = alt[1:] if anchored_start else alt
+    body = body[:-1] if anchored_end else body
+    pieces = body.split("*")
+    pos = 0
+    for index, piece in enumerate(pieces):
+        regex = _segment_regex(piece)
+        is_last = index == len(pieces) - 1
+        if is_last and anchored_end:
+            # The final piece must end at the end of the path. A fixed-length
+            # piece can only do that as a suffix of what is left.
+            if len(pieces) == 1:
+                return (regex.fullmatch(path) if anchored_start else _suffix_match(regex, path, pos)) is not None
+            return _suffix_match(regex, path, pos) is not None
+        m = regex.match(path) if index == 0 and anchored_start else regex.search(path, pos)
+        if m is None:
+            return False
+        pos = m.end()
+    return True
+
+
+def _suffix_match(regex: re.Pattern[str], path: str, pos: int) -> re.Match[str] | None:
+    """Match *regex* so that it ends exactly at the end of *path* and starts at or after *pos*.
+
+    A piece has a fixed length: one character for each literal, `.` or
+    escaped character. So there is exactly one possible start.
+    """
+    length = len(regex.pattern.replace("\\", ""))
+    begin = len(path) - length
+    if begin < pos:
+        return None
+    return regex.fullmatch(path, begin)
+
+
 def _relative_pattern_matches(pattern: str, relative_path: str) -> bool:
     """Apply one `type="relative"` exclude pattern the way phpcs does for a directory scan.
 
-    phpcs turns `*` into `.*`, reads `\\,` as `,`, and matches the result as a
-    case-insensitive regex. Only patterns that passed `_pattern_ok` get here.
+    Only patterns that passed `_pattern_ok` get here. The match never uses a
+    backtracking regex over the whole pattern, so a hostile pattern cannot
+    stall the review.
     """
-    try:
-        return re.search(pattern.replace("\\,", ",").replace("*", ".*"), relative_path, re.IGNORECASE) is not None
-    except re.error:
-        return False
+    return any(_alternative_matches(alt.replace("\\,", ","), relative_path) for alt in pattern.split("|"))
 
 
 def _in_ruleset_scope(path: str, ruleset: _RepoRuleset) -> bool:
