@@ -167,6 +167,74 @@ def strip_carried_forward_entry(body: str, comment_id: int) -> str:
     return body[: match.start()] + new_section + body[match.end():]
 
 
+_CARRIED_FORWARD_SEVERITY_RE = re.compile(r"\*\*\[(Critical|High|Medium|Low)\]\*\*")
+
+_HEADLINE_RE = re.compile(
+    r"(?P<icon>\S+) \*\*Overall Risk:\*\* (?P<risk>None|Unknown|Critical|High|Medium|Low)"
+    r"(?P<lower> or lower)? \| \*\*Findings:\*\* (?P<count>\d+) \((?P<inline>\d+) inline\)"
+)
+
+_SEVERITY_RANK: Final[dict[str, int]] = {"Low": 0, "Medium": 1, "High": 2, "Critical": 3}
+
+
+def carried_forward_entry_severity(body: str, comment_id: int) -> str | None:
+    """Return the severity label of the "Still open" bullet that names
+    `comment_id`, or `None` if the section or the bullet is absent.
+
+    Read before `strip_carried_forward_entry` removes the bullet, so
+    `adjust_headline_after_dismissal` knows what the dismissed finding was.
+    """
+    match = _CARRIED_FORWARD_SECTION_RE.search(body)
+    if match is None:
+        return None
+    anchor = f"#discussion_r{comment_id})"
+    for line in match.group(2).splitlines():
+        if anchor in line:
+            sev = _CARRIED_FORWARD_SEVERITY_RE.search(line)
+            return sev.group(1) if sev else None
+    return None
+
+
+def adjust_headline_after_dismissal(body: str, severity: str) -> str:
+    """Update the `Overall Risk | Findings` headline after one carried-forward
+    finding of `severity` was dismissed (#1049).
+
+    A carried-forward thread counts once toward the findings total and once
+    toward the inline count, so both drop by one. The risk level can only be
+    recomputed exactly when the dismissed finding was below it, since the
+    body does not record the other findings' severities. In that case the
+    risk is unchanged. Otherwise the risk is rewritten as "<risk> or lower",
+    which stays true whatever else remains. A count of zero gives `None`
+    (unless the run had failed agents, shown as `Unknown`, which is kept).
+
+    No-op if the headline is not found. Never raises.
+    """
+    match = _HEADLINE_RE.search(body)
+    if match is None:
+        return body
+    from ai_pr_review.vcs._body import severity_icon
+
+    risk = match.group("risk")
+    count = max(int(match.group("count")) - 1, 0)
+    inline = max(int(match.group("inline")) - 1, 0)
+    icon = match.group("icon")
+    lower = match.group("lower") or ""
+    if count == 0 and risk != "Unknown":
+        risk, lower = "None", ""
+        icon = severity_icon(risk)
+    elif (
+        risk in _SEVERITY_RANK
+        and severity in _SEVERITY_RANK
+        and _SEVERITY_RANK[severity] >= _SEVERITY_RANK[risk]
+    ):
+        lower = " or lower"
+    headline = (
+        f"{icon} **Overall Risk:** {risk}{lower} | "
+        f"**Findings:** {count} ({inline} inline)"
+    )
+    return body[: match.start()] + headline + body[match.end():]
+
+
 def _parse_next_link(link_header: str) -> str | None:
     """Extract the rel=next URL from a GitHub Link response header."""
     if not link_header:

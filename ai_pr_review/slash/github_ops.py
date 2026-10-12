@@ -400,9 +400,19 @@ def _record_verdict(
     verdicts[fingerprint] = verdict
     new_body = upsert_verdicts_marker(canonical.body, verdicts)
     if resolved_comment_id is not None:
-        from ai_pr_review.vcs.github import strip_carried_forward_entry
+        from ai_pr_review.vcs.github import (
+            adjust_headline_after_dismissal,
+            carried_forward_entry_severity,
+            strip_carried_forward_entry,
+        )
 
+        # #1049: the headline counts this thread, so it must follow the bullet.
+        dismissed_severity = carried_forward_entry_severity(
+            new_body, resolved_comment_id
+        )
         new_body = strip_carried_forward_entry(new_body, resolved_comment_id)
+        if dismissed_severity is not None:
+            new_body = adjust_headline_after_dismissal(new_body, dismissed_severity)
     try:
         ok, status, snippet = provider.update_review_body(canonical_id, new_body)
     except httpx.HTTPError as exc:

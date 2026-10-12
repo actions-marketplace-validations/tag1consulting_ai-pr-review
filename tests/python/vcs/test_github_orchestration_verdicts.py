@@ -30,6 +30,8 @@ from ai_pr_review.vcs.github import (
     GitHubConfig,
     GitHubProvider,
     _build_inline_comment_body,
+    adjust_headline_after_dismissal,
+    carried_forward_entry_severity,
     strip_carried_forward_entry,
 )
 from ai_pr_review.vcs.http import RecordingClient, RetryPolicy, TapeRecorder
@@ -544,6 +546,86 @@ def test_strip_carried_forward_entry_noop_when_comment_id_not_named() -> None:
 def test_strip_carried_forward_entry_noop_when_no_section_present() -> None:
     body = "## AI Review Findings\n\nNo findings above the confidence threshold."
     assert strip_carried_forward_entry(body, 10) == body
+
+
+def test_dismiss_inline_reply_updates_headline_after_carried_forward_high_dismissed() -> None:
+    """#1049: dismissing a carried-forward High thread must update the headline
+    count and risk, not only drop the bullet."""
+    f = _finding("leaked secret", source="security-reviewer", file="config.py", line=3)
+    comment_body = _build_inline_comment_body(f, finding_id=6)
+    nodes = [_inline_thread("T1", resolved=False, body=comment_body, comment_db_id=77, review_db_id=41)]
+    review_body = (
+        "## AI Review Findings\n\n"
+        "\U0001f534 **Overall Risk:** High | **Findings:** 6 (3 inline)\n\n"
+        "### Still open from earlier reviews (1)\n"
+        "- \U0001f534 **[High]** **[F6]** `config.py:3` — "
+        "[open thread](https://github.com/o/r/pull/1#discussion_r77)\n"
+        + build_id_map_marker({fingerprint(f): 6})
+    )
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        url = str(req.url)
+        if req.method == "POST" and url.endswith("/graphql"):
+            body = _json.loads(req.content)
+            if "resolveReviewThread" in body.get("query", ""):
+                return httpx.Response(200, json={"data": {"resolveReviewThread": {"thread": {"id": "T1", "isResolved": True}}}})
+            return httpx.Response(200, json=_threads_response(nodes))
+        if req.method == "GET" and url.endswith("/reviews/41"):
+            return httpx.Response(200, json={"id": 41, "state": "COMMENTED"})
+        if req.method == "GET" and "/reviews" in url:
+            return httpx.Response(
+                200,
+                json=[{"id": 41, "state": "COMMENTED", "user": {"login": "github-actions[bot]"}, "body": review_body}],
+            )
+        if req.method == "PUT" and url.endswith("/reviews/41"):
+            return httpx.Response(200, json={"id": 41})
+        return httpx.Response(404)
+
+    prov, rec = _make_provider(handler)
+    dismiss_inline_reply(prov, 77, None, actor="alice", command="false-positive")
+
+    puts = _put_bodies(rec, "/reviews/41")
+    assert len(puts) == 1
+    assert "**Overall Risk:** High or lower | **Findings:** 5 (2 inline)" in puts[0]
+    assert "Still open from earlier reviews" not in puts[0]
+
+
+_HEADLINE_BODY = "## AI Review Findings\n\n\U0001f534 **Overall Risk:** High | **Findings:** 6 (3 inline)\n\nrest"
+
+
+def test_adjust_headline_keeps_risk_when_dismissed_finding_is_lower() -> None:
+    result = adjust_headline_after_dismissal(_HEADLINE_BODY, "Low")
+    assert "**Overall Risk:** High | **Findings:** 5 (2 inline)" in result
+    assert result.endswith("\n\nrest")
+
+
+def test_adjust_headline_marks_risk_or_lower_when_dismissed_matches_risk() -> None:
+    once = adjust_headline_after_dismissal(_HEADLINE_BODY, "High")
+    assert "**Overall Risk:** High or lower | **Findings:** 5 (2 inline)" in once
+    # A second dismissal must not stack the suffix.
+    twice = adjust_headline_after_dismissal(once, "Low")
+    assert "**Overall Risk:** High or lower | **Findings:** 4 (1 inline)" in twice
+
+
+def test_adjust_headline_reports_none_when_last_finding_dismissed() -> None:
+    body = "\U0001f7e1 **Overall Risk:** Medium | **Findings:** 1 (1 inline)"
+    result = adjust_headline_after_dismissal(body, "Medium")
+    assert "**Overall Risk:** None | **Findings:** 0 (0 inline)" in result
+
+
+def test_adjust_headline_noop_without_headline() -> None:
+    body = "## AI Review: Approved\n\nNo findings above the confidence threshold."
+    assert adjust_headline_after_dismissal(body, "High") == body
+
+
+def test_carried_forward_entry_severity_reads_bullet() -> None:
+    body = (
+        "## R\n\n### Still open from earlier reviews (1)\n"
+        "- \U0001f534 **[High]** **[F2]** `a.py:1` — [open thread](https://x/pull/1#discussion_r10)\n"
+    )
+    assert carried_forward_entry_severity(body, 10) == "High"
+    assert carried_forward_entry_severity(body, 11) is None
+    assert carried_forward_entry_severity("no section", 10) is None
 
 
 def test_dismiss_inline_reply_verdict_lookup_list_reviews_raising_is_swallowed(caplog) -> None:
