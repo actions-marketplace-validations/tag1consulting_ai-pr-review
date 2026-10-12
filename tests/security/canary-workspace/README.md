@@ -16,6 +16,7 @@ Each file is designed to write a sentinel marker to `$CANARY_DIR` if it is ever 
 | `.pre-commit-config.yaml` | Hook run by `pre-commit` |
 | `conftest.py` | File imported by pytest auto-discovery |
 | `.semgrep.yml` | Custom rule loaded as executable config |
+| `phpcs.xml.dist` + `canary-bootstrap.php` | Ruleset that names `canary-bootstrap.php` as `bootstrap`, `autoload` and `installed_paths`. phpcs must never read it (#1042) |
 
 ## How the guard works
 

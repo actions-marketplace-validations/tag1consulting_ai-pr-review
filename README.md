@@ -441,7 +441,7 @@ The container action ships all analyzer binaries pre-installed. For the direct-a
 | **golangci-lint** | `.go` files | `errcheck`/`govet`/`staticcheck`→High, others→Medium | 90 | `golangci-lint` |
 | **hadolint** | `Dockerfile*`, `*.dockerfile` | `error`→High, `warning`→Medium, else→Low | 90 | `hadolint` |
 | **checkov** | `.tf`, `.tfvars`, `.yaml`, `.yml`, `Dockerfile*`, `.json` | `CKV2_*` and `CKV_SECRET_*`→High; all other checks→Medium | 80 | `checkov` |
-| **phpcs** | `.php`, `.module`, `.inc`, `.theme`, `.install`, `.profile` | `ERROR`→High, `WARNING`→Medium; Drupal+DrupalPractice standard when available, else PSR12 | 90 | `phpcs` |
+| **phpcs** | `.php`, `.module`, `.inc`, `.theme`, `.install`, `.profile` | `ERROR`→High, `WARNING`→Medium; honors the repo phpcs ruleset's file scope and installed rules (read as data, never passed to phpcs), Drupal+DrupalPractice only for Drupal repos, else PSR12 | 90 | `phpcs` |
 | **eslint** | `.js`, `.jsx`, `.ts`, `.tsx`, `.mjs`, `.cjs` | severity 2→High, severity 1→Medium; uses consumer's config, no-op if no `eslint.config.*` or `.eslintrc.*` found | 90 | `eslint` |
 | **phpstan** | `.php`, `.module`, `.inc`, `.theme`, `.install`, `.profile` | All findings→High; always runs at level `PHPSTAN_LEVEL` (default 3). A project's own `phpstan.neon`/`phpstan.neon.dist` is never auto-discovered, since the analyzed workspace may be untrusted fork-PR content | 85 | `phpstan` |
 | **kube-linter** | `.yaml`, `.yml`, `.json` with `apiVersion:` + `kind:` headers | All findings→Medium (reliability-focused: missing probes, resource limits, etc.) | 85 | `kube-linter` |

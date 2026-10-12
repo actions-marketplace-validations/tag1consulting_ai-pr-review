@@ -2,17 +2,30 @@
 
 Replaces analyzers/run-phpcs.sh. Invokes phpcs directly via subprocess and
 converts its JSON output to Finding instances.
+
+Trust boundary (#1042): the workspace is untrusted PR content, and a phpcs
+ruleset is not inert data. It can set ``installed_paths``, ``<arg
+name="bootstrap">``, ``<autoload>`` and path-style ``<rule ref>`` entries,
+all of which make phpcs load PHP from the workspace. phpcs therefore never
+reads the repo ruleset. This module reads the ruleset itself as data, keeps
+an allowlisted subset (which files to lint, which exclude patterns, which
+installed standards and sniffs, and per-rule tweaks), and gives phpcs a
+freshly written ruleset built from that subset. This is the same approach as
+the empty trusted ``--configuration`` file in ``phpstan.py`` (#739).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import subprocess
 import tempfile
+import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ai_pr_review.analyzers.native._paths import strip_workspace_prefix
@@ -41,6 +54,22 @@ _PSR12_PLUS_DOCBLOCK_RULESET = """<?xml version="1.0"?>
 </ruleset>
 """
 
+# Correctness-only sniffs with no code-style opinion (no indentation, tabs,
+# line length, naming, or brace placement). Used when a repo ruleset names a
+# standard that the image does not have (for example WordPress). PSR12 is the
+# wrong fallback there: it requires spaces, so tab-indented code gets a
+# finding on almost every line. All seven names verified against phpcs 4.0.4
+# with `phpcs -e` (#1042).
+_STYLE_NEUTRAL_REFS = (
+    "Generic.PHP.Syntax",
+    "Generic.CodeAnalysis.EmptyStatement",
+    "Generic.CodeAnalysis.UnconditionalIfStatement",
+    "Generic.CodeAnalysis.JumbledIncrementer",
+    "Generic.PHP.DeprecatedFunctions",
+    "Squiz.PHP.Eval",
+    "Squiz.PHP.NonExecutableCode",
+)
+
 # phpcs 4.x exit codes are a bitmask (PHPCSStandards/PHP_CodeSniffer#184,
 # src/Util/ExitCode.php): 0=clean, 1=fixable violations, 2=non-fixable
 # violations, 3=both. All four mean "phpcs completed a normal run; the JSON
@@ -50,9 +79,57 @@ _PSR12_PLUS_DOCBLOCK_RULESET = """<?xml version="1.0"?>
 # genuine config error was not representable via this simple 0/1/2 scheme.
 _SUCCESS_RETURNCODES = frozenset({0, 1, 2, 3})
 
+# phpcs's own auto-discovery order (Config::CONFIG_FILENAMES, phpcs 4.0.4).
+_RULESET_NAMES = (".phpcs.xml", "phpcs.xml", ".phpcs.xml.dist", "phpcs.xml.dist")
+_MAX_RULESET_BYTES = 256 * 1024
+_MAX_COMPOSER_BYTES = 1024 * 1024
+_DOCTYPE_RE = re.compile(rb"<!\s*(DOCTYPE|ENTITY)", re.IGNORECASE)
 
-def _detect_standard() -> str:
-    """Return the phpcs coding standard to use: Drupal,DrupalPractice if available, else PSR12."""
+# "Standard", "Standard.Category", "Standard.Category.Sniff", or
+# "Standard.Category.Sniff.Code". A path, a ".xml" suffix, or a "../" segment
+# can never match, which is what keeps path-style refs out of the trusted
+# ruleset (a path ref makes phpcs load the referenced file).
+_REF_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_]+){0,3}$")
+_PROP_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+# phpcs treats exclude patterns as regex fragments (`*` becomes `.*`). Only
+# plain path characters, `|`, anchors, and escaped `.`, `-`, `/`, `,` are
+# accepted. No groups, classes, or quantifiers other than `*`, so a pattern
+# from the workspace cannot cause catastrophic backtracking.
+_PATTERN_ESCAPE_RE = re.compile(r"\\[.\-/,]")
+_PATTERN_BODY_RE = re.compile(r"^[A-Za-z0-9_./*|,^$\-]{1,200}$")
+_MAX_PATTERN_STARS = 8
+_PATTERN_TYPES = frozenset({"absolute", "relative"})
+_DRUPAL_EXTENSIONS = frozenset({".module", ".install", ".theme", ".profile"})
+# Ships inside phpcs itself but is not listed by `phpcs -i`.
+_ALWAYS_INSTALLED = frozenset({"Generic"})
+
+
+@dataclass(frozen=True)
+class _RepoRuleset:
+    """The allowlisted subset of a repo phpcs ruleset (data only)."""
+
+    name: str
+    files: tuple[str, ...]
+    patterns: tuple[tuple[str, str], ...]
+    rules: tuple[ET.Element, ...]
+    has_standard_ref: bool
+    missing_standards: tuple[str, ...]
+
+
+@dataclass
+class _Plan:
+    """What to run: a named standard or a generated ruleset, plus scope."""
+
+    label: str
+    remediation_standard: str
+    named_standard: str | None = None
+    ruleset_xml: str | None = None
+    files: list[str] = field(default_factory=list)
+    drupal: bool = False
+
+
+def _installed_standards() -> set[str]:
+    """Return the standard names phpcs lists, or an empty set when it cannot be asked."""
     try:
         result = subprocess.run(
             ["phpcs", "-i"],
@@ -60,33 +137,353 @@ def _detect_standard() -> str:
             text=True,
             timeout=10,
         )
-        if "Drupal" in result.stdout:
-            return "Drupal,DrupalPractice"
     except subprocess.TimeoutExpired:
         logger.warning("[ai-pr-review] WARNING: phpcs -i timed out detecting standard; falling back to PSR12.")
+        return set()
     except OSError as exc:
         logger.warning("[ai-pr-review] WARNING: phpcs -i failed: %s; falling back to PSR12.", exc)
-    return "PSR12"
+        return set()
+    text = result.stdout
+    if ":" in text:
+        text = text.rsplit(":", 1)[-1]
+    elif " are " in text:
+        text = text.split(" are ", 1)[-1]
+    names = {t for t in re.split(r"[,\s]+", text) if t and t != "and"}
+    return names | _ALWAYS_INSTALLED
+
+
+def _pattern_ok(pattern: str) -> bool:
+    if pattern.count("*") > _MAX_PATTERN_STARS:
+        return False
+    return bool(_PATTERN_BODY_RE.match(_PATTERN_ESCAPE_RE.sub("", pattern)))
+
+
+def _path_ok(path: str) -> bool:
+    if not path or len(path) > 300 or "\x00" in path or path.startswith("/") or "\\" in path:
+        return False
+    return ".." not in path.split("/")
+
+
+def _find_repo_ruleset() -> Path | None:
+    """Return the first repo ruleset in the working directory, in phpcs's own order."""
+    for name in _RULESET_NAMES:
+        candidate = Path(name)
+        # A symlink could point at any file on the runner. Never follow one.
+        if candidate.is_symlink():
+            logger.warning("[ai-pr-review] WARNING: ignoring symlinked phpcs ruleset %s.", name)
+            continue
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _keep_rule(rule: ET.Element, installed: set[str]) -> tuple[ET.Element | None, str | None]:
+    """Rebuild one `<rule>` from its allowlisted parts.
+
+    Returns (rule, None) when kept, (None, standard) when it names a standard
+    that is not installed, and (None, None) when it is dropped as unsafe.
+    """
+    ref = rule.get("ref", "")
+    if not _REF_RE.match(ref):
+        logger.warning("[ai-pr-review] WARNING: dropping phpcs rule ref %r (path-style or invalid).", ref[:80])
+        return None, None
+    standard = ref.split(".", 1)[0]
+    if standard not in installed:
+        return None, standard
+
+    kept = ET.Element("rule", ref=ref)
+    for child in rule:
+        text = (child.text or "").strip()
+        if child.tag == "exclude" and _REF_RE.match(child.get("name", "")):
+            ET.SubElement(kept, "exclude", name=child.get("name", ""))
+        elif child.tag in ("exclude-pattern", "include-pattern") and _pattern_ok(text):
+            attrs = {"type": child.get("type", "absolute")}
+            if attrs["type"] in _PATTERN_TYPES:
+                ET.SubElement(kept, child.tag, attrs).text = text
+        elif child.tag == "severity" and text.isdigit() and int(text) <= 10:
+            ET.SubElement(kept, "severity").text = text
+        elif child.tag == "type" and text in ("error", "warning"):
+            ET.SubElement(kept, "type").text = text
+        elif child.tag == "properties":
+            props = ET.SubElement(kept, "properties")
+            for prop in child:
+                name = prop.get("name", "")
+                value = prop.get("value", "")
+                if prop.tag != "property" or not _PROP_NAME_RE.match(name) or len(value) > 200:
+                    continue
+                attrs = {"name": name}
+                if "value" in prop.attrib:
+                    attrs["value"] = value
+                if prop.get("type") == "array":
+                    attrs["type"] = "array"
+                if prop.get("extend") in ("true", "false"):
+                    attrs["extend"] = prop.get("extend", "")
+                new_prop = ET.SubElement(props, "property", attrs)
+                for el in prop:
+                    el_value = el.get("value", "")
+                    if el.tag == "element" and len(el_value) <= 200:
+                        el_attrs = {"value": el_value}
+                        if "key" in el.attrib and len(el.get("key", "")) <= 200:
+                            el_attrs["key"] = el.get("key", "")
+                        ET.SubElement(new_prop, "element", el_attrs)
+    return kept, None
+
+
+def _parse_repo_ruleset(path: Path, installed: set[str]) -> _RepoRuleset | None:
+    """Read *path* as data and keep only the allowlisted parts. None when unusable."""
+    try:
+        with path.open("rb") as fh:
+            data = fh.read(_MAX_RULESET_BYTES + 1)
+    except OSError as exc:
+        logger.warning("[ai-pr-review] WARNING: could not read %s: %s", path, exc)
+        return None
+    if len(data) > _MAX_RULESET_BYTES:
+        logger.warning("[ai-pr-review] WARNING: %s is larger than %d bytes; not using it.", path, _MAX_RULESET_BYTES)
+        return None
+    # A NUL byte means UTF-16/32, which would hide a DOCTYPE from the byte check.
+    if b"\x00" in data or _DOCTYPE_RE.search(data):
+        logger.warning("[ai-pr-review] WARNING: %s has a DOCTYPE, an ENTITY declaration, or a non-UTF-8 encoding; not using it.", path)
+        return None
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError as exc:
+        logger.warning("[ai-pr-review] WARNING: %s is not valid XML: %s", path, exc)
+        return None
+    if root.tag != "ruleset":
+        logger.warning("[ai-pr-review] WARNING: %s has no <ruleset> root; not using it.", path)
+        return None
+
+    files: list[str] = []
+    patterns: list[tuple[str, str]] = []
+    rules: list[ET.Element] = []
+    missing: list[str] = []
+    has_standard_ref = False
+    for child in root:
+        text = (child.text or "").strip()
+        if child.tag == "file" and _path_ok(text):
+            files.append(text.removeprefix("./").rstrip("/"))
+        elif child.tag == "exclude-pattern" and _pattern_ok(text):
+            kind = child.get("type", "absolute")
+            if kind in _PATTERN_TYPES:
+                patterns.append((text, kind))
+        elif child.tag == "rule":
+            has_standard_ref = True
+            kept, absent = _keep_rule(child, installed)
+            if kept is not None:
+                rules.append(kept)
+            elif absent is not None and absent not in missing:
+                missing.append(absent)
+    return _RepoRuleset(
+        name=path.name,
+        files=tuple(files),
+        patterns=tuple(patterns),
+        rules=tuple(rules),
+        has_standard_ref=has_standard_ref,
+        missing_standards=tuple(missing),
+    )
+
+
+def _in_ruleset_scope(path: str, ruleset: _RepoRuleset) -> bool:
+    """Is *path* inside one of the ruleset's `<file>` entries?
+
+    phpcs ignores `<file>` when files are given on the command line (verified
+    against phpcs 4.0.4), so the scope has to be applied here. A ruleset with
+    no `<file>` entry has no scope limit. Exclude patterns are not applied
+    here, because phpcs applies them itself from the generated ruleset.
+    """
+    if not ruleset.files:
+        return True
+    norm = path.removeprefix("./")
+    cwd = Path.cwd()
+    if norm.startswith("/"):
+        try:
+            norm = str(Path(norm).relative_to(cwd))
+        except ValueError:
+            return False
+    return any(norm == entry or norm.startswith(entry + "/") for entry in ruleset.files)
+
+
+def _looks_like_drupal(php_files: list[str]) -> bool:
+    """Does the repo show Drupal signals? Reads file names and composer.json as data."""
+    for f in php_files:
+        if Path(f).suffix in _DRUPAL_EXTENSIONS:
+            return True
+    composer = Path("composer.json")
+    if composer.is_file() and not composer.is_symlink():
+        try:
+            with composer.open("rb") as fh:
+                data = json.loads(fh.read(_MAX_COMPOSER_BYTES))
+        except (OSError, ValueError):
+            data = None
+        if isinstance(data, dict):
+            if str(data.get("type", "")).startswith("drupal-"):
+                return True
+            for key in ("require", "require-dev"):
+                deps = data.get(key)
+                if isinstance(deps, dict) and any(str(k).startswith("drupal/core") for k in deps):
+                    return True
+    cwd = Path.cwd()
+    checked: set[Path] = set()
+    for f in php_files:
+        directory = Path(f).parent
+        if directory.is_absolute():
+            try:
+                directory = directory.relative_to(cwd)
+            except ValueError:
+                checked_dirs = [directory]
+            else:
+                checked_dirs = [directory, *directory.parents]
+        else:
+            checked_dirs = [directory, *directory.parents]
+        for d in checked_dirs:
+            if d in checked:
+                continue
+            checked.add(d)
+            try:
+                if any(d.glob("*.info.yml")):
+                    return True
+            except OSError:
+                continue
+    return False
+
+
+def _build_ruleset_xml(base_refs: tuple[str, ...], ruleset: _RepoRuleset | None) -> str:
+    """Write the trusted ruleset. ElementTree escapes every string from the repo."""
+    root = ET.Element("ruleset", name="AiPrReviewTrusted")
+    ET.SubElement(root, "description").text = "Generated by ai-pr-review. Not read from the repo."
+    for ref in base_refs:
+        ET.SubElement(root, "rule", ref=ref)
+    if ruleset is not None:
+        for pattern, kind in ruleset.patterns:
+            ET.SubElement(root, "exclude-pattern", type=kind).text = pattern
+        for rule in ruleset.rules:
+            root.append(rule)
+    return '<?xml version="1.0"?>\n' + ET.tostring(root, encoding="unicode") + "\n"
+
+
+def _plan_standard(php_files: list[str]) -> _Plan | None:
+    """Choose what to run. None when the repo ruleset puts every changed file out of scope."""
+    installed = _installed_standards()
+    ruleset_path = _find_repo_ruleset()
+    if ruleset_path is not None:
+        ruleset = _parse_repo_ruleset(ruleset_path, installed)
+        if ruleset is None:
+            logger.warning(
+                "[ai-pr-review] WARNING: %s could not be used; linting with the style-neutral fallback.",
+                ruleset_path.name,
+            )
+            return _Plan(
+                label="style-neutral fallback",
+                remediation_standard=ruleset_path.name,
+                ruleset_xml=_build_ruleset_xml(_STYLE_NEUTRAL_REFS, None),
+                files=php_files,
+            )
+        scoped = [f for f in php_files if _in_ruleset_scope(f, ruleset)]
+        if not scoped:
+            logger.info("[ai-pr-review] phpcs: no changed file is inside the <file> scope of %s; skipping.", ruleset.name)
+            return None
+        if ruleset.missing_standards:
+            logger.warning(
+                "[ai-pr-review] WARNING: %s names standard(s) not installed in this image: %s. "
+                "Linting with the style-neutral fallback plus the installed rules it names.",
+                ruleset.name, ", ".join(ruleset.missing_standards),
+            )
+            return _Plan(
+                label="style-neutral fallback",
+                remediation_standard=ruleset.name,
+                ruleset_xml=_build_ruleset_xml(_STYLE_NEUTRAL_REFS, ruleset),
+                files=scoped,
+            )
+        if ruleset.has_standard_ref:
+            return _Plan(
+                label="repo ruleset",
+                remediation_standard=ruleset.name,
+                ruleset_xml=_build_ruleset_xml((), ruleset),
+                files=scoped,
+                drupal=any(r.get("ref", "").startswith("Drupal") for r in ruleset.rules),
+            )
+        # A ruleset with no standard of its own: keep its scope and excludes
+        # and pick the default standard below.
+        php_files = scoped
+        default_extra: _RepoRuleset | None = ruleset
+    else:
+        default_extra = None
+
+    if "Drupal" in installed and _looks_like_drupal(php_files):
+        if default_extra is None:
+            return _Plan(
+                label="Drupal,DrupalPractice",
+                remediation_standard="Drupal,DrupalPractice",
+                named_standard="Drupal,DrupalPractice",
+                files=php_files,
+                drupal=True,
+            )
+        return _Plan(
+            label="Drupal,DrupalPractice",
+            remediation_standard=default_extra.name,
+            ruleset_xml=_build_ruleset_xml(("Drupal", "DrupalPractice"), default_extra),
+            files=php_files,
+            drupal=True,
+        )
+    if default_extra is not None:
+        return _Plan(
+            label="PSR12",
+            remediation_standard=default_extra.name,
+            ruleset_xml=_build_ruleset_xml(("PSR12", "Squiz.Commenting.FunctionComment"), default_extra),
+            files=php_files,
+        )
+    return _Plan(label="PSR12", remediation_standard="PSR12", ruleset_xml=_PSR12_PLUS_DOCBLOCK_RULESET, files=php_files)
 
 
 @contextmanager
-def _standard_arg(standard: str) -> Iterator[str]:
-    """Return the value to pass as --standard for *standard*.
+def _standard_arg(plan: _Plan) -> Iterator[str]:
+    """Return the value to pass as --standard for *plan*.
 
-    Named standards pass through unchanged. The PSR12 fallback is upgraded to
-    a temp-file ruleset combining PSR12 with the Squiz docblock sniff, which
-    extends the doc-comment/signature mismatch coverage Drupal repos already
-    get (via Drupal.Commenting.FunctionComment) to non-Drupal PHP repos.
+    A named standard passes through unchanged. A generated ruleset is written
+    to a temp file that phpcs reads. The temp file never lives in the
+    workspace.
     """
-    if standard != "PSR12":
-        yield standard
+    if plan.ruleset_xml is None:
+        yield plan.named_standard or ""
         return
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".xml", prefix="phpcs-ruleset-", delete=True
     ) as f:
-        f.write(_PSR12_PLUS_DOCBLOCK_RULESET)
+        f.write(plan.ruleset_xml)
         f.flush()
         yield f.name
+
+
+def _invoke_phpcs(plan: _Plan) -> subprocess.CompletedProcess[str] | None:
+    """Run phpcs for *plan*. None on timeout or when phpcs cannot start."""
+    try:
+        with _standard_arg(plan) as standard_arg:
+            return subprocess.run(
+                [
+                    "phpcs",
+                    "--report=json",
+                    f"--standard={standard_arg}",
+                    "--extensions=php,module,inc,theme,install,profile",
+                    "-q",
+                    "--",
+                    *plan.files,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=_TIMEOUT_SECS,
+            )
+    except subprocess.TimeoutExpired as exc:
+        logger.warning("[ai-pr-review] WARNING: phpcs timed out after %ss; skipping.", exc.timeout)
+        return None
+    except OSError as exc:
+        logger.warning("[ai-pr-review] WARNING: phpcs failed to start: %s", exc)
+        return None
+
+
+def _remediation(plan: _Plan, path: str) -> str:
+    if plan.drupal:
+        return f"See https://www.drupal.org/docs/develop/standards or fix with: phpcs --standard={plan.remediation_standard} {path}"
+    return f"Fix the violation named above. Check locally with: phpcs --standard={plan.remediation_standard} {path}"
 
 
 def _run_phpcs(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
@@ -99,36 +496,38 @@ def _run_phpcs(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
         logger.warning("[ai-pr-review] WARNING: phpcs not found; skipping.")
         return []
 
-    standard = _detect_standard()
+    plan = _plan_standard(php_files)
+    if plan is None:
+        return []
 
-    try:
-        with _standard_arg(standard) as standard_arg:
-            result = subprocess.run(
-                [
-                    "phpcs",
-                    "--report=json",
-                    f"--standard={standard_arg}",
-                    "--extensions=php,module,inc,theme,install,profile",
-                    "-q",
-                    "--",
-                    *php_files,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=_TIMEOUT_SECS,
-            )
-    except subprocess.TimeoutExpired as exc:
-        logger.warning("[ai-pr-review] WARNING: phpcs timed out after %ss; skipping.", exc.timeout)
+    result = _invoke_phpcs(plan)
+    if result is None:
         return []
-    except OSError as exc:
-        logger.warning("[ai-pr-review] WARNING: phpcs failed to start: %s", exc)
-        return []
+
+    if result.returncode not in _SUCCESS_RETURNCODES and plan.ruleset_xml is not None and plan.label == "repo ruleset":
+        # A rule or sniff code the repo ruleset names may not exist in this
+        # image. Retry once with the style-neutral fallback instead of
+        # returning no findings at all.
+        logger.warning(
+            "[ai-pr-review] WARNING: phpcs rejected the generated ruleset (exit %d); "
+            "retrying with the style-neutral fallback. stderr: %s",
+            result.returncode, result.stderr[:200],
+        )
+        plan = _Plan(
+            label="style-neutral fallback",
+            remediation_standard=plan.remediation_standard,
+            ruleset_xml=_build_ruleset_xml(_STYLE_NEUTRAL_REFS, None),
+            files=plan.files,
+        )
+        result = _invoke_phpcs(plan)
+        if result is None:
+            return []
 
     if result.returncode not in _SUCCESS_RETURNCODES:
         logger.warning(
-            "[ai-pr-review] WARNING: phpcs exited %d (process/config error); standard=%r may not be installed. "
+            "[ai-pr-review] WARNING: phpcs exited %d (process/config error); standard=%r may not be usable. "
             "stderr: %s",
-            result.returncode, standard, result.stderr[:200],
+            result.returncode, plan.label, result.stderr[:200],
         )
         return []
 
@@ -167,7 +566,7 @@ def _run_phpcs(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
                         file=normalized_path,
                         line=msg.get("line") or None,
                         finding=f"{source_rule}: {msg.get('message', '')}",
-                        remediation=f"See https://www.drupal.org/docs/develop/standards or fix with: phpcs --standard={standard} {normalized_path}",
+                        remediation=_remediation(plan, normalized_path),
                         category="lint",
                     )
                 )
