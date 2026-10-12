@@ -180,7 +180,7 @@ Unit tests for the harness's pure verification logic (`tests/e2e/verify.py`) liv
 
 ## Which branch to target
 
-Feature and issue PRs target the current release branch (`release/vX.Y.Z`), not `main`. Ask a maintainer for the branch name if none is open. Dependency PRs from Renovate still target `main`. See the "Branching model" section in `CLAUDE.md` for why and for how a release is cut.
+Feature and other planned-change PRs target the current release branch (`release/vX.Y.Z`). Ask a maintainer for the branch name if none is open. Bugfix PRs, meaning a defect fix with no new feature, setting, or behavior option, target `main` directly, and the maintainer cuts a patch release from `main`. Dependency PRs from Renovate also target `main`. If you are not sure which one applies, ask a maintainer. See the "Branching model" and "Bugfix path" sections in `CLAUDE.md` for why and for how a release is cut.
 
 ## Pre-PR checklist
 

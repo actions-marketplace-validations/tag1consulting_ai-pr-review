@@ -121,7 +121,7 @@ To make this a real merge gate, add a branch protection rule on the target branc
 
 ## Live example
 
-This repository uses its own feature. [`.github/ai-pr-review/policy.yml`](https://github.com/tag1consulting/ai-pr-review/blob/main/.github/ai-pr-review/policy.yml) routes docs-only PRs (`docs/**`, `language-profiles/**`) to the near-zero-cost tier. It runs a full-mode review automatically on every push to a `release/*` PR (the `deep` policy, which also satisfies the `ai-pr-review/policy-gate` merge gate). Feature and issue PRs that target a `release/*` branch keep the default quick review.
+This repository uses its own feature. [`.github/ai-pr-review/policy.yml`](https://github.com/tag1consulting/ai-pr-review/blob/main/.github/ai-pr-review/policy.yml) routes docs-only PRs (`docs/**`, `language-profiles/**`) to the near-zero-cost tier. It runs a full-mode review automatically on every push to a `release/*` PR (the `deep` policy, which also satisfies the `ai-pr-review/policy-gate` merge gate). Feature and issue PRs that target a `release/*` branch keep the default quick review. Bugfix PRs that target `main` also keep the default quick review. A maintainer can run `/ai-pr-review review-full` on one when it is large or touches a trust boundary.
 
 ## Verifying a route matched
 
