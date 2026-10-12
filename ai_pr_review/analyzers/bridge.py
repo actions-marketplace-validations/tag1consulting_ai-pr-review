@@ -1,6 +1,6 @@
 """Analyzer bridge — invokes static analyzers and returns Finding instances.
 
-Dispatches to native Python callables for each of the 13 supported analyzers.
+Dispatches to a native Python callable for each analyzer in `ANALYZER_NAMES`.
 Uses the typed ChangedFiles from manifest.py to skip analyzers with no
 eligible files (closes #188). Returns Finding instances directly from each
 native callable.
