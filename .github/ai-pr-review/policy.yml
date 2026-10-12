@@ -12,9 +12,9 @@ version: 1
 policies:
   # Docs-only changes: no agents, no analyzers. Scoped to structurally
   # doc-only trees (docs/**, language-profiles/**) rather than a bare
-  # '*.md' glob — path matching is "any changed file matches any glob",
-  # so a broad '*.md' would also zero out review on a PR that bundles a
-  # README/CLAUDE.md edit alongside real code changes in the same diff.
+  # '*.md' glob. The route below uses `paths-all`, so it matches only when
+  # EVERY changed file is under one of those trees. A PR that bundles one
+  # docs file with real code does not match, and gets the normal review.
   content:
     agents: []
     analyzers: []
@@ -26,10 +26,8 @@ policies:
 
 routes:
   # Release branches first, ahead of the content route below, so a release
-  # PR that happens to touch docs/** (e.g. CHANGELOG-style updates) doesn't
-  # match the docs route instead — the any-file-matches-any-glob semantics
-  # above would otherwise let a docs change on a release branch skip this
-  # entirely.
+  # PR that happens to touch only docs/** (e.g. CHANGELOG-style updates)
+  # doesn't match the docs route instead and skip this entirely.
   #
   # Release PRs get a full-mode review on every push. Work lands on a
   # long-lived release/vX.Y.Z branch first (see CLAUDE.md's release process),
@@ -44,7 +42,7 @@ routes:
     require: deep
 
   # Doc-only PRs get the near-zero-cost tier.
-  - when: {paths: ['docs/**', 'language-profiles/**']}
+  - when: {paths-all: ['docs/**', 'language-profiles/**']}
     policy: content
 
 # No `default:` — everything else falls through to the engine's hard-coded

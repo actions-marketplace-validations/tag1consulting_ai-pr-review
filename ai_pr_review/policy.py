@@ -66,7 +66,9 @@ _POLICY_PATH_LEGACY = ".github/ai-pr-review/policy.yml"
 _POLICY_PATH_CANDIDATES: tuple[str, ...] = (_POLICY_PATH, _POLICY_PATH_LEGACY)
 _BUILTIN_BASES: frozenset[str] = frozenset({"quick", "full"})
 _GIT_TIMEOUT_SECS = 15
-_WHEN_KEYS: frozenset[str] = frozenset({"paths", "base-branch", "head-branch"})
+_WHEN_KEYS: frozenset[str] = frozenset(
+    {"paths", "paths-all", "base-branch", "head-branch"}
+)
 
 
 @dataclass(frozen=True)
@@ -95,6 +97,10 @@ class RouteRule:
 
     policy: str
     paths: tuple[str, ...] = ()
+    # #1039: `paths` matches when ANY changed file matches. `paths_all` matches
+    # only when EVERY changed file matches at least one glob, so a route that
+    # reduces review cannot swallow a mixed docs-and-code PR.
+    paths_all: tuple[str, ...] = ()
     base_branch: str | None = None
     head_branch: str | None = None
     require: str | None = None
@@ -469,18 +475,20 @@ def _parse_policy_file(raw: dict[object, object]) -> PolicyFile:
         if unknown_keys:
             raise ValueError(f"routes[{i}].when has unknown key(s): {sorted(unknown_keys)}")
         paths = _opt_str_list(when.get("paths"), f"routes[{i}].when.paths") or ()
+        paths_all = _opt_str_list(when.get("paths-all"), f"routes[{i}].when.paths-all") or ()
         base_branch = _opt_str(when.get("base-branch"), f"routes[{i}].when.base-branch")
         head_branch = _opt_str(when.get("head-branch"), f"routes[{i}].when.head-branch")
-        if not paths and base_branch is None and head_branch is None:
+        if not paths and not paths_all and base_branch is None and head_branch is None:
             raise ValueError(
                 f"routes[{i}].when must constrain at least one of "
-                "paths/base-branch/head-branch (an unconstrained route "
+                "paths/paths-all/base-branch/head-branch (an unconstrained route "
                 "would match every PR, silently shadowing every route after it)"
             )
         routes.append(
             RouteRule(
                 policy=policy_name,
                 paths=paths,
+                paths_all=paths_all,
                 base_branch=base_branch,
                 head_branch=head_branch,
                 require=require,
@@ -563,6 +571,14 @@ def _route_matches(
 ) -> bool:
     if route.paths and not any(
         fnmatch.fnmatch(f, pat) for f in changed_files for pat in route.paths
+    ):
+        return False
+    if route.paths_all and not (
+        changed_files
+        and all(
+            any(fnmatch.fnmatch(f, pat) for pat in route.paths_all)
+            for f in changed_files
+        )
     ):
         return False
     if route.base_branch is not None and not fnmatch.fnmatch(base_ref, route.base_branch):

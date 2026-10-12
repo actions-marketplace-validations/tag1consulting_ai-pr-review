@@ -32,7 +32,7 @@ policies:
     extends: full                # today's full mode, unchanged
 
 routes:
-  - when: {paths: ['docs/**', '_data/**']}
+  - when: {paths-all: ['docs/**', '_data/**']}
     policy: content
   - when: {base-branch: 'staging-*'}
     policy: integration
@@ -42,7 +42,7 @@ default: feature
 ```
 
 - **`policies`**: Named policies. `extends` is either a built-in base (`quick` or `full`, which reproduce today's roster exactly) or another policy that this file defines. The fields `agents`, `exclude-agents`, `analyzers`, and `exclude-analyzers` override the value of the extended base for that field only. A field that you leave unset inherits from `extends`. If you omit `extends`, the policy extends `quick`.
-- **`routes`**: An ordered list. The first route whose `when` matches the PR wins. `when.paths` matches if *any* changed file matches *any* glob (standard shell-style globs, for example `src/**` or `*.md`). `when.base-branch` and `when.head-branch` each match a single glob against the base or head branch name of the PR. A route must constrain at least one of the three. An unconstrained route would match every PR without notice and shadow all the routes after it. The engine therefore rejects the file if it finds one.
+- **`routes`**: An ordered list. The first route whose `when` matches the PR wins. `when.paths` matches if *any* changed file matches *any* glob (standard shell-style globs, for example `src/**` or `*.md`). `when.paths-all` matches only if *every* changed file matches at least one of its globs. Use `paths-all` for a route that reduces review, such as a docs-only route, because with `paths` one docs file in a PR that also changes code would route the whole PR to the reduced policy. If a route has both keys, both must match. `when.base-branch` and `when.head-branch` each match a single glob against the base or head branch name of the PR. A route must constrain at least one of `paths`, `paths-all`, `base-branch` and `head-branch`. An unconstrained route would match every PR without notice and shadow all the routes after it. The engine therefore rejects the file if it finds one.
 - **`default`**: The policy to use when no route matches. If you omit it and nothing matches, the engine uses its hard-coded default (`quick`, all agents and analyzers eligible).
 
 ## Precedence
