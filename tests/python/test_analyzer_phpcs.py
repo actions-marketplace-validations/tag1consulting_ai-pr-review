@@ -536,6 +536,41 @@ class TestRepoRuleset:
         _, run = _run_in(tmp_path, monkeypatch, files, changed)
         assert "--standard=Drupal,DrupalPractice" in run.main_args
 
+    def test_drupal7_info_file_selects_drupal_for_inc_only_change(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        files = {
+            "sites/all/modules/mod/mod.info": "name = Mod\ndescription = x\ncore = 7.x\n",
+            "sites/all/modules/mod/includes/helper.inc": _PHP,
+        }
+        _, run = _run_in(tmp_path, monkeypatch, files, ["sites/all/modules/mod/includes/helper.inc"])
+        assert "--standard=Drupal,DrupalPractice" in run.main_args
+
+    @pytest.mark.parametrize(
+        "info_body",
+        ["just some notes\n", "name = Thing\n", "core = 7.x\n"],
+        ids=["unrelated", "name-only", "core-only"],
+    )
+    def test_info_file_without_drupal7_keys_is_not_a_signal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, info_body: str
+    ) -> None:
+        files = {"lib/thing.info": info_body, "lib/a.php": _PHP}
+        _, run = _run_in(tmp_path, monkeypatch, files, ["lib/a.php"])
+        assert run.xml is not None
+        assert 'ref="PSR12"' in run.xml
+
+    def test_symlinked_drupal7_info_is_not_a_signal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        real = tmp_path / "real.txt"
+        real.write_text("name = Mod\ncore = 7.x\n")
+        (tmp_path / "lib").mkdir()
+        (tmp_path / "lib" / "mod.info").symlink_to(real)
+        _, run = _run_in(tmp_path, monkeypatch, {"lib/a.php": _PHP}, ["lib/a.php"])
+        assert run.xml is not None
+        assert 'ref="PSR12"' in run.xml
+
     def test_missing_wordpress_standard_uses_neutral_fallback_and_scope(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:

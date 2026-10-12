@@ -101,6 +101,12 @@ _PATTERN_BODY_RE = re.compile(r"^[A-Za-z0-9_./*|,^$\-]{1,200}$")
 _MAX_PATTERN_STARS = 8
 _PATTERN_TYPES = frozenset({"absolute", "relative"})
 _DRUPAL_EXTENSIONS = frozenset({".module", ".install", ".theme", ".profile"})
+# Drupal 7 modules describe themselves with a plain `<name>.info` file (no
+# `.info.yml`, often no composer.json). `.info` is also used by unrelated tools,
+# so the file counts only when it has both keys every Drupal 7 info file needs.
+_MAX_INFO_BYTES = 64 * 1024
+_D7_NAME_RE = re.compile(rb"^\s*name\s*=", re.MULTILINE)
+_D7_CORE_RE = re.compile(rb"^\s*core\s*=", re.MULTILINE)
 # Ships inside phpcs itself but is not listed by `phpcs -i`.
 _ALWAYS_INSTALLED = frozenset({"Generic"})
 
@@ -344,8 +350,29 @@ def _in_ruleset_scope(path: str, ruleset: _RepoRuleset) -> bool:
     return any(norm == entry or norm.startswith(entry + "/") for entry in ruleset.files)
 
 
+def _is_drupal7_info(path: Path) -> bool:
+    """Is *path* a Drupal 7 `.info` file? Reads at most 64 KiB, as data, never a symlink."""
+    try:
+        if path.is_symlink() or not path.is_file():
+            return False
+        with path.open("rb") as fh:
+            data = fh.read(_MAX_INFO_BYTES)
+    except OSError:
+        return False
+    return bool(_D7_NAME_RE.search(data) and _D7_CORE_RE.search(data))
+
+
+def _dir_has_drupal_info(directory: Path) -> bool:
+    try:
+        if any(directory.glob("*.info.yml")):
+            return True
+        return any(_is_drupal7_info(p) for p in directory.glob("*.info"))
+    except OSError:
+        return False
+
+
 def _looks_like_drupal(php_files: list[str]) -> bool:
-    """Does the repo show Drupal signals? Reads file names and composer.json as data."""
+    """Does the repo show Drupal signals? Reads file names, `*.info` files and composer.json as data."""
     for f in php_files:
         if Path(f).suffix in _DRUPAL_EXTENSIONS:
             return True
@@ -380,11 +407,8 @@ def _looks_like_drupal(php_files: list[str]) -> bool:
             if d in checked:
                 continue
             checked.add(d)
-            try:
-                if any(d.glob("*.info.yml")):
-                    return True
-            except OSError:
-                continue
+            if _dir_has_drupal_info(d):
+                return True
     return False
 
 
