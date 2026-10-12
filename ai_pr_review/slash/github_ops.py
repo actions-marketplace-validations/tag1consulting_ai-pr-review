@@ -399,19 +399,28 @@ def _record_verdict(
     verdicts = merge_verdicts(reviews)
     verdicts[fingerprint] = verdict
     new_body = upsert_verdicts_marker(canonical.body, verdicts)
-    if resolved_comment_id is not None:
-        from ai_pr_review.vcs.github import (
-            adjust_headline_after_dismissal,
-            carried_forward_entry_severity,
-            strip_carried_forward_entry,
-        )
+    from ai_pr_review.vcs.github import (
+        adjust_headline_after_dismissal,
+        carried_forward_entry_severity,
+        recompute_headline_after_dismissal,
+        strip_carried_forward_entry,
+    )
+    from ai_pr_review.vcs.marker import extract_headline_map
 
-        # #1049: the headline counts this thread, so it must follow the bullet.
+    # #1049: the headline counts the finding, so it must follow it. With a
+    # headline-map marker the headline is recomputed exactly (a no-op when
+    # the fingerprint is not in the map). Without one (a review posted
+    # before the marker existed, or one too large to carry it) the
+    # carried-forward bullet gives a plain decrement. The two never mix, so
+    # a stale map cannot undo a decrement on the next dismissal.
+    has_headline_map = extract_headline_map(new_body) is not None
+    new_body = recompute_headline_after_dismissal(new_body, fingerprint)
+    if resolved_comment_id is not None:
         dismissed_severity = carried_forward_entry_severity(
             new_body, resolved_comment_id
         )
         new_body = strip_carried_forward_entry(new_body, resolved_comment_id)
-        if dismissed_severity is not None:
+        if dismissed_severity is not None and not has_headline_map:
             new_body = adjust_headline_after_dismissal(new_body, dismissed_severity)
     try:
         ok, status, snippet = provider.update_review_body(canonical_id, new_body)

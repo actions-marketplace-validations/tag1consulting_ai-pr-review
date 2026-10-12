@@ -235,6 +235,45 @@ def adjust_headline_after_dismissal(body: str, severity: str) -> str:
     return body[: match.start()] + headline + body[match.end():]
 
 
+def recompute_headline_after_dismissal(
+    body: str, fingerprint: str | None
+) -> str:
+    """Recompute the headline from the headline-map marker minus
+    `fingerprint` (#1049), and write both back. Returns `body` unchanged when
+    there is no headline, no marker, or `fingerprint` is not in the marker, so
+    the caller can fall back to `adjust_headline_after_dismissal`.
+    """
+    from ai_pr_review.findings.models import Finding
+    from ai_pr_review.vcs._body import compute_headline, severity_icon
+    from ai_pr_review.vcs.marker import extract_headline_map, replace_headline_map_marker
+
+    entries = extract_headline_map(body)
+    match = _HEADLINE_RE.search(body)
+    if entries is None or match is None or fingerprint not in entries:
+        return body
+    remaining = {fp: v for fp, v in entries.items() if fp != fingerprint}
+    stubs = [
+        Finding(
+            severity=cast("Any", sev),
+            confidence=0,
+            finding="(headline map entry)",
+            category="other",
+            file="",
+            line=None,
+        )
+        for sev, _inline in remaining.values()
+    ]
+    failed = ["unknown"] if match.group("risk") == "Unknown" else []
+    headline = compute_headline(stubs, failed)
+    inline = sum(1 for _sev, is_inline in remaining.values() if is_inline)
+    text = (
+        f"{severity_icon(headline.risk)} **Overall Risk:** {headline.risk} | "
+        f"**Findings:** {headline.count} ({inline} inline)"
+    )
+    body = body[: match.start()] + text + body[match.end():]
+    return replace_headline_map_marker(body, remaining)
+
+
 def _parse_next_link(link_header: str) -> str | None:
     """Extract the rel=next URL from a GitHub Link response header."""
     if not link_header:
@@ -1365,6 +1404,19 @@ class GitHubProvider:
 
         carried_forward_text = self._render_carried_forward_section(carried_forward)
 
+        # #1049: what the headline counts, per fingerprint, so a later
+        # dismissal can recompute it exactly. Skipped (None) whenever a
+        # counted finding has no usable fingerprint or two share one, so the
+        # map can never undercount.
+        headline_map = _build_headline_map(
+            classified=classified,
+            render_findings=render_findings,
+            actually_inline_fps=actually_inline_fps,
+            carried_forward=carried_forward,
+            expected_count=sum(1 for f in headline_findings if not f.out_of_diff),
+            expected_inline=headline_inline_count,
+        )
+
         body = _render_review_body(
             event=render_event,
             findings=headline_findings,
@@ -1379,7 +1431,11 @@ class GitHubProvider:
             agent_prompt=agent_prompt,
         )
         body = self._finalize_body_with_markers(
-            body, id_map=id_map, verdicts=updated_verdicts, judge_map=judge_map
+            body,
+            id_map=id_map,
+            verdicts=updated_verdicts,
+            judge_map=judge_map,
+            headline_map=headline_map,
         )
 
         if action == "put" and canonical is not None:
@@ -1673,6 +1729,7 @@ class GitHubProvider:
         id_map: dict[str, int],
         verdicts: dict[str, str],
         judge_map: dict[str, dict[str, object]] | None = None,
+        headline_map: dict[str, tuple[str, bool]] | None = None,
     ) -> str:
         """Truncate `body` to GitHub's limit, then append the inline-ownership
         marker plus (space permitting) the id-map, judge-map, and verdicts
@@ -1683,7 +1740,8 @@ class GitHubProvider:
         was reserved and the inline-ownership marker (`INLINE_MARKER`,
         always appended) was added *after* truncation, letting the final
         body exceed `GITHUB_MAX_BODY_SIZE` by `len(INLINE_MARKER)` bytes. If
-        space is tight, drop order is: judge-map first (pure instrumentation,
+        space is tight, drop order is: headline-map first (#1049, display-only:
+        a dismissal then falls back to a plain decrement), then judge-map (pure instrumentation,
         never anything else's source of truth), then id-map (reconstructible
         from prior review bodies via the fallback bullet-scan in
         `_finding_ids.py`); the verdicts marker -- durable human dismiss/fixed
@@ -1691,10 +1749,18 @@ class GitHubProvider:
         it still doesn't fit, with a loud warning rather than a silent drop.
         """
         from ai_pr_review.vcs.marker import (
+            build_headline_map_marker,
             build_id_map_marker,
             build_judge_map_marker,
             build_verdicts_marker,
         )
+
+        headline_map_marker = ""
+        if headline_map is not None:
+            try:
+                headline_map_marker = build_headline_map_marker(headline_map)
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("github: failed to build headline-map marker: %s", exc)
 
         id_map_marker = ""
         try:
@@ -1730,7 +1796,25 @@ class GitHubProvider:
         verdicts_reserve = (
             len(verdicts_marker.encode("utf-8")) + 1 if verdicts_marker else 0
         )
-        reserve = inline_reserve + id_map_reserve + judge_map_reserve + verdicts_reserve
+        headline_map_reserve = (
+            len(headline_map_marker.encode("utf-8")) + 1 if headline_map_marker else 0
+        )
+        reserve = (
+            inline_reserve + id_map_reserve + judge_map_reserve + verdicts_reserve
+            + headline_map_reserve
+        )
+
+        # Display-only (#1049): the first marker to go when space is tight.
+        # Without it a dismissal falls back to a plain count decrement.
+        if headline_map_marker and reserve > GITHUB_MAX_BODY_SIZE - _MIN_BODY_BYTES:
+            _log.warning(
+                "github: markers (%d bytes) too large to fit in review body for "
+                "%s/%s PR #%s; dropping headline-map marker for this cycle",
+                reserve, self.config.owner, self.config.repo, self.config.pr_number,
+            )
+            headline_map_marker = ""
+            reserve -= headline_map_reserve
+            headline_map_reserve = 0
 
         if judge_map_marker and reserve > GITHUB_MAX_BODY_SIZE - _MIN_BODY_BYTES:
             _log.warning(
@@ -1741,7 +1825,9 @@ class GitHubProvider:
             )
             judge_map_marker = ""
             judge_map_reserve = 0
-            reserve = inline_reserve + id_map_reserve + verdicts_reserve
+            reserve = (
+                inline_reserve + id_map_reserve + verdicts_reserve + headline_map_reserve
+            )
 
         if id_map_marker and reserve > GITHUB_MAX_BODY_SIZE - _MIN_BODY_BYTES:
             _log.warning(
@@ -1752,7 +1838,7 @@ class GitHubProvider:
             )
             id_map_marker = ""
             id_map_reserve = 0
-            reserve = inline_reserve + verdicts_reserve
+            reserve = inline_reserve + verdicts_reserve + headline_map_reserve
 
         if verdicts_marker and reserve > GITHUB_MAX_BODY_SIZE - _MIN_BODY_BYTES:
             _log.warning(
@@ -1774,6 +1860,8 @@ class GitHubProvider:
             body += "\n" + id_map_marker
         if judge_map_marker:
             body += "\n" + judge_map_marker
+        if headline_map_marker:
+            body += "\n" + headline_map_marker
         if verdicts_marker:
             body += "\n" + verdicts_marker
         return body
@@ -2823,6 +2911,53 @@ def _build_inline_comment_body(
         confidence=f.confidence,
     )
     return f"{body}\n{meta_marker}"
+
+
+def _build_headline_map(
+    *,
+    classified: Sequence[Classified],
+    render_findings: Sequence[Finding],
+    actually_inline_fps: set[str],
+    carried_forward: Sequence[PriorThread],
+    expected_count: int,
+    expected_inline: int,
+) -> dict[str, tuple[str, bool]] | None:
+    """Fingerprint -> `(severity, inline)` for every finding the headline
+    counts (#1049), mirroring how `post_findings` builds `headline_findings`
+    and `headline_inline_count`. Returns `None` when the map cannot match the
+    headline's count exactly (a missing fingerprint, a collision, or an
+    `out_of_diff` mismatch), so a dismissal falls back to a plain decrement.
+    """
+    from ai_pr_review.vcs._finding_ids import fingerprint
+
+    entries: dict[str, tuple[str, bool]] = {}
+    for f in render_findings:
+        if f.out_of_diff:
+            continue
+        fp = fingerprint(f)
+        entries[fp] = (f.severity, fp in actually_inline_fps)
+    thread_bound = (
+        c for c in classified
+        if c.kind in ("update", "escalate")
+        or (c.kind == "recurred" and c.thread is not None)
+    )
+    for c in thread_bound:
+        if c.finding.out_of_diff:
+            continue
+        key = (
+            c.thread.fingerprint
+            if c.kind == "recurred" and c.thread is not None and c.thread.fingerprint
+            else fingerprint(c.finding)
+        )
+        entries[key] = (c.finding.severity, True)
+    for t in carried_forward:
+        if not t.fingerprint:
+            return None
+        entries[t.fingerprint] = (t.severity or "Low", True)
+    inline_total = sum(1 for _sev, is_inline in entries.values() if is_inline)
+    if len(entries) != expected_count or inline_total != expected_inline:
+        return None
+    return entries
 
 
 def _carried_forward_finding(thread: PriorThread) -> Finding:
