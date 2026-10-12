@@ -26,6 +26,7 @@ import httpx
 from ai_pr_review.findings.models import Finding
 from ai_pr_review.vcs._body import (
     TOKEN_TABLE_OPEN_MARKER,
+    also_reported_notes,
     badge_suffix,
     format_body_finding,
     format_source_tag,
@@ -803,6 +804,7 @@ class GitLabProvider:
         parts = [header]
         if f.remediation:
             parts.append(f"\n**Remediation:** {sanitize_bullet_text(f.remediation)}")
+        parts.extend(f"\n**Also reported by:** {note}" for note in also_reported_notes(f))
         if (
             enable_suggestions
             and is_suggestion_safe(f)

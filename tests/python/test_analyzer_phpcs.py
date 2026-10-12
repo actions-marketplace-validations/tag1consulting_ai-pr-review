@@ -265,6 +265,7 @@ class TestRunPhpcsFindings:
     def test_drupal_standard_used_when_available(self, tmp_path: Path) -> None:
         f = tmp_path / "module.php"
         f.write_text("<?php\n")
+        (tmp_path / "module.info.yml").write_text("name: x\n")
         cf = _make_cf([str(f)])
         with (
             patch("ai_pr_review.analyzers.native.phpcs.shutil.which", return_value="/usr/bin/phpcs"),
@@ -365,6 +366,7 @@ class TestRunPhpcsFindings:
         # Drupal.Commenting.FunctionComment, so the Drupal branch is untouched.
         f = tmp_path / "module.php"
         f.write_text("<?php\n")
+        (tmp_path / "module.info.yml").write_text("name: x\n")
         cf = _make_cf([str(f)])
         with (
             patch("ai_pr_review.analyzers.native.phpcs.shutil.which", return_value="/usr/bin/phpcs"),
@@ -417,3 +419,539 @@ class TestBridgeIntegration:
             await run_analyzers(ChangedFiles(), "/dev/null")
 
         assert not called
+
+
+# ---------------------------------------------------------------------------
+# Repo ruleset handling (#1042): read as data only, phpcs never reads the repo file
+# ---------------------------------------------------------------------------
+
+_INSTALLED_FULL = (
+    "The installed coding standards are PEAR, PSR1, PSR2, PSR12, Squiz, Zend, "
+    "Drupal, DrupalPractice and VariableAnalysis"
+)
+
+# A trimmed copy of the tag1consulting/scolta-wp ruleset that triggered #1042.
+_SCOLTA_RULESET = """<?xml version="1.0"?>
+<ruleset name="Scolta WordPress">
+  <arg name="extensions" value="php"/>
+  <file>includes</file>
+  <file>cli</file>
+  <file>scolta.php</file>
+  <rule ref="WordPress-Extra"/>
+  <rule ref="WordPress-Docs">
+    <exclude-pattern>scolta\\.php</exclude-pattern>
+  </rule>
+  <config name="minimum_supported_wp_version" value="6.1"/>
+  <rule ref="Generic.Files.LineLength">
+    <exclude-pattern>tests/*</exclude-pattern>
+  </rule>
+  <rule ref="Generic.Files.LineLength.MaxExceeded">
+    <exclude-pattern>admin/*</exclude-pattern>
+  </rule>
+  <rule ref="WordPress.PHP.YodaConditions">
+    <exclude-pattern>*</exclude-pattern>
+  </rule>
+</ruleset>
+"""
+
+
+class _Run:
+    def __init__(self) -> None:
+        self.xml: str | None = None
+        self.main_args: list[str] = []
+        self.calls: list[list[str]] = []
+
+
+def _run_in(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    files: dict[str, str],
+    changed: list[str],
+    *,
+    installed: str = _INSTALLED_FULL,
+    ruleset: tuple[str, str | bytes] | None = None,
+    main_returncodes: list[int] | None = None,
+) -> tuple[list[object], _Run]:
+    """Run the analyzer in *tmp_path* with a mocked phpcs. Returns (findings, capture)."""
+    monkeypatch.chdir(tmp_path)
+    for rel, content in files.items():
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+    if ruleset is not None:
+        name, body = ruleset
+        path = tmp_path / name
+        if isinstance(body, bytes):
+            path.write_bytes(body)
+        else:
+            path.write_text(body)
+    run = _Run()
+    codes = list(main_returncodes or [0])
+
+    def _fake(args: list[str], **kwargs: object) -> MagicMock:
+        run.calls.append(args)
+        if args[0:2] == ["phpcs", "-i"]:
+            return MagicMock(returncode=0, stdout=installed, stderr="")
+        run.main_args = args
+        flag = next(a for a in args if a.startswith("--standard="))
+        value = flag.removeprefix("--standard=")
+        if value.endswith(".xml"):
+            run.xml = Path(value).read_text()
+        rc = codes.pop(0) if len(codes) > 1 else codes[0]
+        return MagicMock(returncode=rc, stdout='{"totals":{},"files":{}}' if rc in (0, 1, 2, 3) else "", stderr="boom")
+
+    with (
+        patch("ai_pr_review.analyzers.native.phpcs.shutil.which", return_value="/usr/bin/phpcs"),
+        patch("ai_pr_review.analyzers.native.phpcs.subprocess.run", side_effect=_fake),
+    ):
+        findings = _run_phpcs(_make_cf(changed), Path("/dev/null"))
+    return list(findings), run
+
+
+_PHP = "<?php\n"
+
+
+class TestRepoRuleset:
+    def test_no_ruleset_no_drupal_signal_uses_psr12_not_drupal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, run = _run_in(tmp_path, monkeypatch, {"a.php": _PHP}, ["a.php"])
+        assert run.xml is not None
+        assert 'ref="PSR12"' in run.xml
+        assert "Drupal" not in " ".join(run.main_args)
+
+    @pytest.mark.parametrize(
+        "files",
+        [
+            {"a.php": _PHP, "composer.json": '{"type": "drupal-module"}'},
+            {"a.php": _PHP, "composer.json": '{"require": {"drupal/core-recommended": "^11"}}'},
+            {"mod/src/a.php": _PHP, "mod/mod.info.yml": "name: x\n"},
+            {"mod.module": _PHP},
+        ],
+    )
+    def test_drupal_signals_select_drupal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, files: dict[str, str]
+    ) -> None:
+        changed = [next(k for k in files if k.endswith((".php", ".module")))]
+        _, run = _run_in(tmp_path, monkeypatch, files, changed)
+        assert "--standard=Drupal,DrupalPractice" in run.main_args
+
+    def test_drupal7_info_file_selects_drupal_for_inc_only_change(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        files = {
+            "sites/all/modules/mod/mod.info": "name = Mod\ndescription = x\ncore = 7.x\n",
+            "sites/all/modules/mod/includes/helper.inc": _PHP,
+        }
+        _, run = _run_in(tmp_path, monkeypatch, files, ["sites/all/modules/mod/includes/helper.inc"])
+        assert "--standard=Drupal,DrupalPractice" in run.main_args
+
+    @pytest.mark.parametrize(
+        "info_body",
+        ["just some notes\n", "name = Thing\n", "core = 7.x\n"],
+        ids=["unrelated", "name-only", "core-only"],
+    )
+    def test_info_file_without_drupal7_keys_is_not_a_signal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, info_body: str
+    ) -> None:
+        files = {"lib/thing.info": info_body, "lib/a.php": _PHP}
+        _, run = _run_in(tmp_path, monkeypatch, files, ["lib/a.php"])
+        assert run.xml is not None
+        assert 'ref="PSR12"' in run.xml
+
+    def test_symlinked_drupal7_info_is_not_a_signal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        real = tmp_path / "real.txt"
+        real.write_text("name = Mod\ncore = 7.x\n")
+        (tmp_path / "lib").mkdir()
+        (tmp_path / "lib" / "mod.info").symlink_to(real)
+        _, run = _run_in(tmp_path, monkeypatch, {"lib/a.php": _PHP}, ["lib/a.php"])
+        assert run.xml is not None
+        assert 'ref="PSR12"' in run.xml
+
+    def test_missing_wordpress_standard_uses_neutral_fallback_and_scope(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        files = {"includes/y.php": _PHP, "tests/x.php": _PHP, "scolta.php": _PHP}
+        with caplog.at_level("WARNING"):
+            _, run = _run_in(
+                tmp_path,
+                monkeypatch,
+                files,
+                ["includes/y.php", "tests/x.php", "scolta.php"],
+                ruleset=("phpcs.xml.dist", _SCOLTA_RULESET),
+            )
+        assert "WordPress-Extra" in caplog.text
+        # `<file>` scope is applied here, because phpcs ignores it for CLI files.
+        sent = run.main_args[run.main_args.index("--") + 1 :]
+        assert sent == ["includes/y.php", "scolta.php"]
+        assert run.xml is not None
+        assert '<rule ref="Generic.PHP.Syntax"' in run.xml
+        assert "WordPress" not in run.xml
+        assert "PSR12" not in run.xml
+        # Installed sniffs the repo named, with their excludes, are kept.
+        assert '<rule ref="Generic.Files.LineLength">' in run.xml
+        assert "<exclude-pattern type=\"absolute\">tests/*</exclude-pattern>" in run.xml
+        assert "<config" not in run.xml
+        assert "<arg" not in run.xml
+
+    def test_all_changed_files_out_of_scope_skips_phpcs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        findings, run = _run_in(
+            tmp_path,
+            monkeypatch,
+            {"tests/x.php": _PHP},
+            ["tests/x.php"],
+            ruleset=("phpcs.xml.dist", _SCOLTA_RULESET),
+        )
+        assert findings == []
+        assert run.main_args == []
+
+    def test_installed_standard_ruleset_keeps_standard_patterns_and_properties(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ruleset = """<?xml version="1.0"?>
+<ruleset name="X">
+  <exclude-pattern>vendor/*</exclude-pattern>
+  <exclude-pattern type="relative">tests/*</exclude-pattern>
+  <rule ref="PSR12">
+    <exclude name="PSR12.Files.FileHeader"/>
+    <severity>3</severity>
+  </rule>
+  <rule ref="Generic.Files.LineLength">
+    <properties><property name="lineLimit" value="140"/></properties>
+  </rule>
+</ruleset>
+"""
+        _, run = _run_in(
+            tmp_path, monkeypatch, {"a.php": _PHP}, ["a.php"], ruleset=("phpcs.xml", ruleset)
+        )
+        assert run.xml is not None
+        assert '<rule ref="PSR12">' in run.xml
+        assert '<exclude name="PSR12.Files.FileHeader"' in run.xml
+        assert "<severity>3</severity>" in run.xml
+        assert '<property name="lineLimit" value="140"' in run.xml
+        assert '<exclude-pattern type="relative">tests/*</exclude-pattern>' in run.xml
+        assert "Generic.PHP.Syntax" not in run.xml
+
+    def test_ruleset_discovery_order_matches_phpcs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        low = '<ruleset name="a"><file>nope</file><rule ref="PSR12"/></ruleset>'
+        high = '<ruleset name="b"><rule ref="PSR12"/></ruleset>'
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "phpcs.xml.dist").write_text(low)
+        _, run = _run_in(
+            tmp_path, monkeypatch, {"a.php": _PHP}, ["a.php"], ruleset=(".phpcs.xml", high)
+        )
+        # `.phpcs.xml` wins, and it has no `<file>` scope, so a.php is linted.
+        assert run.main_args
+
+    def test_ruleset_without_standard_keeps_scope_and_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ruleset = '<ruleset name="s"><file>src</file><exclude-pattern>src/gen/*</exclude-pattern></ruleset>'
+        _, run = _run_in(
+            tmp_path,
+            monkeypatch,
+            {"src/a.php": _PHP, "other/b.php": _PHP},
+            ["src/a.php", "other/b.php"],
+            ruleset=("phpcs.xml", ruleset),
+        )
+        assert run.main_args[run.main_args.index("--") + 1 :] == ["src/a.php"]
+        assert run.xml is not None
+        assert 'ref="PSR12"' in run.xml
+        assert "src/gen/*" in run.xml
+
+    def test_remediation_names_repo_ruleset_not_drupal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        out = json.dumps(
+            {"files": {str(tmp_path / "a.php"): {"messages": [
+                {"type": "ERROR", "line": 1, "source": "Generic.PHP.Syntax", "message": "bad"}
+            ]}}}
+        )
+        monkeypatch.chdir(tmp_path)
+        # CI sets GITHUB_WORKSPACE, which strip_workspace_prefix prefers over the cwd.
+        monkeypatch.setenv("GITHUB_WORKSPACE", str(tmp_path))
+        (tmp_path / "a.php").write_text(_PHP)
+        (tmp_path / "phpcs.xml").write_text('<ruleset name="s"><rule ref="PSR12"/></ruleset>')
+
+        def _fake(args: list[str], **kwargs: object) -> MagicMock:
+            if args[0:2] == ["phpcs", "-i"]:
+                return MagicMock(returncode=0, stdout=_INSTALLED_FULL, stderr="")
+            return MagicMock(returncode=2, stdout=out, stderr="")
+
+        with (
+            patch("ai_pr_review.analyzers.native.phpcs.shutil.which", return_value="/usr/bin/phpcs"),
+            patch("ai_pr_review.analyzers.native.phpcs.subprocess.run", side_effect=_fake),
+        ):
+            findings = _run_phpcs(_make_cf(["a.php"]), Path("/dev/null"))
+        assert len(findings) == 1
+        assert "drupal.org" not in findings[0].remediation
+        assert "phpcs --standard=phpcs.xml a.php" in findings[0].remediation
+
+    def test_process_error_with_repo_ruleset_retries_with_neutral_fallback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        ruleset = '<ruleset name="s"><rule ref="PSR12.Nope.Missing"/></ruleset>'
+        with caplog.at_level("WARNING"):
+            _, run = _run_in(
+                tmp_path,
+                monkeypatch,
+                {"a.php": _PHP},
+                ["a.php"],
+                ruleset=("phpcs.xml", ruleset),
+                main_returncodes=[16, 0],
+            )
+        assert "retrying with the style-neutral fallback" in caplog.text
+        assert run.xml is not None
+        assert "Generic.PHP.Syntax" in run.xml
+
+
+    @pytest.mark.parametrize("entry", [".", "./", "./src/", "src", "src/"])
+    def test_file_scope_entry_forms(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entry: str
+    ) -> None:
+        ruleset = f'<ruleset name="s"><file>{entry}</file><rule ref="PSR12"/></ruleset>'
+        _, run = _run_in(
+            tmp_path, monkeypatch, {"src/a.php": _PHP}, ["src/a.php"], ruleset=("phpcs.xml", ruleset)
+        )
+        # Every form covers src/a.php. `.` and `./` mean the whole tree.
+        assert run.main_args, entry
+
+    def test_dot_scope_does_not_limit_other_directories(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ruleset = '<ruleset name="s"><file>.</file><rule ref="PSR12"/></ruleset>'
+        _, run = _run_in(
+            tmp_path,
+            monkeypatch,
+            {"a/x.php": _PHP, "b/y.php": _PHP},
+            ["a/x.php", "b/y.php"],
+            ruleset=("phpcs.xml", ruleset),
+        )
+        assert run.main_args[run.main_args.index("--") + 1 :] == ["a/x.php", "b/y.php"]
+
+    def test_retry_also_covers_the_neutral_fallback_with_repo_rules(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # A WordPress-style ruleset plus a Generic sniff that phpcs 4 removed.
+        ruleset = (
+            '<ruleset name="s"><rule ref="WordPress-Extra"/>'
+            '<rule ref="Generic.Gone.Removed"><exclude-pattern>x</exclude-pattern></rule></ruleset>'
+        )
+        with caplog.at_level("WARNING"):
+            _, run = _run_in(
+                tmp_path,
+                monkeypatch,
+                {"a.php": _PHP},
+                ["a.php"],
+                ruleset=("phpcs.xml", ruleset),
+                main_returncodes=[16, 0],
+            )
+        assert "retrying with the style-neutral fallback" in caplog.text
+        assert run.xml is not None
+        assert "Generic.Gone.Removed" not in run.xml
+        assert "Generic.PHP.Syntax" in run.xml
+
+    def test_relative_exclude_pattern_is_applied_in_python(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # phpcs does not apply type="relative" excludes to explicitly listed files.
+        ruleset = (
+            '<ruleset name="s"><exclude-pattern type="relative">^tests/*</exclude-pattern>'
+            '<rule ref="PSR12"/></ruleset>'
+        )
+        _, run = _run_in(
+            tmp_path,
+            monkeypatch,
+            {"src/a.php": _PHP, "tests/t.php": _PHP},
+            ["src/a.php", "tests/t.php"],
+            ruleset=("phpcs.xml", ruleset),
+        )
+        assert run.main_args[run.main_args.index("--") + 1 :] == ["src/a.php"]
+
+    def test_rule_level_drops_are_logged_with_a_total(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        bad = "".join(f"<exclude-pattern>(a+){i}</exclude-pattern>" for i in range(8))
+        ruleset = f'<ruleset name="s"><rule ref="PSR12">{bad}<severity>99</severity></rule></ruleset>'
+        with caplog.at_level("WARNING"):
+            _run_in(tmp_path, monkeypatch, {"a.php": _PHP}, ["a.php"], ruleset=("phpcs.xml", ruleset))
+        assert "dropping PSR12 exclude-pattern" in caplog.text
+        assert "dropped 9 entries in total, showed 5" in caplog.text
+
+    def test_retry_keeps_top_level_excludes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ruleset = (
+            '<ruleset name="s"><exclude-pattern>vendor/*</exclude-pattern>'
+            '<rule ref="PSR12.Nope.Missing"/></ruleset>'
+        )
+        _, run = _run_in(
+            tmp_path,
+            monkeypatch,
+            {"a.php": _PHP},
+            ["a.php"],
+            ruleset=("phpcs.xml", ruleset),
+            main_returncodes=[16, 0],
+        )
+        assert run.xml is not None
+        assert "PSR12.Nope.Missing" not in run.xml
+        assert "vendor/*" in run.xml
+
+    def test_failed_phpcs_i_is_logged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level("WARNING"):
+            _run_in(tmp_path, monkeypatch, {"a.php": _PHP}, ["a.php"], installed="")
+        assert "installed standards are unknown" in caplog.text
+
+    def test_dropped_exclude_pattern_is_logged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        ruleset = '<ruleset name="s"><exclude-pattern>(a+)+$</exclude-pattern><rule ref="PSR12"/></ruleset>'
+        with caplog.at_level("WARNING"):
+            _run_in(tmp_path, monkeypatch, {"a.php": _PHP}, ["a.php"], ruleset=("phpcs.xml", ruleset))
+        assert "dropping exclude-pattern" in caplog.text
+
+
+class TestRepoRulesetIsDataOnly:
+    """The repo ruleset must never reach phpcs. Mirrors the phpstan trust rule (#739)."""
+
+    _HOSTILE = """<?xml version="1.0"?>
+<ruleset name="evil">
+  <config name="installed_paths" value="/workspace/evil"/>
+  <config name="php_path" value="/workspace/evil/php"/>
+  <arg name="bootstrap" value="/workspace/evil/boot.php"/>
+  <autoload>/workspace/evil/autoload.php</autoload>
+  <ini name="auto_prepend_file" value="/workspace/evil/p.php"/>
+  <exclude-pattern>(a+)+$</exclude-pattern>
+  <exclude-pattern></exclude-pattern>
+  <rule ref="vendor/evil/ruleset.xml"/>
+  <rule ref="../evil.xml"/>
+  <rule ref="PSR12">
+    <exclude-pattern>x</exclude-pattern><arg name="bootstrap" value="/workspace/evil/b2.php"/>
+    <properties><property name="ok" value="1"/><property name="bad name" value="1"/></properties>
+  </rule>
+</ruleset>
+"""
+
+    def test_hostile_ruleset_never_reaches_phpcs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, run = _run_in(
+            tmp_path, monkeypatch, {"a.php": _PHP}, ["a.php"], ruleset=("phpcs.xml.dist", self._HOSTILE)
+        )
+        standard = next(a for a in run.main_args if a.startswith("--standard="))
+        assert "phpcs.xml.dist" not in standard
+        assert str(tmp_path) not in standard
+        assert run.xml is not None
+        for needle in ("installed_paths", "php_path", "bootstrap", "autoload", "auto_prepend", "evil", "(a+)+", "<arg", "<ini"):
+            assert needle not in run.xml, needle
+        assert '<rule ref="PSR12">' in run.xml
+        assert '<property name="ok" value="1"' in run.xml
+        assert "bad name" not in run.xml
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            b'<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x "y">]><ruleset name="a"><rule ref="PSR12"/></ruleset>',
+            '<?xml version="1.0" encoding="UTF-16"?><ruleset name="a"/>'.encode("utf-16"),
+            b'<ruleset name="a">' + b"<!-- " + b"x" * 300_000 + b" --></ruleset>",
+            b"<ruleset",
+            b"<notaruleset/>",
+        ],
+        ids=["doctype", "utf16", "oversize", "malformed", "wrong-root"],
+    )
+    def test_unusable_ruleset_falls_back_to_neutral(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: bytes
+    ) -> None:
+        _, run = _run_in(
+            tmp_path, monkeypatch, {"a.php": _PHP}, ["a.php"], ruleset=("phpcs.xml", body)
+        )
+        assert run.xml is not None
+        assert "Generic.PHP.Syntax" in run.xml
+        assert "PSR12" not in run.xml
+
+    def test_symlinked_ruleset_is_ignored(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        target = tmp_path / "elsewhere.xml"
+        target.write_text('<ruleset name="a"><file>nope</file><rule ref="PSR12"/></ruleset>')
+        (tmp_path / "phpcs.xml").symlink_to(target)
+        _, run = _run_in(tmp_path, monkeypatch, {"a.php": _PHP}, ["a.php"])
+        # The symlink is skipped, so no `<file>` scope applies and a.php is linted.
+        assert run.main_args
+        assert run.xml is not None
+        assert "PSR12" in run.xml
+
+    def test_pattern_text_with_markup_is_not_injected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ruleset = (
+            '<ruleset name="a"><rule ref="PSR12"/>'
+            "<exclude-pattern>&lt;/exclude-pattern&gt;&lt;arg name=&quot;bootstrap&quot;/&gt;</exclude-pattern>"
+            "</ruleset>"
+        )
+        _, run = _run_in(
+            tmp_path, monkeypatch, {"a.php": _PHP}, ["a.php"], ruleset=("phpcs.xml", ruleset)
+        )
+        assert run.xml is not None
+        assert "bootstrap" not in run.xml
+
+
+class TestRelativePatternMatcher:
+    """The Python matcher for relative exclude patterns must stay linear and agree with phpcs's regex reading (#1042)."""
+
+    @pytest.mark.parametrize(
+        ("pattern", "path"),
+        [
+            ("*a*a*b", "a" * 4000),
+            ("^*a*a*a$", "a" * 4000 + "b"),
+            ("a*a*b|x*y", "a" * 4000),
+            ("*.*.*", "." * 4000),
+        ],
+    )
+    def test_hostile_pattern_and_long_path_finish_fast(self, pattern: str, path: str) -> None:
+        import time
+
+        from ai_pr_review.analyzers.native.phpcs import _pattern_ok, _relative_pattern_matches
+
+        assert _pattern_ok(pattern)
+        started = time.monotonic()
+        _relative_pattern_matches(pattern, path)
+        assert time.monotonic() - started < 1.0
+
+    def test_more_than_three_wildcards_is_rejected(self) -> None:
+        from ai_pr_review.analyzers.native.phpcs import _pattern_ok
+
+        assert not _pattern_ok("*a*a*a*a")
+        assert not _pattern_ok("a^b")
+        assert not _pattern_ok("a$b")
+
+    @pytest.mark.parametrize(
+        ("pattern", "path", "expected"),
+        [
+            ("^tests/*", "tests/a.php", True),
+            ("^tests/*", "src/tests/a.php", False),
+            ("tests/*", "src/tests/a.php", True),
+            ("\\.min\\.js$", "web/app.min.js", True),
+            ("\\.min\\.js$", "web/app.min.json", False),
+            ("vendor/*|node_modules/*", "node_modules/x/y.php", True),
+            ("^a*b*c$", "aXbYc", True),
+            ("^a*b*c$", "aXbYcZ", False),
+            ("TESTS/*", "tests/a.php", True),
+            ("a.c", "abc", True),
+            ("a\\.c", "abc", False),
+        ],
+    )
+    def test_matches_like_phpcs(self, pattern: str, path: str, expected: bool) -> None:
+        from ai_pr_review.analyzers.native.phpcs import _relative_pattern_matches
+
+        assert _relative_pattern_matches(pattern, path) is expected

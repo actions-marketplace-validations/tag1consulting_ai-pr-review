@@ -37,7 +37,7 @@ The action reads file contents, paths, and git metadata from `$GITHUB_WORKSPACE`
 - `source` shell files from `$GITHUB_WORKSPACE`, run interpreters on checked-out files, or invoke binaries from the checked-out tree;
 - run linters/formatters/test runners that auto-discover and execute project plugins or fixtures from `$GITHUB_WORKSPACE`.
 
-The container image entrypoint invokes the Python engine (`python3 -m ai_pr_review review`) directly. Static analyzers bundled in the image (semgrep, ruff, golangci-lint, shellcheck, trufflehog, phpstan, etc.) are invoked against repository **content** as data; their configuration is the analyzer's own bundled defaults plus opt-in repo-level config files where the analyzer treats the file as data (e.g., `.semgrepignore`).
+The container image entrypoint invokes the Python engine (`python3 -m ai_pr_review review`) directly. Static analyzers bundled in the image (semgrep, ruff, golangci-lint, shellcheck, trufflehog, phpstan, etc.) are invoked against repository **content** as data; their configuration is the analyzer's own bundled defaults plus opt-in repo-level config files where the analyzer treats the file as data (e.g., `.semgrepignore`). The phpcs analyzer reads a repo `phpcs.xml` or `phpcs.xml.dist` as data only and gives phpcs a generated ruleset, because a ruleset can load PHP from the workspace (`installed_paths`, `bootstrap`, `autoload`, path-style `rule ref`). `tests/security/canary-workspace/phpcs.xml.dist` guards this.
 
 ### Why this matters
 

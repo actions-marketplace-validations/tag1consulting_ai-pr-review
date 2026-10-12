@@ -2716,6 +2716,7 @@ def _build_inline_comment_body(
         being matched against).
     """
     from ai_pr_review.vcs._body import (
+        also_reported_notes,
         badge_suffix,
         format_source_tag,
         sanitize_bullet_text,
@@ -2731,6 +2732,7 @@ def _build_inline_comment_body(
     parts = [header]
     if f.remediation:
         parts.append(f"\n**Remediation:** {sanitize_bullet_text(f.remediation)}")
+    parts.extend(f"\n**Also reported by:** {note}" for note in also_reported_notes(f))
     if f.suggested_code and "```" not in f.suggested_code:
         fence = "suggestion" if include_suggestion_fence else ""
         parts.append(f"\n```{fence}\n{f.suggested_code}\n```")

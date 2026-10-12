@@ -32,7 +32,7 @@ from typing import Any, Final
 
 from ai_pr_review.findings.badge import finding_badge
 from ai_pr_review.findings.models import Finding, Severity
-from ai_pr_review.vcs._body import format_http_error_body
+from ai_pr_review.vcs._body import also_reported_notes, format_http_error_body
 from ai_pr_review.vcs._finding_ids import fingerprint
 from ai_pr_review.vcs.http import RecordingClient
 
@@ -183,6 +183,8 @@ def build_annotation_payload(
     summary = f"{token}{finding.severity}: {finding.finding}{badge}"
     if finding.remediation:
         summary = f"{summary}\n\nRemediation: {finding.remediation}"
+    for note in also_reported_notes(finding):
+        summary = f"{summary}\n\nAlso reported by: {note}"
     return {
         "external_id": fingerprint(finding),
         "title": _truncate_utf8(summary, _MAX_TITLE_BYTES),
