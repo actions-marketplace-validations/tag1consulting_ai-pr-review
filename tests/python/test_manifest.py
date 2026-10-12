@@ -200,3 +200,26 @@ class TestParseChangedFilesPayload:
         result = parse_changed_files_payload([{"path": ""}, "c.py"])
         assert "" not in result.all_files
         assert "c.py" in result.all_files
+
+
+def test_changed_file_symlinked_outside_workspace_is_dropped(tmp_path, monkeypatch) -> None:
+    """#1047: a changed file that resolves outside the workspace must never
+    reach any analyzer, whether it is a symlink or sits under a symlinked
+    directory."""
+    from ai_pr_review.manifest import build_changed_files, parse_changed_files_payload
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.py").write_text("TOKEN = 'x'\n")
+    work = tmp_path / "work"
+    (work / "src").mkdir(parents=True)
+    (work / "src" / "ok.py").write_text("x = 1\n")
+    (work / "link.py").symlink_to(outside / "secret.py")
+    (work / "linkdir").symlink_to(outside, target_is_directory=True)
+    (work / "inner.py").symlink_to(work / "src" / "ok.py")  # stays inside
+    monkeypatch.chdir(work)
+
+    paths = ["src/ok.py", "link.py", "linkdir/secret.py", "inner.py", "gone.py"]
+    for cf in (build_changed_files(paths), parse_changed_files_payload(list(paths))):
+        assert cf.all_files == ["src/ok.py", "inner.py", "gone.py"]
+        assert cf.python == ["src/ok.py", "inner.py", "gone.py"]

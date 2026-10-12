@@ -64,6 +64,26 @@ def _is_option_like(path: str) -> bool:
     return any(part.startswith("-") for part in path.split("/") if part)
 
 
+def escapes_workspace(path: str) -> bool:
+    """Does *path* look like it is inside the workspace but resolve to a file outside it?
+
+    A changed file can be a symlink, or sit under a symlinked directory, that
+    points at a file elsewhere on the runner. An analyzer would read that
+    file, and a finding could quote its content in the posted review. A path
+    that is outside the workspace by name is not checked here, because the
+    changed-file list only holds paths from the diff. The workspace is the
+    current directory. A path that does not exist (a deleted file) cannot
+    escape.
+    """
+    root = os.path.abspath(os.getcwd())
+    lexical = os.path.abspath(path)
+    if lexical != root and not lexical.startswith(root + os.sep):
+        return False
+    real_root = os.path.realpath(root)
+    real = os.path.realpath(path)
+    return not (real == real_root or real.startswith(real_root + os.sep))
+
+
 @dataclass
 class ChangedFiles:
     """Categorized sets of changed file paths."""
@@ -132,6 +152,13 @@ def build_changed_files(file_list: list[str]) -> ChangedFiles:
             logging.getLogger(__name__).warning(
                 "[ai-pr-review] WARNING: dropping option-like changed-file path "
                 "from analyzer input (argument-injection guard): %r",
+                f,
+            )
+            continue
+        if escapes_workspace(f):
+            logging.getLogger(__name__).warning(
+                "[ai-pr-review] WARNING: dropping changed-file path that resolves "
+                "outside the workspace (symlink guard): %r",
                 f,
             )
             continue
