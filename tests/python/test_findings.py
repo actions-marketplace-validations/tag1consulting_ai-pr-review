@@ -408,6 +408,66 @@ def test_merge_proximity_chaining() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Cross-analyzer dedup (#1044)
+# ---------------------------------------------------------------------------
+
+
+def test_merge_two_analyzer_tools_nearby_keep_both_messages() -> None:
+    """phpcs and phpstan on nearby lines merge into one finding that keeps both texts."""
+    findings = [
+        _make_finding(file="a.php", line=294, source="phpcs", severity="High", finding="indent", category="lint"),
+        _make_finding(file="a.php", line=296, source="phpstan", severity="Low", finding="return type", category="lint"),
+    ]
+    result = merge_findings(findings)
+    assert len(result) == 1
+    assert result[0].finding == "indent"
+    assert result[0].sources == ["phpcs", "phpstan"]
+    assert result[0].also_reported == ["phpstan (line 296): return type"]
+
+
+def test_merge_also_reported_keeps_fingerprint_of_survivor() -> None:
+    """The survivor's `finding` text is untouched, so its fingerprint is unchanged."""
+    from ai_pr_review.vcs._finding_ids import fingerprint
+
+    solo = _make_finding(file="a.php", line=294, source="phpcs", severity="High", finding="indent", category="lint")
+    other = _make_finding(file="a.php", line=296, source="phpstan", severity="Low", finding="x", category="lint")
+    merged = merge_findings([solo, other])[0]
+    assert fingerprint(merged).split("|")[-1] == fingerprint(solo).split("|")[-1]
+
+
+def test_merge_same_analyzer_tool_nearby_has_no_also_reported() -> None:
+    findings = [
+        _make_finding(file="a.php", line=10, source="phpcs", category="lint", finding="a"),
+        _make_finding(file="a.php", line=12, source="phpcs", category="lint", finding="b"),
+    ]
+    result = merge_findings(findings)
+    assert len(result) == 1
+    assert result[0].also_reported == []
+
+
+def test_merge_agent_and_analyzer_still_merge_and_corroborate() -> None:
+    findings = [
+        _make_finding(file="a.php", line=10, source="code-reviewer", category="lint"),
+        _make_finding(file="a.php", line=11, source="phpstan", category="lint"),
+    ]
+    result = merge_findings(findings)
+    assert len(result) == 1
+    assert result[0].corroborated is True
+    assert result[0].also_reported == []
+
+
+def test_merge_also_reported_is_capped() -> None:
+    findings = [_make_finding(file="a.php", line=10, source="phpcs", severity="High", finding="top", category="lint")]
+    findings += [
+        _make_finding(file="a.php", line=10 + (i % 3), source="phpstan", severity="Low", finding=f"m{i}", category="lint")
+        for i in range(8)
+    ]
+    notes = merge_findings(findings)[0].also_reported
+    assert len(notes) == 6
+    assert notes[-1] == "(+3 more from other analyzers)"
+
+
+# ---------------------------------------------------------------------------
 # Category-aware dedup (#578)
 # ---------------------------------------------------------------------------
 
@@ -570,7 +630,11 @@ def test_merge_two_agents_no_boost() -> None:
 
 
 def test_merge_two_analyzers_no_boost() -> None:
-    """Two analyzers — no LLM agent present → no corroboration."""
+    """Two analyzers — no LLM agent present → no corroboration.
+
+    Two different analyzer tools still merge (#1044 keeps the lost text in
+    `also_reported`), and the merge never counts as corroboration.
+    """
     findings = [
         _make_finding(file="a.py", line=10, source="semgrep", confidence=90),
         _make_finding(file="a.py", line=12, source="ruff", confidence=90),
@@ -578,6 +642,7 @@ def test_merge_two_analyzers_no_boost() -> None:
     result = merge_findings(findings)
     assert len(result) == 1
     assert result[0].corroborated is False
+    assert result[0].confidence == 90
 
 
 def test_merge_single_finding_no_boost() -> None:

@@ -96,6 +96,14 @@ class Finding(BaseModel):
     # `corroborated` field this Finding already carries. Internal-only: not
     # serialised by to_dict().
     judge_verdict: JudgeVerdict | None = None
+    # Set by merge._collapse_cluster when two different analyzer tools report
+    # nearby lines (#1044). Each entry is one lost message, already composed as
+    # "<tool> (line N): <message>". The surviving finding keeps its own
+    # `finding` text unchanged because vcs/_finding_ids.fingerprint() hashes
+    # it. Kept out of `remediation` so suppression rules (which match on
+    # finding + remediation) cannot hide the surviving finding through the
+    # other tool's text. Internal-only: not serialised by to_dict().
+    also_reported: list[str] = Field(default_factory=list)
 
     @field_validator("severity", mode="before")
     @classmethod
