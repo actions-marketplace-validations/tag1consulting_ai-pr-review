@@ -18,12 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Behavior change: a PHP repo that is not a Drupal repo no longer gets the Drupal standard.** With no phpcs ruleset, the Drupal and DrupalPractice standards apply only when the repo shows Drupal signals: a `*.info.yml` file, a Drupal 7 `*.info` file with `name` and `core` keys, a `.module`, `.install`, `.theme` or `.profile` file, a composer `type` of `drupal-*`, or a `drupal/core` requirement. Other repos get PSR12 with the docblock sniff. Open pull requests can see new findings and stale threads that resolve.
 - **A ruleset that names a standard the image does not have gets a style-neutral fallback.** For example, `WordPress-Extra` is not installed. phpcs then runs seven correctness sniffs with no code-style opinion, plus the repo rules that name installed sniffs, and the log names the missing standard. PSR12 is not the fallback, because it requires spaces and tab-indented code would fail on almost every line. If phpcs rejects the generated ruleset, the analyzer retries once without the repo rules and keeps the repo's top-level exclude patterns.
+- **Bugfixes now land directly on `main`.** A defect fix that deserves a patch release no longer goes through a `release/vX.Y.Z` branch. The maintainer cuts the patch release from `main`. Features and other planned changes still use the release branch. This is a process change only, with no engine or workflow code changes. See "Bugfix path" in `CLAUDE.md`.
 - **Dependency updates.** Python is 3.15 in the workflows (#1040) and `ruby/setup-ruby` is v1.329.0 (#1041).
 
 ### Known limits
 
 - WPCS (the WordPress standard) is not in the image, because WPCS 3.4.1 needs phpcs 3 and `drupal/coder` 9 needs phpcs 4 (#1043).
 - Rule-level `type="relative"` exclude patterns are passed to phpcs, which does not apply them to files given on the command line.
+||||||| b37d766
 
 ## [2.21.0] - 2026-10-09
 

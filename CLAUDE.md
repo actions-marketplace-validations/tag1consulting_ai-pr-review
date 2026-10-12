@@ -158,7 +158,7 @@ For contributor how-tos (adding an analyzer, agent, language profile, or VCS pro
 
 ## Branching model
 
-Work lands on a long-lived release branch first, and the release branch then merges into `main`. This makes the release PR carry the whole code diff since the last release, so the one full review of a release looks at real code and not only at the release docs.
+Features and other planned changes land on a long-lived release branch first, and the release branch then merges into `main`. This makes the release PR carry the whole code diff since the last release, so the one full review of a release looks at real code and not only at the release docs. Bugfixes that deserve a patch release skip the release branch (see "Bugfix path" below).
 
 1. **Start a release cycle**: create `release/vX.Y.Z` from `main` in a worktree and push it. Use the planned next version number.
 2. **Feature and issue PRs target the release branch**: `gh pr create --base release/vX.Y.Z`. They get the default quick review and the normal CI checks.
@@ -170,8 +170,19 @@ Rules for this model:
 - **Close issues in the release PR**: GitHub closes an issue from a closing keyword only when the PR targets the default branch. List every issue the release fixes as `Fixes #N` in the release PR description.
 - **Dependency PRs**: Renovate PRs still target `main`. Merge `main` into the release branch before the release PR.
 - **The `:dev` image** is built from `main`, so changes on a release branch reach `:dev` when the release PR merges. The release PR's e2e run builds the image from the release branch.
-- **Hotfix**: create `release/vX.Y.Z` from the last release tag, apply the fix, and open the release PR into `main`.
+- **Hotfix**: a bugfix that qualifies for the bugfix path goes straight to `main`. Use `release/vX.Y.Z` from the last release tag only when the fix is not a bugfix by the rule below.
 - **Policy file source**: the policy file is read from the PR's base branch. A release branch must contain the current `.github/ai-pr-review/policy.yml`, so create it from an up-to-date `main`.
+
+### Bugfix path (patch release from `main`)
+
+A bugfix that deserves a patch release (`X.Y.Z` to `X.Y.Z+1`) uses a shorter loop with no release branch. `main` always equals the last release plus maintenance (Renovate PRs and bugfixes), because features wait on the release branch, so `main` is always releasable.
+
+1. **What qualifies**: a fix for a defect, with no new feature, setting, or behavior option. If the change adds any of those, or the maintainer is unsure, use the release branch above.
+2. **Branch and PR**: branch from an up-to-date `main` in a worktree and open the PR with `gh pr create --base main`. List the fixed issues as `Fixes #N`, which closes them on merge because the PR targets the default branch.
+3. **Review**: the PR gets the default quick review, and the local `/comprehensive-review --quick` rule still applies before the push. There is no release PR to carry a full review, so run `/ai-pr-review review-full` once on the PR when the fix is large or touches a trust boundary (analyzers, auth, anything that reads the workspace). Batch the pushes, because every push costs review tokens.
+4. **Live e2e**: the automatic live `e2e-gate` legs run only on non-draft `release/*` PRs, so a PR into `main` passes that check at once. Before tagging, run the e2e workflow on `main` with `workflow_dispatch` (it reports `e2e-gate (manual)`) and read the result.
+5. **Release**: after the bugfix PRs merge, add the release commit (version bump, changelog, version history, homepage) in the last bugfix PR or in one small release-prep PR into `main`. Then tag `vX.Y.Z+1` on `main`. Steps 3 and 4 of "Release process" apply unchanged.
+6. **Open release branch**: if `release/vX.Y.Z` is open, merge `main` into it after the bugfix lands.
 
 ## Release process
 
