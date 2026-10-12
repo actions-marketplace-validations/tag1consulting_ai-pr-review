@@ -137,6 +137,9 @@ class _Plan:
     # Those can name a sniff that this phpcs version lacks, so a process error
     # is retried once without them.
     repo_rules: bool = False
+    # The repo's top-level exclude patterns. They survive a retry, because only
+    # the rules can name a sniff that this phpcs version lacks.
+    patterns: tuple[tuple[str, str], ...] = ()
 
 
 def _installed_standards() -> set[str]:
@@ -153,6 +156,13 @@ def _installed_standards() -> set[str]:
         return set()
     except OSError as exc:
         logger.warning("[ai-pr-review] WARNING: phpcs -i failed: %s; falling back to PSR12.", exc)
+        return set()
+    if result.returncode != 0 or not result.stdout.strip():
+        logger.warning(
+            "[ai-pr-review] WARNING: phpcs -i exited %d with no usable output; "
+            "the installed standards are unknown, so no repo standard can be honored.",
+            result.returncode,
+        )
         return set()
     text = result.stdout
     if ":" in text:
@@ -188,13 +198,32 @@ def _normalize_scope_entry(text: str) -> str | None:
 _MAX_DROP_LOGS = 5
 
 
-def _log_drop(ruleset_name: str, kind: str, value: str, count: int) -> None:
-    """Log one dropped ruleset entry. A dropped exclude means more files get linted."""
-    if count <= _MAX_DROP_LOGS:
-        logger.warning(
-            "[ai-pr-review] WARNING: %s: dropping %s %r (not in the allowed subset).",
-            ruleset_name, kind, value[:80],
-        )
+class _Drops:
+    """Count and log the ruleset entries dropped as outside the allowed subset.
+
+    A dropped exclude means more files get linted than the repo intended, so
+    every drop is visible. Only the first few are logged one by one, then
+    `summary()` reports the total.
+    """
+
+    def __init__(self, ruleset_name: str) -> None:
+        self.name = ruleset_name
+        self.count = 0
+
+    def note(self, kind: str, value: str) -> None:
+        self.count += 1
+        if self.count <= _MAX_DROP_LOGS:
+            logger.warning(
+                "[ai-pr-review] WARNING: %s: dropping %s %r (not in the allowed subset).",
+                self.name, kind, value[:80],
+            )
+
+    def summary(self) -> None:
+        if self.count > _MAX_DROP_LOGS:
+            logger.warning(
+                "[ai-pr-review] WARNING: %s: dropped %d entries in total, showed %d.",
+                self.name, self.count, _MAX_DROP_LOGS,
+            )
 
 
 def _find_repo_ruleset() -> Path | None:
@@ -210,7 +239,37 @@ def _find_repo_ruleset() -> Path | None:
     return None
 
 
-def _keep_rule(rule: ET.Element, installed: set[str]) -> tuple[ET.Element | None, str | None]:
+def _keep_properties(src: ET.Element, kept_rule: ET.Element, ref: str, drops: _Drops) -> None:
+    props = ET.SubElement(kept_rule, "properties")
+    for prop in src:
+        name = prop.get("name", "")
+        value = prop.get("value", "")
+        if prop.tag != "property" or not _PROP_NAME_RE.match(name) or len(value) > 200:
+            drops.note(f"{ref} property", name or prop.tag)
+            continue
+        attrs = {"name": name}
+        if "value" in prop.attrib:
+            attrs["value"] = value
+        if prop.get("type") == "array":
+            attrs["type"] = "array"
+        if prop.get("extend") in ("true", "false"):
+            attrs["extend"] = prop.get("extend", "")
+        new_prop = ET.SubElement(props, "property", attrs)
+        for el in prop:
+            el_value = el.get("value", "")
+            el_key = el.get("key", "")
+            if el.tag == "element" and len(el_value) <= 200 and len(el_key) <= 200:
+                el_attrs = {"value": el_value}
+                if "key" in el.attrib:
+                    el_attrs["key"] = el_key
+                ET.SubElement(new_prop, "element", el_attrs)
+            else:
+                drops.note(f"{ref} property {name} element", el_value)
+
+
+def _keep_rule(
+    rule: ET.Element, installed: set[str], drops: _Drops
+) -> tuple[ET.Element | None, str | None]:
     """Rebuild one `<rule>` from its allowlisted parts.
 
     Returns (rule, None) when kept, (None, standard) when it names a standard
@@ -218,7 +277,7 @@ def _keep_rule(rule: ET.Element, installed: set[str]) -> tuple[ET.Element | None
     """
     ref = rule.get("ref", "")
     if not _REF_RE.match(ref):
-        logger.warning("[ai-pr-review] WARNING: dropping phpcs rule ref %r (path-style or invalid).", ref[:80])
+        drops.note("rule ref", ref)
         return None, None
     standard = ref.split(".", 1)[0]
     if standard not in installed:
@@ -227,38 +286,31 @@ def _keep_rule(rule: ET.Element, installed: set[str]) -> tuple[ET.Element | None
     kept = ET.Element("rule", ref=ref)
     for child in rule:
         text = (child.text or "").strip()
-        if child.tag == "exclude" and _REF_RE.match(child.get("name", "")):
-            ET.SubElement(kept, "exclude", name=child.get("name", ""))
-        elif child.tag in ("exclude-pattern", "include-pattern") and _pattern_ok(text):
-            attrs = {"type": child.get("type", "absolute")}
-            if attrs["type"] in _PATTERN_TYPES:
-                ET.SubElement(kept, child.tag, attrs).text = text
-        elif child.tag == "severity" and text.isdigit() and int(text) <= 10:
-            ET.SubElement(kept, "severity").text = text
-        elif child.tag == "type" and text in ("error", "warning"):
-            ET.SubElement(kept, "type").text = text
+        if child.tag == "exclude":
+            if _REF_RE.match(child.get("name", "")):
+                ET.SubElement(kept, "exclude", name=child.get("name", ""))
+            else:
+                drops.note(f"{ref} exclude", child.get("name", ""))
+        elif child.tag in ("exclude-pattern", "include-pattern"):
+            kind = child.get("type", "absolute")
+            if _pattern_ok(text) and kind in _PATTERN_TYPES:
+                ET.SubElement(kept, child.tag, {"type": kind}).text = text
+            else:
+                drops.note(f"{ref} {child.tag}", text)
+        elif child.tag == "severity":
+            if text.isdigit() and int(text) <= 10:
+                ET.SubElement(kept, "severity").text = text
+            else:
+                drops.note(f"{ref} severity", text)
+        elif child.tag == "type":
+            if text in ("error", "warning"):
+                ET.SubElement(kept, "type").text = text
+            else:
+                drops.note(f"{ref} type", text)
         elif child.tag == "properties":
-            props = ET.SubElement(kept, "properties")
-            for prop in child:
-                name = prop.get("name", "")
-                value = prop.get("value", "")
-                if prop.tag != "property" or not _PROP_NAME_RE.match(name) or len(value) > 200:
-                    continue
-                attrs = {"name": name}
-                if "value" in prop.attrib:
-                    attrs["value"] = value
-                if prop.get("type") == "array":
-                    attrs["type"] = "array"
-                if prop.get("extend") in ("true", "false"):
-                    attrs["extend"] = prop.get("extend", "")
-                new_prop = ET.SubElement(props, "property", attrs)
-                for el in prop:
-                    el_value = el.get("value", "")
-                    if el.tag == "element" and len(el_value) <= 200:
-                        el_attrs = {"value": el_value}
-                        if "key" in el.attrib and len(el.get("key", "")) <= 200:
-                            el_attrs["key"] = el.get("key", "")
-                        ET.SubElement(new_prop, "element", el_attrs)
+            _keep_properties(child, kept, ref, drops)
+        else:
+            drops.note(f"{ref} <{child.tag}>", "")
     return kept, None
 
 
@@ -292,14 +344,13 @@ def _parse_repo_ruleset(path: Path, installed: set[str]) -> _RepoRuleset | None:
     rules: list[ET.Element] = []
     missing: list[str] = []
     has_standard_ref = False
-    dropped = 0
+    drops = _Drops(path.name)
     for child in root:
         text = (child.text or "").strip()
         if child.tag == "file":
             entry = _normalize_scope_entry(text)
             if entry is None:
-                dropped += 1
-                _log_drop(path.name, "file", text, dropped)
+                drops.note("file", text)
             elif entry == ".":
                 # `<file>.</file>` means the whole tree: no scope limit.
                 files = []
@@ -311,15 +362,15 @@ def _parse_repo_ruleset(path: Path, installed: set[str]) -> _RepoRuleset | None:
             if _pattern_ok(text) and kind in _PATTERN_TYPES:
                 patterns.append((text, kind))
             else:
-                dropped += 1
-                _log_drop(path.name, "exclude-pattern", text, dropped)
+                drops.note("exclude-pattern", text)
         elif child.tag == "rule":
             has_standard_ref = True
-            kept, absent = _keep_rule(child, installed)
+            kept, absent = _keep_rule(child, installed, drops)
             if kept is not None:
                 rules.append(kept)
             elif absent is not None and absent not in missing:
                 missing.append(absent)
+    drops.summary()
     return _RepoRuleset(
         name=path.name,
         files=tuple(files),
@@ -330,23 +381,38 @@ def _parse_repo_ruleset(path: Path, installed: set[str]) -> _RepoRuleset | None:
     )
 
 
-def _in_ruleset_scope(path: str, ruleset: _RepoRuleset) -> bool:
-    """Is *path* inside one of the ruleset's `<file>` entries?
+def _relative_pattern_matches(pattern: str, relative_path: str) -> bool:
+    """Apply one `type="relative"` exclude pattern the way phpcs does for a directory scan.
 
-    phpcs ignores `<file>` when files are given on the command line (verified
-    against phpcs 4.0.4), so the scope has to be applied here. A ruleset with
-    no `<file>` entry has no scope limit. Exclude patterns are not applied
-    here, because phpcs applies them itself from the generated ruleset.
+    phpcs turns `*` into `.*`, reads `\\,` as `,`, and matches the result as a
+    case-insensitive regex. Only patterns that passed `_pattern_ok` get here.
     """
-    if not ruleset.files:
-        return True
+    try:
+        return re.search(pattern.replace("\\,", ",").replace("*", ".*"), relative_path, re.IGNORECASE) is not None
+    except re.error:
+        return False
+
+
+def _in_ruleset_scope(path: str, ruleset: _RepoRuleset) -> bool:
+    """Is *path* inside the ruleset's `<file>` scope and outside its relative excludes?
+
+    phpcs ignores `<file>` when files are given on the command line, and it
+    does not apply `type="relative"` exclude patterns to such files either
+    (both verified against phpcs 4.0.4), so both are applied here. A ruleset
+    with no `<file>` entry has no scope limit. Absolute exclude patterns are
+    not applied here, because phpcs applies them itself from the generated
+    ruleset.
+    """
     norm = posixpath.normpath(path)
-    cwd = Path.cwd()
     if norm.startswith("/"):
         try:
-            norm = str(Path(norm).relative_to(cwd))
+            norm = str(Path(norm).relative_to(Path.cwd()))
         except ValueError:
-            return False
+            return not ruleset.files
+    if any(kind == "relative" and _relative_pattern_matches(pattern, norm) for pattern, kind in ruleset.patterns):
+        return False
+    if not ruleset.files:
+        return True
     return any(norm == entry or norm.startswith(entry + "/") for entry in ruleset.files)
 
 
@@ -459,6 +525,7 @@ def _plan_standard(php_files: list[str]) -> _Plan | None:
                 ruleset_xml=_build_ruleset_xml(_STYLE_NEUTRAL_REFS, ruleset),
                 files=scoped,
                 repo_rules=True,
+                patterns=ruleset.patterns,
             )
         if ruleset.has_standard_ref:
             return _Plan(
@@ -468,6 +535,7 @@ def _plan_standard(php_files: list[str]) -> _Plan | None:
                 files=scoped,
                 drupal=any(r.get("ref", "").startswith("Drupal") for r in ruleset.rules),
                 repo_rules=True,
+                patterns=ruleset.patterns,
             )
         # A ruleset with no standard of its own: keep its scope and excludes
         # and pick the default standard below.
@@ -492,6 +560,7 @@ def _plan_standard(php_files: list[str]) -> _Plan | None:
             files=php_files,
             drupal=True,
             repo_rules=True,
+            patterns=default_extra.patterns,
         )
     if default_extra is not None:
         return _Plan(
@@ -500,6 +569,7 @@ def _plan_standard(php_files: list[str]) -> _Plan | None:
             ruleset_xml=_build_ruleset_xml(("PSR12", "Squiz.Commenting.FunctionComment"), default_extra),
             files=php_files,
             repo_rules=True,
+            patterns=default_extra.patterns,
         )
     return _Plan(label="PSR12", remediation_standard="PSR12", ruleset_xml=_PSR12_PLUS_DOCBLOCK_RULESET, files=php_files)
 
@@ -580,13 +650,24 @@ def _run_phpcs(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
         # rules, instead of returning no findings at all.
         logger.warning(
             "[ai-pr-review] WARNING: phpcs rejected the generated ruleset (exit %d); "
-            "retrying with the style-neutral fallback. stderr: %s",
+            "retrying with the style-neutral fallback. The repo rules are dropped and "
+            "the repo's top-level exclude patterns are kept. stderr: %s",
             result.returncode, result.stderr[:200],
         )
         plan = _Plan(
             label="style-neutral fallback",
             remediation_standard=plan.remediation_standard,
-            ruleset_xml=_build_ruleset_xml(_STYLE_NEUTRAL_REFS, None),
+            ruleset_xml=_build_ruleset_xml(
+                _STYLE_NEUTRAL_REFS,
+                _RepoRuleset(
+                    name=plan.remediation_standard,
+                    files=(),
+                    patterns=plan.patterns,
+                    rules=(),
+                    has_standard_ref=False,
+                    missing_standards=(),
+                ),
+            ),
             files=plan.files,
         )
         result = _invoke_phpcs(plan)

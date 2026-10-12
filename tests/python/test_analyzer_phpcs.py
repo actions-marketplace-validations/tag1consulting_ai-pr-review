@@ -756,6 +756,59 @@ class TestRepoRuleset:
         assert "Generic.Gone.Removed" not in run.xml
         assert "Generic.PHP.Syntax" in run.xml
 
+    def test_relative_exclude_pattern_is_applied_in_python(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # phpcs does not apply type="relative" excludes to explicitly listed files.
+        ruleset = (
+            '<ruleset name="s"><exclude-pattern type="relative">^tests/*</exclude-pattern>'
+            '<rule ref="PSR12"/></ruleset>'
+        )
+        _, run = _run_in(
+            tmp_path,
+            monkeypatch,
+            {"src/a.php": _PHP, "tests/t.php": _PHP},
+            ["src/a.php", "tests/t.php"],
+            ruleset=("phpcs.xml", ruleset),
+        )
+        assert run.main_args[run.main_args.index("--") + 1 :] == ["src/a.php"]
+
+    def test_rule_level_drops_are_logged_with_a_total(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        bad = "".join(f"<exclude-pattern>(a+){i}</exclude-pattern>" for i in range(8))
+        ruleset = f'<ruleset name="s"><rule ref="PSR12">{bad}<severity>99</severity></rule></ruleset>'
+        with caplog.at_level("WARNING"):
+            _run_in(tmp_path, monkeypatch, {"a.php": _PHP}, ["a.php"], ruleset=("phpcs.xml", ruleset))
+        assert "dropping PSR12 exclude-pattern" in caplog.text
+        assert "dropped 9 entries in total, showed 5" in caplog.text
+
+    def test_retry_keeps_top_level_excludes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ruleset = (
+            '<ruleset name="s"><exclude-pattern>vendor/*</exclude-pattern>'
+            '<rule ref="PSR12.Nope.Missing"/></ruleset>'
+        )
+        _, run = _run_in(
+            tmp_path,
+            monkeypatch,
+            {"a.php": _PHP},
+            ["a.php"],
+            ruleset=("phpcs.xml", ruleset),
+            main_returncodes=[16, 0],
+        )
+        assert run.xml is not None
+        assert "PSR12.Nope.Missing" not in run.xml
+        assert "vendor/*" in run.xml
+
+    def test_failed_phpcs_i_is_logged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level("WARNING"):
+            _run_in(tmp_path, monkeypatch, {"a.php": _PHP}, ["a.php"], installed="")
+        assert "installed standards are unknown" in caplog.text
+
     def test_dropped_exclude_pattern_is_logged(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
