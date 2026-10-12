@@ -276,6 +276,34 @@ def test_resolve_route_path_glob_match() -> None:
     assert resolve_route(pf, ["src/app.py"], "main", "") is None
 
 
+def test_resolve_route_paths_all_needs_every_file_to_match() -> None:
+    """#1039: one docs file in a mixed PR must not route the whole PR to a
+    reduced policy when the route uses `paths-all`."""
+    pf = _pf((RouteRule(policy="content", paths_all=("docs/**", "language-profiles/**")),))
+    assert resolve_route(pf, ["docs/a.md", "language-profiles/go.md"], "main", "") == "content"
+    assert resolve_route(pf, ["docs/a.md", "src/app.py"], "main", "") is None
+    assert resolve_route(pf, [], "main", "") is None
+    # `paths` keeps its any-file meaning.
+    any_pf = _pf((RouteRule(policy="content", paths=("docs/**",)),))
+    assert resolve_route(any_pf, ["docs/a.md", "src/app.py"], "main", "") == "content"
+
+
+def test_resolve_route_paths_and_paths_all_must_both_match() -> None:
+    pf = _pf((RouteRule(policy="x", paths=("docs/**",), paths_all=("docs/**", "*.md")),))
+    assert resolve_route(pf, ["docs/a.md", "README.md"], "main", "") == "x"
+    assert resolve_route(pf, ["README.md"], "main", "") is None  # no docs/** file
+
+
+def test_paths_all_route_parses_and_counts_as_a_constraint() -> None:
+    raw = {
+        "policies": {"content": {"agents": []}},
+        "routes": [{"when": {"paths-all": ["docs/**"]}, "policy": "content"}],
+    }
+    pf = _parse_policy_file(raw)
+    assert pf.routes[0].paths_all == ("docs/**",)
+    assert pf.routes[0].paths == ()
+
+
 def test_resolve_route_base_branch_glob_match() -> None:
     pf = _pf((RouteRule(policy="integration", base_branch="staging-*"),))
     assert resolve_route(pf, [], "staging-1.2", "") == "integration"
