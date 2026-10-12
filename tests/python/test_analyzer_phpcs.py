@@ -1125,3 +1125,48 @@ class TestRefsCannotReachTheWorkspace:
         sent_raw = run.main_args[run.main_args.index("--") + 1 :]
         assert sent_raw == [str(tmp_path / "src" / "a.php")]
         assert run.sent == ["src/a.php"]
+
+
+class TestSymlinksThatLeaveTheWorkspace:
+    """A changed file must not make phpcs read a file outside the workspace."""
+
+    def test_symlinked_file_and_symlinked_dir_that_resolve_outside_are_skipped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "secret.php").write_text('<?php\n$k = "ghp_FAKE";\n')
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        (workspace / "ok.php").write_text(_PHP)
+        (workspace / "leak.php").symlink_to(outside / "secret.php")
+        (workspace / "linkdir").symlink_to(outside, target_is_directory=True)
+        with caplog.at_level("WARNING"):
+            _, run = _run_in(
+                workspace,
+                monkeypatch,
+                {},
+                ["ok.php", "leak.php", "linkdir/secret.php"],
+            )
+        assert run.sent == ["ok.php"]
+        assert "resolve outside the workspace" in caplog.text
+
+    def test_symlink_that_stays_inside_the_workspace_is_kept(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "real.php").write_text(_PHP)
+        (tmp_path / "alias.php").symlink_to(tmp_path / "real.php")
+        _, run = _run_in(tmp_path, monkeypatch, {}, ["alias.php"])
+        assert run.sent == ["alias.php"]
+
+    def test_only_symlinked_files_means_no_phpcs_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        outside = tmp_path / "outside.php"
+        outside.write_text(_PHP)
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        (workspace / "leak.php").symlink_to(outside)
+        findings, run = _run_in(workspace, monkeypatch, {}, ["leak.php"])
+        assert findings == []
+        assert run.main_args == []

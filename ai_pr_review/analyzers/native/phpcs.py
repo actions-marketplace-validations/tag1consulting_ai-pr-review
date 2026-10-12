@@ -718,6 +718,24 @@ def _invoke_phpcs(plan: _Plan) -> subprocess.CompletedProcess[str] | None:
         return None
 
 
+def _escapes_workspace(path: str) -> bool:
+    """Does *path* look like it is inside the workspace but resolve to a file outside it?
+
+    A changed file can be a symlink, or sit under a symlinked directory, that
+    points at a file elsewhere on the runner. phpcs would read that file, and a
+    finding could quote its content in the posted review. A path that is
+    outside the workspace by name is not checked here, because the manifest
+    only lists paths from the diff.
+    """
+    root = os.path.abspath(os.getcwd())
+    lexical = os.path.abspath(path)
+    if lexical != root and not lexical.startswith(root + os.sep):
+        return False
+    real_root = os.path.realpath(root)
+    real = os.path.realpath(path)
+    return not (real == real_root or real.startswith(real_root + os.sep))
+
+
 def _remediation(plan: _Plan, path: str) -> str:
     if plan.drupal:
         return f"See https://www.drupal.org/docs/develop/standards or fix with: phpcs --standard={plan.remediation_standard} {path}"
@@ -727,6 +745,13 @@ def _remediation(plan: _Plan, path: str) -> str:
 def _run_phpcs(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
     """Run phpcs on changed PHP files and return Finding instances."""
     php_files = [f for f in changed_files.php if Path(f).is_file() and Path(f).suffix in _PHP_EXTENSIONS]
+    escaping = [f for f in php_files if _escapes_workspace(f)]
+    if escaping:
+        logger.warning(
+            "[ai-pr-review] WARNING: phpcs skips %d changed file(s) that resolve outside the workspace: %s",
+            len(escaping), ", ".join(escaping[:5]),
+        )
+        php_files = [f for f in php_files if f not in escaping]
     if not php_files:
         return []
 
