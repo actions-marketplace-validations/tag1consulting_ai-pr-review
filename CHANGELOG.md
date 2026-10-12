@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.22.0] - 2026-10-12
+
+### Fixed
+
+- **The phpcs analyzer now honors the repo's own ruleset (#1042).** It applied the Drupal standard to every PHP repo and ignored `phpcs.xml`, so a WordPress plugin got High indentation findings on test files that its ruleset does not lint. The analyzer reads `.phpcs.xml`, `phpcs.xml`, `.phpcs.xml.dist` or `phpcs.xml.dist` as data and gives phpcs a generated ruleset. phpcs never reads the repo file, because a ruleset can load PHP from the workspace (`installed_paths`, `bootstrap`, `autoload`, path-style `rule ref`), which is the same threat as #739. The analyzer keeps the `<file>` scope, the exclude patterns, the rules that name installed standards or sniffs, and their `exclude`, `severity`, `type` and `properties` settings. It rejects a ruleset with a DOCTYPE or ENTITY declaration, a NUL byte, a size over 256 KiB, or a symlink. It applies the `<file>` scope and `type="relative"` exclude patterns itself, because phpcs ignores both for files given on the command line. It matches those patterns without a backtracking regex, so a hostile pattern cannot stall the review. It logs every ruleset entry that it drops.
+- **A merged finding from two different analyzer tools no longer loses the second message (#1044).** When phpcs and phpstan reported nearby lines, the merged finding kept only the highest-severity text, while the badge still named both tools. The merged finding now keeps its own text and lists the other tool's message as `Also reported by:` in the GitHub inline comment, the GitLab discussion, the review body, and the Bitbucket Code Insights annotation. The text is not appended to the finding, because the finding fingerprint hashes it. The roll-up step keeps the notes of every occurrence.
+
+### Changed
+
+- **Behavior change: a PHP repo that is not a Drupal repo no longer gets the Drupal standard.** With no phpcs ruleset, the Drupal and DrupalPractice standards apply only when the repo shows Drupal signals: a `*.info.yml` file, a Drupal 7 `*.info` file with `name` and `core` keys, a `.module`, `.install`, `.theme` or `.profile` file, a composer `type` of `drupal-*`, or a `drupal/core` requirement. Other repos get PSR12 with the docblock sniff. Open pull requests can see new findings and stale threads that resolve.
+- **A ruleset that names a standard the image does not have gets a style-neutral fallback.** For example, `WordPress-Extra` is not installed. phpcs then runs seven correctness sniffs with no code-style opinion, plus the repo rules that name installed sniffs, and the log names the missing standard. PSR12 is not the fallback, because it requires spaces and tab-indented code would fail on almost every line. If phpcs rejects the generated ruleset, the analyzer retries once without the repo rules and keeps the repo's top-level exclude patterns.
+- **Dependency updates.** Python is 3.15 in the workflows (#1040) and `ruby/setup-ruby` is v1.329.0 (#1041).
+
+### Known limits
+
+- WPCS (the WordPress standard) is not in the image, because WPCS 3.4.1 needs phpcs 3 and `drupal/coder` 9 needs phpcs 4 (#1043).
+- Rule-level `type="relative"` exclude patterns are passed to phpcs, which does not apply them to files given on the command line.
+
 ## [2.21.0] - 2026-10-09
 
 ### Added
