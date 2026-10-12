@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.22.1] - 2026-10-12
+
+### Fixed
+
+- **The review headline now follows a dismissal (#1049).** After a maintainer dismissed a finding, the "Overall Risk | Findings" line kept the old risk and counts until the next full review. Every review body now carries a hidden `headline-map` marker (fingerprint, severity and place of each counted finding). A dismissal removes the finding from it and recomputes the headline, for carried-forward, inline and body-level findings. The marker is the first one dropped when the body is near the size limit. A review posted before this release has no marker, so a dismissed carried-forward finding only lowers the counts and the risk reads `<risk> or lower`.
+- **A changed file that resolves outside the workspace is dropped for every analyzer (#1047, item 1).** A symlink, or a file under a symlinked directory, could point at a file elsewhere on the runner. v2.22.0 fixed this for phpcs only. `build_changed_files` now applies the rule once, so no analyzer or agent gets the path.
+- **A docs file no longer routes a mixed pull request to no review (#1039).** `when.paths` matches if any one changed file matches, so one `docs/` file next to real code gave the whole PR `agents: []` and `analyzers: []` under this repository's own docs route.
+
+### Added
+
+- **New policy route key `when.paths-all` (#1039).** A route with `paths-all` matches only if every changed file matches at least one of its globs, and never matches an empty file list. `paths` keeps its meaning, so no existing policy file changes. This repository's docs route now uses `paths-all`.
+
 ## [2.22.0] - 2026-10-12
 
 ### Fixed
