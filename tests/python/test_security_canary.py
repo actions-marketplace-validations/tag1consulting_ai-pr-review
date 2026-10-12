@@ -27,6 +27,7 @@ SENTINEL_NAMES = [
     "pre-commit-hook-executed",
     "conftest-imported",
     "semgrep-rule-executed",
+    "phpcs-ruleset-executed",
 ]
 
 
@@ -180,3 +181,84 @@ class TestNeverExecuteCheckedOutCode:
                 _ = f.read_bytes()
 
         _assert_no_canary_fired(canary_dir)
+
+
+@pytest.mark.security
+class TestPhpcsRulesetIsData:
+    """The phpcs analyzer reads a repo ruleset as data and never hands it to phpcs (#1042)."""
+
+    def test_phpcs_never_receives_the_workspace_ruleset(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import subprocess
+        from unittest.mock import MagicMock, patch
+
+        from ai_pr_review.analyzers.native.phpcs import _run_phpcs
+        from ai_pr_review.manifest import ChangedFiles
+
+        canary_dir = tmp_path / "canary"
+        monkeypatch.setenv("CANARY_DIR", str(canary_dir))
+        monkeypatch.chdir(CANARY_WORKSPACE)
+        seen: list[list[str]] = []
+        generated: list[str] = []
+
+        def _fake(args: list[str], **kwargs: object) -> MagicMock:
+            seen.append(args)
+            if args[0:2] == ["phpcs", "-i"]:
+                return MagicMock(returncode=0, stdout="PSR12, PSR2, PSR1", stderr="")
+            flag = next(a for a in args if a.startswith("--standard="))
+            generated.append(Path(flag.removeprefix("--standard=")).read_text())
+            return MagicMock(returncode=0, stdout='{"totals":{},"files":{}}', stderr="")
+
+        files = ["canary-bootstrap.php"]
+        with (
+            patch("ai_pr_review.analyzers.native.phpcs.shutil.which", return_value="/usr/bin/phpcs"),
+            patch.object(subprocess, "run", side_effect=_fake),
+        ):
+            _run_phpcs(ChangedFiles(all_files=files, php=files), tmp_path / "x.diff")
+
+        main = seen[-1]
+        standard = next(a for a in main if a.startswith("--standard="))
+        assert "phpcs.xml.dist" not in standard
+        assert str(CANARY_WORKSPACE) not in standard
+        assert generated, "phpcs should receive a generated ruleset"
+        for needle in ("installed_paths", "php_path", "bootstrap", "autoload", "canary-bootstrap", "Generic.canary"):
+            assert needle not in generated[-1], needle
+        _assert_no_canary_fired(canary_dir)
+
+    def test_real_phpcs_does_not_load_workspace_php(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import shutil
+
+        if not (shutil.which("phpcs") and shutil.which("php")):
+            pytest.skip("phpcs and php are not installed")
+        from ai_pr_review.analyzers.native.phpcs import _run_phpcs
+        from ai_pr_review.manifest import ChangedFiles
+
+        canary_dir = tmp_path / "canary"
+        monkeypatch.setenv("CANARY_DIR", str(canary_dir))
+        monkeypatch.chdir(CANARY_WORKSPACE)
+        files = ["canary-bootstrap.php"]
+        _run_phpcs(ChangedFiles(all_files=files, php=files), tmp_path / "x.diff")
+        _assert_no_canary_fired(canary_dir)
+
+    def test_real_phpcs_with_ref_shapes_that_resolve_against_the_cwd(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A rule ref or exclude name that names a workspace file or directory must not load it (#1042)."""
+        import shutil
+
+        if not (shutil.which("phpcs") and shutil.which("php")):
+            pytest.skip("phpcs and php are not installed")
+        from ai_pr_review.analyzers.native.phpcs import _plan_standard
+
+        canary_dir = tmp_path / "canary"
+        monkeypatch.setenv("CANARY_DIR", str(canary_dir))
+        monkeypatch.chdir(CANARY_WORKSPACE)
+        plan = _plan_standard(["canary-bootstrap.php"])
+        assert plan is not None
+        assert plan.ruleset_xml is not None
+        assert "Generic.canary" not in plan.ruleset_xml
+        _assert_no_canary_fired(canary_dir)
+

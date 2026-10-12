@@ -27,7 +27,7 @@ import re
 from collections import defaultdict
 
 from ai_pr_review.diff.linemap import parse_added_lines
-from ai_pr_review.findings.models import Finding
+from ai_pr_review.findings.models import Finding, combine_also_reported
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +196,10 @@ def rollup_repeated_findings(
         if len(lines) > 10:
             line_preview += f" ... (+{len(lines) - 10} more)"
         summary = f" ({len(group)} occurrences in {key[0]}, lines: {line_preview})"
-        result.append(rep.model_copy(update={"finding": rep.finding + summary}))
+        update: dict[str, object] = {"finding": rep.finding + summary}
+        notes = combine_also_reported([g.also_reported for g in group])
+        if notes:
+            update["also_reported"] = notes
+        result.append(rep.model_copy(update=update))
 
     return result

@@ -615,3 +615,48 @@ def test_format_http_error_body_caps_an_enormous_scope_list() -> None:
     assert out.startswith("m (required scopes: r. granted scopes: scope-0:bitbucket")
     assert out.endswith(" ...)")
     assert len(out) < 2200
+
+
+def _merged_two_tool_finding() -> Finding:
+    return Finding(
+        severity="High",
+        confidence=90,
+        finding="indent",
+        source="phpcs",
+        file="a.php",
+        line=294,
+        category="lint",
+        also_reported=["phpstan (line 296): returns void</details><!-- x -->"],
+    )
+
+
+def test_also_reported_rendered_and_sanitized_in_body_inline_and_insights() -> None:
+    # #1044: the message of the second analyzer shows in every renderer, defanged.
+    from ai_pr_review.vcs._code_insights import build_annotation_payload
+    from ai_pr_review.vcs.github import _build_inline_comment_body
+
+    f = _merged_two_tool_finding()
+    body = format_body_finding(f)
+    inline = _build_inline_comment_body(f, finding_id=1)
+    insights = build_annotation_payload(f, finding_id=1)
+    assert insights is not None
+    for out in (body, inline):
+        assert "**Also reported by:** phpstan (line 296): returns void" in out
+        assert "</details>" not in out
+        assert "<!-- x" not in out
+    assert "Also reported by: phpstan (line 296): returns void" in insights["title"]
+
+
+def test_no_also_reported_line_when_empty() -> None:
+    f = Finding(severity="High", confidence=90, finding="indent", source="phpcs", file="a.php", line=1)
+    assert "Also reported" not in format_body_finding(f)
+
+
+def test_shortened_bullet_leaves_out_also_reported_notes() -> None:
+    # #919: a finding with a Code Insights annotation gets a short bullet, and the
+    # annotation already carries the notes.
+    f = _merged_two_tool_finding()
+    short = format_body_finding(f, include_remediation=False)
+    assert "Also reported" not in short
+    assert "Remediation" not in short
+    assert "Also reported by" in format_body_finding(f, include_remediation=True)

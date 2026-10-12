@@ -277,6 +277,16 @@ _LINE_BREAK_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 
+def also_reported_notes(finding: Finding) -> list[str]:
+    """Return the sanitized "also reported" notes of a merged finding (#1044).
+
+    `also_reported` is built from analyzer output and can carry untrusted
+    file text, so every note goes through `sanitize_bullet_text` here, once,
+    for all renderers.
+    """
+    return [sanitize_bullet_text(n) for n in finding.also_reported]
+
+
 def sanitize_bullet_text(text: str) -> str:
     """Sanitize `finding`/`remediation` text for a single-line bullet render
     (issue #914).
@@ -394,6 +404,11 @@ def format_body_finding(
         out += f" *(at `{location}`{location_note})*"
     if include_remediation and finding.remediation:
         out += f"\n  - **Remediation:** {sanitize_bullet_text(finding.remediation)}"
+    # The shortened Bitbucket bullet (include_remediation=False) leaves out detail
+    # sub-bullets, and its Code Insights annotation already carries the notes (#919).
+    if include_remediation:
+        for note in also_reported_notes(finding):
+            out += f"\n  - **Also reported by:** {note}"
     if include_suggestion and finding.suggested_code:
         fence_body = finding.suggested_code.replace("```", "``​`")
         out += f"\n  ```\n  {fence_body}\n  ```"
