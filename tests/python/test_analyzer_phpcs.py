@@ -675,6 +675,8 @@ class TestRepoRuleset:
             ]}}}
         )
         monkeypatch.chdir(tmp_path)
+        # CI sets GITHUB_WORKSPACE, which strip_workspace_prefix prefers over the cwd.
+        monkeypatch.setenv("GITHUB_WORKSPACE", str(tmp_path))
         (tmp_path / "a.php").write_text(_PHP)
         (tmp_path / "phpcs.xml").write_text('<ruleset name="s"><rule ref="PSR12"/></ruleset>')
 
