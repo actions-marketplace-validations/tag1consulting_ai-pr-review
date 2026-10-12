@@ -222,7 +222,7 @@ class TestPhpcsRulesetIsData:
         assert "phpcs.xml.dist" not in standard
         assert str(CANARY_WORKSPACE) not in standard
         assert generated, "phpcs should receive a generated ruleset"
-        for needle in ("installed_paths", "bootstrap", "autoload", "canary-bootstrap"):
+        for needle in ("installed_paths", "php_path", "bootstrap", "autoload", "canary-bootstrap"):
             assert needle not in generated[-1], needle
         _assert_no_canary_fired(canary_dir)
 

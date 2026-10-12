@@ -36,6 +36,31 @@ Category = Literal[
 CATEGORIES: tuple[str, ...] = get_args(Category)
 
 
+MAX_ALSO_REPORTED = 5
+_ALSO_REPORTED_OVERFLOW_PREFIX = "(+"
+
+
+def combine_also_reported(groups: list[list[str]]) -> list[str]:
+    """Union several `Finding.also_reported` lists, keep order, drop repeats, apply the cap.
+
+    Used by `merge._collapse_cluster` and by `scope.rollup_repeated_findings`,
+    so a collapsed group keeps the notes of every member (#1044). The overflow
+    marker of an input list is dropped and recounted.
+    """
+    notes: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for note in group:
+            if note.startswith(_ALSO_REPORTED_OVERFLOW_PREFIX) or note in seen:
+                continue
+            seen.add(note)
+            notes.append(note)
+    if len(notes) > MAX_ALSO_REPORTED:
+        extra = len(notes) - MAX_ALSO_REPORTED
+        notes = [*notes[:MAX_ALSO_REPORTED], f"(+{extra} more from other analyzers)"]
+    return notes
+
+
 class Finding(BaseModel):
     """A single finding from an agent or static analyzer."""
 

@@ -1,9 +1,10 @@
 <?xml version="1.0"?>
-<!-- SECURITY CANARY — do not remove or modify.
+<!-- SECURITY CANARY: do not remove or modify.
      Every entry below makes phpcs load PHP from the workspace if phpcs reads
      this file. The analyzer must read it as data only (#1042). -->
 <ruleset name="canary">
   <config name="installed_paths" value="canary-bootstrap.php"/>
+  <config name="php_path" value="canary-bootstrap.php"/>
   <arg name="bootstrap" value="canary-bootstrap.php"/>
   <autoload>canary-bootstrap.php</autoload>
   <file>canary-bootstrap.php</file>

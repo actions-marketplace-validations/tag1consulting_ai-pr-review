@@ -675,12 +675,68 @@ class TestRepoRuleset:
         assert "Generic.PHP.Syntax" in run.xml
 
 
+    @pytest.mark.parametrize("entry", [".", "./", "./src/", "src", "src/"])
+    def test_file_scope_entry_forms(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entry: str
+    ) -> None:
+        ruleset = f'<ruleset name="s"><file>{entry}</file><rule ref="PSR12"/></ruleset>'
+        _, run = _run_in(
+            tmp_path, monkeypatch, {"src/a.php": _PHP}, ["src/a.php"], ruleset=("phpcs.xml", ruleset)
+        )
+        # Every form covers src/a.php. `.` and `./` mean the whole tree.
+        assert run.main_args, entry
+
+    def test_dot_scope_does_not_limit_other_directories(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ruleset = '<ruleset name="s"><file>.</file><rule ref="PSR12"/></ruleset>'
+        _, run = _run_in(
+            tmp_path,
+            monkeypatch,
+            {"a/x.php": _PHP, "b/y.php": _PHP},
+            ["a/x.php", "b/y.php"],
+            ruleset=("phpcs.xml", ruleset),
+        )
+        assert run.main_args[run.main_args.index("--") + 1 :] == ["a/x.php", "b/y.php"]
+
+    def test_retry_also_covers_the_neutral_fallback_with_repo_rules(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # A WordPress-style ruleset plus a Generic sniff that phpcs 4 removed.
+        ruleset = (
+            '<ruleset name="s"><rule ref="WordPress-Extra"/>'
+            '<rule ref="Generic.Gone.Removed"><exclude-pattern>x</exclude-pattern></rule></ruleset>'
+        )
+        with caplog.at_level("WARNING"):
+            _, run = _run_in(
+                tmp_path,
+                monkeypatch,
+                {"a.php": _PHP},
+                ["a.php"],
+                ruleset=("phpcs.xml", ruleset),
+                main_returncodes=[16, 0],
+            )
+        assert "retrying with the style-neutral fallback" in caplog.text
+        assert run.xml is not None
+        assert "Generic.Gone.Removed" not in run.xml
+        assert "Generic.PHP.Syntax" in run.xml
+
+    def test_dropped_exclude_pattern_is_logged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        ruleset = '<ruleset name="s"><exclude-pattern>(a+)+$</exclude-pattern><rule ref="PSR12"/></ruleset>'
+        with caplog.at_level("WARNING"):
+            _run_in(tmp_path, monkeypatch, {"a.php": _PHP}, ["a.php"], ruleset=("phpcs.xml", ruleset))
+        assert "dropping exclude-pattern" in caplog.text
+
+
 class TestRepoRulesetIsDataOnly:
     """The repo ruleset must never reach phpcs. Mirrors the phpstan trust rule (#739)."""
 
     _HOSTILE = """<?xml version="1.0"?>
 <ruleset name="evil">
   <config name="installed_paths" value="/workspace/evil"/>
+  <config name="php_path" value="/workspace/evil/php"/>
   <arg name="bootstrap" value="/workspace/evil/boot.php"/>
   <autoload>/workspace/evil/autoload.php</autoload>
   <ini name="auto_prepend_file" value="/workspace/evil/p.php"/>
@@ -705,7 +761,7 @@ class TestRepoRulesetIsDataOnly:
         assert "phpcs.xml.dist" not in standard
         assert str(tmp_path) not in standard
         assert run.xml is not None
-        for needle in ("installed_paths", "bootstrap", "autoload", "auto_prepend", "evil", "(a+)+", "<arg", "<ini"):
+        for needle in ("installed_paths", "php_path", "bootstrap", "autoload", "auto_prepend", "evil", "(a+)+", "<arg", "<ini"):
             assert needle not in run.xml, needle
         assert '<rule ref="PSR12">' in run.xml
         assert '<property name="ok" value="1"' in run.xml

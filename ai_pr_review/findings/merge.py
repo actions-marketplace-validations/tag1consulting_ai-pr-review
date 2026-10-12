@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 
-from ai_pr_review.findings.models import Finding, Severity
+from ai_pr_review.findings.models import Finding, Severity, combine_also_reported
 from ai_pr_review.findings.provenance import boosted_confidence, is_corroborated
 from ai_pr_review.findings.scope import is_analyzer_source
 
@@ -140,7 +140,6 @@ def _dedup_file(findings: list[Finding]) -> list[Finding]:
     return [_collapse_cluster(c) for c in clusters]
 
 
-_MAX_ALSO_REPORTED = 5
 _MAX_NOTE_CHARS = 300
 
 
@@ -179,10 +178,7 @@ def _also_reported_notes(cluster: list[Finding], best: Finding) -> list[str]:
         if note not in seen:
             seen.add(note)
             notes.append(note)
-    if len(notes) > _MAX_ALSO_REPORTED:
-        extra = len(notes) - _MAX_ALSO_REPORTED
-        notes = [*notes[:_MAX_ALSO_REPORTED], f"(+{extra} more from other analyzers)"]
-    return notes
+    return combine_also_reported([notes])
 
 
 def _collapse_cluster(cluster: list[Finding]) -> Finding:

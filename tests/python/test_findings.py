@@ -630,7 +630,7 @@ def test_merge_two_agents_no_boost() -> None:
 
 
 def test_merge_two_analyzers_no_boost() -> None:
-    """Two analyzers — no LLM agent present → no corroboration.
+    """Two analyzers with no LLM agent present give no corroboration.
 
     Two different analyzer tools still merge (#1044 keeps the lost text in
     `also_reported`), and the merge never counts as corroboration.

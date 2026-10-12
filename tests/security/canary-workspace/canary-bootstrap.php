@@ -1,5 +1,5 @@
 <?php
-// SECURITY CANARY — do not remove or modify.
+// SECURITY CANARY: do not remove or modify.
 //
 // If phpcs (or any PHP process) ever loads this file because the phpcs
 // ruleset in this directory named it (bootstrap, autoload, installed_paths),

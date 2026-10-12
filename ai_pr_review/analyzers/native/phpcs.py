@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import posixpath
 import re
 import shutil
 import subprocess
@@ -126,6 +127,10 @@ class _Plan:
     ruleset_xml: str | None = None
     files: list[str] = field(default_factory=list)
     drupal: bool = False
+    # True when the generated ruleset carries rules or patterns from the repo.
+    # Those can name a sniff that this phpcs version lacks, so a process error
+    # is retried once without them.
+    repo_rules: bool = False
 
 
 def _installed_standards() -> set[str]:
@@ -162,6 +167,28 @@ def _path_ok(path: str) -> bool:
     if not path or len(path) > 300 or "\x00" in path or path.startswith("/") or "\\" in path:
         return False
     return ".." not in path.split("/")
+
+
+def _normalize_scope_entry(text: str) -> str | None:
+    """Return a clean relative `<file>` entry, "." for the whole tree, or None if unusable."""
+    if not _path_ok(text):
+        return None
+    entry = posixpath.normpath(text)
+    if entry == ".":
+        return "."
+    return None if entry.startswith("..") or entry.startswith("/") else entry
+
+
+_MAX_DROP_LOGS = 5
+
+
+def _log_drop(ruleset_name: str, kind: str, value: str, count: int) -> None:
+    """Log one dropped ruleset entry. A dropped exclude means more files get linted."""
+    if count <= _MAX_DROP_LOGS:
+        logger.warning(
+            "[ai-pr-review] WARNING: %s: dropping %s %r (not in the allowed subset).",
+            ruleset_name, kind, value[:80],
+        )
 
 
 def _find_repo_ruleset() -> Path | None:
@@ -254,18 +281,32 @@ def _parse_repo_ruleset(path: Path, installed: set[str]) -> _RepoRuleset | None:
         return None
 
     files: list[str] = []
+    scope_all = False
     patterns: list[tuple[str, str]] = []
     rules: list[ET.Element] = []
     missing: list[str] = []
     has_standard_ref = False
+    dropped = 0
     for child in root:
         text = (child.text or "").strip()
-        if child.tag == "file" and _path_ok(text):
-            files.append(text.removeprefix("./").rstrip("/"))
-        elif child.tag == "exclude-pattern" and _pattern_ok(text):
+        if child.tag == "file":
+            entry = _normalize_scope_entry(text)
+            if entry is None:
+                dropped += 1
+                _log_drop(path.name, "file", text, dropped)
+            elif entry == ".":
+                # `<file>.</file>` means the whole tree: no scope limit.
+                files = []
+                scope_all = True
+            elif not scope_all:
+                files.append(entry)
+        elif child.tag == "exclude-pattern":
             kind = child.get("type", "absolute")
-            if kind in _PATTERN_TYPES:
+            if _pattern_ok(text) and kind in _PATTERN_TYPES:
                 patterns.append((text, kind))
+            else:
+                dropped += 1
+                _log_drop(path.name, "exclude-pattern", text, dropped)
         elif child.tag == "rule":
             has_standard_ref = True
             kept, absent = _keep_rule(child, installed)
@@ -293,7 +334,7 @@ def _in_ruleset_scope(path: str, ruleset: _RepoRuleset) -> bool:
     """
     if not ruleset.files:
         return True
-    norm = path.removeprefix("./")
+    norm = posixpath.normpath(path)
     cwd = Path.cwd()
     if norm.startswith("/"):
         try:
@@ -393,6 +434,7 @@ def _plan_standard(php_files: list[str]) -> _Plan | None:
                 remediation_standard=ruleset.name,
                 ruleset_xml=_build_ruleset_xml(_STYLE_NEUTRAL_REFS, ruleset),
                 files=scoped,
+                repo_rules=True,
             )
         if ruleset.has_standard_ref:
             return _Plan(
@@ -401,6 +443,7 @@ def _plan_standard(php_files: list[str]) -> _Plan | None:
                 ruleset_xml=_build_ruleset_xml((), ruleset),
                 files=scoped,
                 drupal=any(r.get("ref", "").startswith("Drupal") for r in ruleset.rules),
+                repo_rules=True,
             )
         # A ruleset with no standard of its own: keep its scope and excludes
         # and pick the default standard below.
@@ -424,6 +467,7 @@ def _plan_standard(php_files: list[str]) -> _Plan | None:
             ruleset_xml=_build_ruleset_xml(("Drupal", "DrupalPractice"), default_extra),
             files=php_files,
             drupal=True,
+            repo_rules=True,
         )
     if default_extra is not None:
         return _Plan(
@@ -431,6 +475,7 @@ def _plan_standard(php_files: list[str]) -> _Plan | None:
             remediation_standard=default_extra.name,
             ruleset_xml=_build_ruleset_xml(("PSR12", "Squiz.Commenting.FunctionComment"), default_extra),
             files=php_files,
+            repo_rules=True,
         )
     return _Plan(label="PSR12", remediation_standard="PSR12", ruleset_xml=_PSR12_PLUS_DOCBLOCK_RULESET, files=php_files)
 
@@ -504,10 +549,11 @@ def _run_phpcs(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
     if result is None:
         return []
 
-    if result.returncode not in _SUCCESS_RETURNCODES and plan.ruleset_xml is not None and plan.label == "repo ruleset":
+    if result.returncode not in _SUCCESS_RETURNCODES and plan.repo_rules:
         # A rule or sniff code the repo ruleset names may not exist in this
-        # image. Retry once with the style-neutral fallback instead of
-        # returning no findings at all.
+        # phpcs version (a phpcs 3 sniff that phpcs 4 removed, for example).
+        # Retry once with the style-neutral fallback and none of the repo
+        # rules, instead of returning no findings at all.
         logger.warning(
             "[ai-pr-review] WARNING: phpcs rejected the generated ruleset (exit %d); "
             "retrying with the style-neutral fallback. stderr: %s",
