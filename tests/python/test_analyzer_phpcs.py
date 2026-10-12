@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -460,6 +461,14 @@ class _Run:
         self.xml: str | None = None
         self.main_args: list[str] = []
         self.calls: list[list[str]] = []
+        self.cwds: list[str | None] = []
+        self.cwd_was_empty: list[bool] = []
+
+    @property
+    def sent(self) -> list[str]:
+        """The files given to phpcs, as paths relative to the test workspace."""
+        files = self.main_args[self.main_args.index("--") + 1 :] if "--" in self.main_args else []
+        return [os.path.relpath(f) if os.path.isabs(f) else f for f in files]
 
 
 def _run_in(
@@ -490,6 +499,9 @@ def _run_in(
 
     def _fake(args: list[str], **kwargs: object) -> MagicMock:
         run.calls.append(args)
+        cwd = kwargs.get("cwd")
+        run.cwds.append(str(cwd) if cwd is not None else None)
+        run.cwd_was_empty.append(cwd is not None and os.listdir(str(cwd)) == [])
         if args[0:2] == ["phpcs", "-i"]:
             return MagicMock(returncode=0, stdout=installed, stderr="")
         run.main_args = args
@@ -585,7 +597,7 @@ class TestRepoRuleset:
             )
         assert "WordPress-Extra" in caplog.text
         # `<file>` scope is applied here, because phpcs ignores it for CLI files.
-        sent = run.main_args[run.main_args.index("--") + 1 :]
+        sent = run.sent
         assert sent == ["includes/y.php", "scolta.php"]
         assert run.xml is not None
         assert '<rule ref="Generic.PHP.Syntax"' in run.xml
@@ -661,7 +673,7 @@ class TestRepoRuleset:
             ["src/a.php", "other/b.php"],
             ruleset=("phpcs.xml", ruleset),
         )
-        assert run.main_args[run.main_args.index("--") + 1 :] == ["src/a.php"]
+        assert run.sent == ["src/a.php"]
         assert run.xml is not None
         assert 'ref="PSR12"' in run.xml
         assert "src/gen/*" in run.xml
@@ -734,7 +746,7 @@ class TestRepoRuleset:
             ["a/x.php", "b/y.php"],
             ruleset=("phpcs.xml", ruleset),
         )
-        assert run.main_args[run.main_args.index("--") + 1 :] == ["a/x.php", "b/y.php"]
+        assert run.sent == ["a/x.php", "b/y.php"]
 
     def test_retry_also_covers_the_neutral_fallback_with_repo_rules(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
@@ -773,7 +785,7 @@ class TestRepoRuleset:
             ["src/a.php", "tests/t.php"],
             ruleset=("phpcs.xml", ruleset),
         )
-        assert run.main_args[run.main_args.index("--") + 1 :] == ["src/a.php"]
+        assert run.sent == ["src/a.php"]
 
     def test_rule_level_drops_are_logged_with_a_total(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
@@ -1028,7 +1040,7 @@ class TestRemainingBranches:
         _, run = _run_in(
             tmp_path, monkeypatch, files, ["src/a.module", "other/b.module"], ruleset=("phpcs.xml", ruleset)
         )
-        assert run.main_args[run.main_args.index("--") + 1 :] == ["src/a.module"]
+        assert run.sent == ["src/a.module"]
         assert run.xml is not None
         assert 'ref="Drupal"' in run.xml
         assert "src/gen/*" in run.xml
@@ -1045,7 +1057,7 @@ class TestRemainingBranches:
             [inside, outside],
             ruleset=("phpcs.xml", ruleset),
         )
-        assert run.main_args[run.main_args.index("--") + 1 :] == [inside]
+        assert run.sent == ["src/a.php"]
 
     def test_empty_alternative_matches_every_path_like_phpcs(self) -> None:
         from ai_pr_review.analyzers.native.phpcs import _relative_pattern_matches
@@ -1060,3 +1072,56 @@ class TestRemainingBranches:
         _, run = _run_in(tmp_path, monkeypatch, {"a.php": _PHP}, ["a.php"], ruleset=("phpcs.xml", ruleset))
         assert run.xml is not None
         assert "<severity>" not in run.xml
+
+
+class TestRefsCannotReachTheWorkspace:
+    """#1042 review finding: phpcs resolves a non-sniff ref against its cwd and loads it as a ruleset."""
+
+    _EVIL = '<ruleset name="e"><arg name="bootstrap" value="boot.php"/></ruleset>'
+
+    @pytest.mark.parametrize(
+        "ref",
+        ["Generic.evil.xml", "Generic.evil.php", "Generic.evildir", "PSR12.evildir", "Generic.evil.dist"],
+    )
+    def test_rule_ref_that_names_a_workspace_path_or_file_suffix_is_dropped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ref: str
+    ) -> None:
+        files = {
+            "Generic.evil.xml": self._EVIL,
+            "Generic.evildir/ruleset.xml": self._EVIL,
+            "PSR12.evildir/ruleset.xml": self._EVIL,
+            "a.php": _PHP,
+        }
+        ruleset = f'<ruleset name="x"><rule ref="{ref}"/><rule ref="PSR12"/></ruleset>'
+        _, run = _run_in(tmp_path, monkeypatch, files, ["a.php"], ruleset=("phpcs.xml", ruleset))
+        assert run.xml is not None
+        assert ref not in run.xml
+        assert 'ref="PSR12"' in run.xml
+
+    @pytest.mark.parametrize("name", ["Generic.evil.xml", "Generic.evildir", "Generic.evil.php"])
+    def test_exclude_name_that_names_a_workspace_path_is_dropped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+    ) -> None:
+        files = {"Generic.evil.xml": self._EVIL, "Generic.evildir/ruleset.xml": self._EVIL, "a.php": _PHP}
+        ruleset = (
+            '<ruleset name="x"><rule ref="Generic.PHP.Syntax">'
+            f'<exclude name="{name}"/></rule></ruleset>'
+        )
+        _, run = _run_in(tmp_path, monkeypatch, files, ["a.php"], ruleset=("phpcs.xml", ruleset))
+        assert run.xml is not None
+        assert name not in run.xml
+
+    def test_phpcs_runs_from_an_empty_directory_with_absolute_paths(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, run = _run_in(tmp_path, monkeypatch, {"src/a.php": _PHP}, ["src/a.php"])
+        # Both the `phpcs -i` call and the main call get a trusted working directory.
+        assert len(run.cwds) == 2
+        for cwd in run.cwds:
+            assert cwd is not None
+            assert cwd != str(tmp_path)
+            assert not str(cwd).startswith(str(tmp_path))
+        assert all(run.cwd_was_empty)
+        sent_raw = run.main_args[run.main_args.index("--") + 1 :]
+        assert sent_raw == [str(tmp_path / "src" / "a.php")]
+        assert run.sent == ["src/a.php"]

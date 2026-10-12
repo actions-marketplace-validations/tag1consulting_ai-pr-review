@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import posixpath
 import re
 import shutil
@@ -87,10 +88,15 @@ _MAX_COMPOSER_BYTES = 1024 * 1024
 _DOCTYPE_RE = re.compile(rb"<!\s*(DOCTYPE|ENTITY)", re.IGNORECASE)
 
 # "Standard", "Standard.Category", "Standard.Category.Sniff", or
-# "Standard.Category.Sniff.Code". A path, a ".xml" suffix, or a "../" segment
-# can never match, which is what keeps path-style refs out of the trusted
-# ruleset (a path ref makes phpcs load the referenced file).
+# "Standard.Category.Sniff.Code". A slash or a "../" segment can never match.
+# That alone is not enough: phpcs resolves a ref that is not a sniff code with
+# `is_file()` and `is_dir()` against its working directory and then loads it as
+# a ruleset, so `Generic.evil.xml` or `Generic.evildir` could make phpcs load
+# PHP from the workspace. `_ref_ok` rejects those shapes, and phpcs also runs
+# from an empty directory (`_trusted_cwd`), so a ref cannot resolve to a
+# workspace path even if a shape gets through.
 _REF_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_]+){0,3}$")
+_FILE_LIKE_SUFFIXES = frozenset({"xml", "php", "dist", "inc", "yml", "yaml", "json", "txt"})
 _PROP_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 # phpcs treats exclude patterns as regex fragments (`*` becomes `.*`). Only
 # plain path characters, `|`, a leading `^`, a trailing `$`, and escaped `.`,
@@ -148,12 +154,14 @@ class _Plan:
 def _installed_standards() -> set[str]:
     """Return the standard names phpcs lists, or an empty set when it cannot be asked."""
     try:
-        result = subprocess.run(
-            ["phpcs", "-i"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        with _trusted_cwd() as cwd:
+            result = subprocess.run(
+                ["phpcs", "-i"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                cwd=cwd,
+            )
     except subprocess.TimeoutExpired:
         logger.warning("[ai-pr-review] WARNING: phpcs -i timed out detecting standard; falling back to PSR12.")
         return set()
@@ -174,6 +182,17 @@ def _installed_standards() -> set[str]:
         text = text.split(" are ", 1)[-1]
     names = {t for t in re.split(r"[,\s]+", text) if t and t != "and"}
     return names | _ALWAYS_INSTALLED
+
+
+def _ref_ok(ref: str) -> bool:
+    """Is *ref* a standard name or sniff code, and not a path in the workspace?"""
+    if not _REF_RE.match(ref):
+        return False
+    if ref.rsplit(".", 1)[-1].lower() in _FILE_LIKE_SUFFIXES and "." in ref:
+        return False
+    # A backstop for any shape the checks above miss. A name that exists as a
+    # file, directory or symlink in the workspace is never a sniff code.
+    return not (Path(ref).exists() or Path(ref).is_symlink())
 
 
 def _pattern_ok(pattern: str) -> bool:
@@ -232,6 +251,19 @@ class _Drops:
             )
 
 
+@contextmanager
+def _trusted_cwd() -> Iterator[str]:
+    """Yield an empty temp directory to use as phpcs's working directory.
+
+    phpcs resolves some ruleset references against its working directory. Run
+    from the workspace, a repo file could be loaded as a ruleset, and a ruleset
+    can run PHP (`bootstrap`, `autoload`). From an empty directory, nothing from
+    the repo can resolve (#1042).
+    """
+    with tempfile.TemporaryDirectory(prefix="phpcs-cwd-") as directory:
+        yield directory
+
+
 def _find_repo_ruleset() -> Path | None:
     """Return the first repo ruleset in the working directory, in phpcs's own order."""
     for name in _RULESET_NAMES:
@@ -282,7 +314,7 @@ def _keep_rule(
     that is not installed, and (None, None) when it is dropped as unsafe.
     """
     ref = rule.get("ref", "")
-    if not _REF_RE.match(ref):
+    if not _ref_ok(ref):
         drops.note("rule ref", ref)
         return None, None
     standard = ref.split(".", 1)[0]
@@ -293,7 +325,7 @@ def _keep_rule(
     for child in rule:
         text = (child.text or "").strip()
         if child.tag == "exclude":
-            if _REF_RE.match(child.get("name", "")):
+            if _ref_ok(child.get("name", "")):
                 ET.SubElement(kept, "exclude", name=child.get("name", ""))
             else:
                 drops.note(f"{ref} exclude", child.get("name", ""))
@@ -660,7 +692,9 @@ def _standard_arg(plan: _Plan) -> Iterator[str]:
 def _invoke_phpcs(plan: _Plan) -> subprocess.CompletedProcess[str] | None:
     """Run phpcs for *plan*. None on timeout or when phpcs cannot start."""
     try:
-        with _standard_arg(plan) as standard_arg:
+        # Absolute paths, because phpcs runs from an empty directory.
+        absolute_files = [os.path.abspath(f) for f in plan.files]
+        with _standard_arg(plan) as standard_arg, _trusted_cwd() as cwd:
             return subprocess.run(
                 [
                     "phpcs",
@@ -669,11 +703,12 @@ def _invoke_phpcs(plan: _Plan) -> subprocess.CompletedProcess[str] | None:
                     "--extensions=php,module,inc,theme,install,profile",
                     "-q",
                     "--",
-                    *plan.files,
+                    *absolute_files,
                 ],
                 capture_output=True,
                 text=True,
                 timeout=_TIMEOUT_SECS,
+                cwd=cwd,
             )
     except subprocess.TimeoutExpired as exc:
         logger.warning("[ai-pr-review] WARNING: phpcs timed out after %ss; skipping.", exc.timeout)

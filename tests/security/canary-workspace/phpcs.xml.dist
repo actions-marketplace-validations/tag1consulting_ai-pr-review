@@ -9,5 +9,11 @@
   <autoload>canary-bootstrap.php</autoload>
   <file>canary-bootstrap.php</file>
   <rule ref="./canary-bootstrap.php"/>
+  <rule ref="Generic.canary.xml"/>
+  <rule ref="Generic.canarydir"/>
+  <rule ref="Generic.PHP.Syntax">
+    <exclude name="Generic.canary.xml"/>
+    <exclude name="Generic.canarydir"/>
+  </rule>
   <rule ref="PSR12"/>
 </ruleset>

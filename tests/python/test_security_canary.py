@@ -222,7 +222,7 @@ class TestPhpcsRulesetIsData:
         assert "phpcs.xml.dist" not in standard
         assert str(CANARY_WORKSPACE) not in standard
         assert generated, "phpcs should receive a generated ruleset"
-        for needle in ("installed_paths", "php_path", "bootstrap", "autoload", "canary-bootstrap"):
+        for needle in ("installed_paths", "php_path", "bootstrap", "autoload", "canary-bootstrap", "Generic.canary"):
             assert needle not in generated[-1], needle
         _assert_no_canary_fired(canary_dir)
 
@@ -241,5 +241,24 @@ class TestPhpcsRulesetIsData:
         monkeypatch.chdir(CANARY_WORKSPACE)
         files = ["canary-bootstrap.php"]
         _run_phpcs(ChangedFiles(all_files=files, php=files), tmp_path / "x.diff")
+        _assert_no_canary_fired(canary_dir)
+
+    def test_real_phpcs_with_ref_shapes_that_resolve_against_the_cwd(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A rule ref or exclude name that names a workspace file or directory must not load it (#1042)."""
+        import shutil
+
+        if not (shutil.which("phpcs") and shutil.which("php")):
+            pytest.skip("phpcs and php are not installed")
+        from ai_pr_review.analyzers.native.phpcs import _plan_standard
+
+        canary_dir = tmp_path / "canary"
+        monkeypatch.setenv("CANARY_DIR", str(canary_dir))
+        monkeypatch.chdir(CANARY_WORKSPACE)
+        plan = _plan_standard(["canary-bootstrap.php"])
+        assert plan is not None
+        assert plan.ruleset_xml is not None
+        assert "Generic.canary" not in plan.ruleset_xml
         _assert_no_canary_fired(canary_dir)
 

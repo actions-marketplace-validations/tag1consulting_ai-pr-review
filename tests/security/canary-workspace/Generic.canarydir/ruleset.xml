@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<!-- SECURITY CANARY: do not remove or modify. A rule ref that names this
+     directory makes phpcs load this ruleset, and the autoload line runs
+     canary-bootstrap.php. -->
+<ruleset name="canary-ref-dir">
+  <autoload>../canary-bootstrap.php</autoload>
+</ruleset>
