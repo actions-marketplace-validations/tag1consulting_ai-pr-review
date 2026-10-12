@@ -650,3 +650,13 @@ def test_also_reported_rendered_and_sanitized_in_body_inline_and_insights() -> N
 def test_no_also_reported_line_when_empty() -> None:
     f = Finding(severity="High", confidence=90, finding="indent", source="phpcs", file="a.php", line=1)
     assert "Also reported" not in format_body_finding(f)
+
+
+def test_shortened_bullet_leaves_out_also_reported_notes() -> None:
+    # #919: a finding with a Code Insights annotation gets a short bullet, and the
+    # annotation already carries the notes.
+    f = _merged_two_tool_finding()
+    short = format_body_finding(f, include_remediation=False)
+    assert "Also reported" not in short
+    assert "Remediation" not in short
+    assert "Also reported by" in format_body_finding(f, include_remediation=True)

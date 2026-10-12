@@ -955,3 +955,108 @@ class TestRelativePatternMatcher:
         from ai_pr_review.analyzers.native.phpcs import _relative_pattern_matches
 
         assert _relative_pattern_matches(pattern, path) is expected
+
+
+class TestRemainingBranches:
+    def test_no_json_output_with_success_code_is_logged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "a.php").write_text(_PHP)
+
+        def _fake(args: list[str], **kwargs: object) -> MagicMock:
+            if args[0:2] == ["phpcs", "-i"]:
+                return MagicMock(returncode=0, stdout=_INSTALLED_FULL, stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with (
+            caplog.at_level("WARNING"),
+            patch("ai_pr_review.analyzers.native.phpcs.shutil.which", return_value="/usr/bin/phpcs"),
+            patch("ai_pr_review.analyzers.native.phpcs.subprocess.run", side_effect=_fake),
+        ):
+            assert _run_phpcs(_make_cf(["a.php"]), Path("/dev/null")) == []
+        assert "no JSON output" in caplog.text
+
+    def test_malformed_composer_json_is_logged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level("WARNING"):
+            _, run = _run_in(tmp_path, monkeypatch, {"a.php": _PHP, "composer.json": "{not json"}, ["a.php"])
+        assert "composer.json" in caplog.text
+        assert run.xml is not None
+        assert 'ref="PSR12"' in run.xml
+
+    def test_retry_that_also_fails_returns_no_findings(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ruleset = '<ruleset name="s"><rule ref="PSR12.Nope.Missing"/></ruleset>'
+        findings, run = _run_in(
+            tmp_path,
+            monkeypatch,
+            {"a.php": _PHP},
+            ["a.php"],
+            ruleset=("phpcs.xml", ruleset),
+            main_returncodes=[16, 16],
+        )
+        assert findings == []
+        assert sum(1 for c in run.calls if c[0:2] != ["phpcs", "-i"]) == 2
+
+    def test_process_error_without_repo_rules_does_not_retry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        findings, run = _run_in(
+            tmp_path, monkeypatch, {"a.php": _PHP}, ["a.php"], main_returncodes=[16]
+        )
+        assert findings == []
+        assert sum(1 for c in run.calls if c[0:2] != ["phpcs", "-i"]) == 1
+
+    def test_drupal_signal_without_installed_drupal_falls_to_psr12(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        files = {"mod.module": _PHP}
+        _, run = _run_in(
+            tmp_path, monkeypatch, files, ["mod.module"], installed="The installed coding standards are PSR12 and PEAR"
+        )
+        assert run.xml is not None
+        assert 'ref="PSR12"' in run.xml
+
+    def test_no_standard_ruleset_with_drupal_signal_keeps_scope_and_uses_drupal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ruleset = '<ruleset name="s"><file>src</file><exclude-pattern>src/gen/*</exclude-pattern></ruleset>'
+        files = {"src/a.module": _PHP, "other/b.module": _PHP}
+        _, run = _run_in(
+            tmp_path, monkeypatch, files, ["src/a.module", "other/b.module"], ruleset=("phpcs.xml", ruleset)
+        )
+        assert run.main_args[run.main_args.index("--") + 1 :] == ["src/a.module"]
+        assert run.xml is not None
+        assert 'ref="Drupal"' in run.xml
+        assert "src/gen/*" in run.xml
+
+    def test_absolute_changed_paths_inside_the_workspace_are_scoped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ruleset = '<ruleset name="s"><file>src</file><rule ref="PSR12"/></ruleset>'
+        inside, outside = str(tmp_path / "src" / "a.php"), str(tmp_path / "other" / "b.php")
+        _, run = _run_in(
+            tmp_path,
+            monkeypatch,
+            {"src/a.php": _PHP, "other/b.php": _PHP},
+            [inside, outside],
+            ruleset=("phpcs.xml", ruleset),
+        )
+        assert run.main_args[run.main_args.index("--") + 1 :] == [inside]
+
+    def test_empty_alternative_matches_every_path_like_phpcs(self) -> None:
+        from ai_pr_review.analyzers.native.phpcs import _relative_pattern_matches
+
+        assert _relative_pattern_matches("a||b", "anything/at/all.php")
+
+    @pytest.mark.parametrize("severity", ["\u00b2", "\u0663", "11", "-1", "", "5x"])
+    def test_non_ascii_or_out_of_range_severity_is_dropped_not_raised(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, severity: str
+    ) -> None:
+        ruleset = f'<ruleset name="s"><rule ref="PSR12"><severity>{severity}</severity></rule></ruleset>'
+        _, run = _run_in(tmp_path, monkeypatch, {"a.php": _PHP}, ["a.php"], ruleset=("phpcs.xml", ruleset))
+        assert run.xml is not None
+        assert "<severity>" not in run.xml

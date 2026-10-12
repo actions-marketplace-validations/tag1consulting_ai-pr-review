@@ -304,7 +304,8 @@ def _keep_rule(
             else:
                 drops.note(f"{ref} {child.tag}", text)
         elif child.tag == "severity":
-            if text.isdigit() and int(text) <= 10:
+            # `str.isdigit()` is true for characters such as "²" that `int()` rejects.
+            if re.fullmatch(r"[0-9]{1,2}", text) and int(text) <= 10:
                 ET.SubElement(kept, "severity").text = text
             else:
                 drops.note(f"{ref} severity", text)
@@ -509,7 +510,8 @@ def _looks_like_drupal(php_files: list[str]) -> bool:
         try:
             with composer.open("rb") as fh:
                 data = json.loads(fh.read(_MAX_COMPOSER_BYTES))
-        except (OSError, ValueError):
+        except (OSError, ValueError) as exc:
+            logger.warning("[ai-pr-review] WARNING: could not read composer.json as a Drupal signal: %s", exc)
             data = None
         if isinstance(data, dict):
             if str(data.get("type", "")).startswith("drupal-"):
@@ -745,6 +747,10 @@ def _run_phpcs(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
         return []
 
     if not result.stdout.strip():
+        logger.warning(
+            "[ai-pr-review] WARNING: phpcs exited %d with no JSON output; treating it as no findings. stderr: %s",
+            result.returncode, result.stderr[:200],
+        )
         return []
 
     try:

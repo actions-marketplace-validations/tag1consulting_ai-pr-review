@@ -404,8 +404,11 @@ def format_body_finding(
         out += f" *(at `{location}`{location_note})*"
     if include_remediation and finding.remediation:
         out += f"\n  - **Remediation:** {sanitize_bullet_text(finding.remediation)}"
-    for note in also_reported_notes(finding):
-        out += f"\n  - **Also reported by:** {note}"
+    # The shortened Bitbucket bullet (include_remediation=False) leaves out detail
+    # sub-bullets, and its Code Insights annotation already carries the notes (#919).
+    if include_remediation:
+        for note in also_reported_notes(finding):
+            out += f"\n  - **Also reported by:** {note}"
     if include_suggestion and finding.suggested_code:
         fence_body = finding.suggested_code.replace("```", "``​`")
         out += f"\n  ```\n  {fence_body}\n  ```"
