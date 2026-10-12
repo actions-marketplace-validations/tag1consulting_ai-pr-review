@@ -346,6 +346,75 @@ def extract_judge_map(body: str) -> dict[str, dict[str, object]]:
     return result
 
 
+HEADLINE_MAP_MARKER_PREFIX: Final[str] = "<!-- ai-pr-review-headline-map:"
+_HEADLINE_MAP_MARKER_RE = re.compile(r"<!-- ai-pr-review-headline-map: (\{.*\}) -->")
+
+_HEADLINE_SEVERITIES: Final[frozenset[str]] = frozenset(
+    {"Critical", "High", "Medium", "Low"}
+)
+
+
+def build_headline_map_marker(entries: dict[str, tuple[str, bool]]) -> str:
+    """Produce a marker recording what the review headline counts (#1049).
+
+    `entries` maps a finding fingerprint to `(severity, inline)` for every
+    finding behind the "Overall Risk | Findings: N (M inline)" line. When a
+    human dismisses one of them, `_record_verdict` drops its entry and
+    recomputes the headline from the rest. GitHub-only and display-only:
+    losing it (body too large, legacy review) only means the headline falls
+    back to a plain decrement.
+    """
+    payload = json.dumps(
+        {fp: [sev, 1 if inline else 0] for fp, (sev, inline) in entries.items()},
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return f"{HEADLINE_MAP_MARKER_PREFIX} {payload} -->"
+
+
+def extract_headline_map(body: str) -> dict[str, tuple[str, bool]] | None:
+    """Extract the fingerprint -> `(severity, inline)` headline map.
+
+    Returns `None` when no usable marker exists (absent, malformed, or any
+    entry of the wrong shape), so the caller can tell "no information" from
+    a valid empty map. The last marker in the body wins, like every marker.
+    """
+    match = _last_match_across_forms(body, _HEADLINE_MAP_MARKER_RE)
+    if not match:
+        return None
+    try:
+        data = json.loads(match.group(1))
+    except (json.JSONDecodeError, ValueError):
+        _log.warning("ai-pr-review: headline-map marker present but unparseable")
+        return None
+    if not isinstance(data, dict):
+        return None
+    result: dict[str, tuple[str, bool]] = {}
+    for fp, entry in data.items():
+        if (
+            not isinstance(entry, list)
+            or len(entry) != 2
+            or entry[0] not in _HEADLINE_SEVERITIES
+            or entry[1] not in (0, 1)
+        ):
+            return None
+        result[str(fp)] = (entry[0], entry[1] == 1)
+    return result
+
+
+def replace_headline_map_marker(
+    body: str, entries: dict[str, tuple[str, bool]]
+) -> str:
+    """Return `body` with its headline-map marker replaced by `entries`.
+
+    No-op when the body has no marker: this never adds one.
+    """
+    match = _last_match_across_forms(body, _HEADLINE_MAP_MARKER_RE)
+    if not match:
+        return body
+    return body[: match.start()] + build_headline_map_marker(entries) + body[match.end():]
+
+
 def _hidden_marker_separator(body: str) -> str:
     """Separator to append a `[//]: # (...)` reference-link marker after.
 
