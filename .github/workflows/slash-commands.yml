@@ -257,6 +257,23 @@ on:
         type: string
         required: false
         default: 'warn'
+      context-window-margin:
+        description: >
+          Skip the review before any LLM call when an agent's estimated prompt
+          is larger than this fraction of the model context window ('0' turns
+          the check off). Omit to inherit container-action's own default
+          ('0.9').
+        type: string
+        required: false
+        default: '0.9'
+      fail-on-context-window:
+        description: >
+          When true, exit non-zero on a context-window skip, instead of the
+          default informational-only skip. Omit to inherit container-action's
+          own default ('false').
+        type: string
+        required: false
+        default: 'false'
       context-max-queries:
         description: >
           Maximum ripgrep symbol-lookup queries across all agents in a run
@@ -712,6 +729,8 @@ jobs:
           max-cost-usd: ${{ inputs.max-cost-usd }}
           fail-on-cost-ceiling: ${{ inputs.fail-on-cost-ceiling }}
           cost-ceiling-unpriced: ${{ inputs.cost-ceiling-unpriced }}
+          context-window-margin: ${{ inputs.context-window-margin }}
+          fail-on-context-window: ${{ inputs.fail-on-context-window }}
           context-max-queries: ${{ inputs.context-max-queries }}
           policy-source: ${{ inputs.policy-source }}
           exclude-patterns: ${{ inputs.exclude-patterns }}

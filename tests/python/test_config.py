@@ -1206,3 +1206,38 @@ def test_bool_env(
     if value is not None:
         monkeypatch.setenv("AI_TEST_FLAG", value)
     assert _bool_env("AI_TEST_FLAG", default) is expected
+
+
+def test_context_window_defaults() -> None:
+    cfg = ReviewConfig()
+    assert cfg.context_window_margin == 0.9
+    assert cfg.fail_on_context_window is False
+
+
+def test_context_window_env_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AI_CONTEXT_WINDOW_MARGIN", "0.75")
+    monkeypatch.setenv("AI_FAIL_ON_CONTEXT_WINDOW", "true")
+    cfg = ReviewConfig.from_env()
+    assert cfg.context_window_margin == 0.75
+    assert cfg.fail_on_context_window is True
+
+
+def test_context_window_env_known_ai_vars_no_unknown_warning(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("AI_CONTEXT_WINDOW_MARGIN", "0.8")
+    monkeypatch.setenv("AI_FAIL_ON_CONTEXT_WINDOW", "false")
+    ReviewConfig.from_env()
+    assert "Unknown AI_* variable" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("bad", [-0.1, 1.5, 90.0])
+def test_context_window_margin_out_of_range_raises(bad: float) -> None:
+    with pytest.raises(ValueError, match="context_window_margin"):
+        ReviewConfig(context_window_margin=bad)
+
+
+@pytest.mark.parametrize("ok", [0.0, 0.5, 1.0])
+def test_context_window_margin_in_range_accepted(ok: float) -> None:
+    assert ReviewConfig(context_window_margin=ok).context_window_margin == ok

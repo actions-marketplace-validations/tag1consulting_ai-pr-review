@@ -882,3 +882,29 @@ def test_pricing_file_golden_snapshot_matches_the_official_page() -> None:
     assert long_prompt.output_rate / _MILLION == pytest.approx(2.50)
     assert long_prompt.cache_write_rate / _MILLION == pytest.approx(0.625)
     assert long_prompt.cache_read_rate / _MILLION == pytest.approx(0.05)
+
+
+def test_model_pricing_reads_context_window() -> None:
+    """#1056: an optional context_window comes through, absent means 0."""
+    data = [
+        {"patterns": ["with-window"], "display_name": "W", "input_rate": 1,
+         "output_rate": 1, "context_window": 1_000_000},
+        {"patterns": ["no-window"], "display_name": "N", "input_rate": 1, "output_rate": 1},
+    ]
+    from ai_pr_review.pricing import model_pricing
+
+    assert model_pricing("with-window", data).context_window == 1_000_000
+    assert model_pricing("no-window", data).context_window == 0
+    assert model_pricing("unknown", data).context_window == 0
+
+
+def test_bundled_pricing_has_verified_context_windows() -> None:
+    """The three Claude 5.5 models list a 1M token window (Anthropic models overview)."""
+    from pathlib import Path
+
+    from ai_pr_review.pricing import load_pricing, model_pricing
+
+    path = Path(__file__).resolve().parents[2] / "config" / "model-pricing.json"
+    data = load_pricing(str(path))
+    for model in ("claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5"):
+        assert model_pricing(model, data).context_window == 1_000_000, model

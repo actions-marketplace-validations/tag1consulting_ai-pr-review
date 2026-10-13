@@ -25,7 +25,7 @@ from ai_pr_review.language_profiles import load_language_profiles
 from ai_pr_review.manifest import ChangedFiles, parse_changed_files_payload
 from ai_pr_review.orchestrate import OrchestrationConfig
 from ai_pr_review.review.compute import run_compute
-from ai_pr_review.review.cost_ceiling import CostCeilingExceeded
+from ai_pr_review.review.cost_ceiling import ContextWindowExceeded, CostCeilingExceeded
 from ai_pr_review.review.not_reviewed import build_not_reviewed_notice
 from ai_pr_review.review.pr_context import build_shared_context_block
 from ai_pr_review.vcs import provider_from_env
@@ -51,6 +51,11 @@ class SkipPlan:
     check rather than the diff-too-large/no-changes compute-phase skips.
     cli.py uses this to decide whether AI_FAIL_ON_COST_CEILING should turn
     the otherwise-0 exit code into 2."""
+    is_context_window_skip: bool = False
+    """True when this skip came from the #1056 pre-flight context-window
+    check. cli.py uses this to decide whether AI_FAIL_ON_CONTEXT_WINDOW should
+    turn the otherwise-0 exit code into 2. Carries the same extra fields as a
+    cost-ceiling skip."""
     # #896: the remaining fields are populated only on a cost-ceiling skip
     # (never on the compute-phase no-changes/diff-too-large skips, which
     # have no diff, no analyzers run, and nothing to post) so orchestrate.py
@@ -637,6 +642,7 @@ async def build_review_runtime(
         from ai_pr_review.pricing import load_pricing
         from ai_pr_review.review.cost_ceiling import (
             AgentCostEstimate,
+            check_context_window,
             enforce_cost_ceiling,
             estimate_preflight_agent_cost,
             estimate_review_cost,
@@ -706,6 +712,14 @@ async def build_review_runtime(
 
         log_cost_estimate(cost_estimate, ceiling_usd=config.max_cost_usd)
         pre_flight_cost_estimate_units = cost_estimate.total_cost_units
+        # #1056: the context-window check runs whether or not a cost ceiling is
+        # set, because a prompt past the window fails at the provider whatever
+        # the dollar amount is.
+        check_context_window(
+            cost_estimate,
+            pricing_data=pricing_data,
+            margin=config.context_window_margin,
+        )
         enforce_cost_ceiling(
             cost_estimate,
             ceiling_usd=config.max_cost_usd,
@@ -717,6 +731,18 @@ async def build_review_runtime(
             # with nothing unpriced / no pricing file to judge by).
             cost_ceiling_unenforced_models = unpriced_models(cost_estimate)
             cost_ceiling_pricing_missing = not pricing_data
+    except ContextWindowExceeded as exc:
+        return SkipPlan(
+            reason=str(exc),
+            provider=provider,
+            is_context_window_skip=True,
+            extra_findings=extra_findings,
+            diff_text=diff_text,
+            head_sha=head_sha,
+            suppression_rules=suppression_rules,
+            analyzer_diff_scope=config.analyzer_diff_scope,
+            is_incremental=is_incremental,
+        )
     except CostCeilingExceeded as exc:
         # #896: carry the analyzer/SARIF findings (already suppression-rule-
         # filtered above), the diff, and enough config that orchestrate.py's
