@@ -14,7 +14,7 @@ import json
 import logging
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -55,6 +55,7 @@ from ai_pr_review.review.reporting import write_step_summary as _write_step_summ
 from ai_pr_review.vcs import ProviderConfigError
 
 if TYPE_CHECKING:
+    from ai_pr_review.agents.dispatch import AgentResult as _AgentResult
     from ai_pr_review.llm.base import LLMRequest, LLMResponse
     from ai_pr_review.review.runtime import ReviewRuntime, SkipPlan
     from ai_pr_review.vcs import GitHubProvider
@@ -257,39 +258,40 @@ def review() -> None:
     sys.exit(exit_code)
 
 
-def _preflight_actual_units(
-    usage: Sequence[tuple[str, LLMResponse]], script_dir: Path,
-) -> int:
-    """Cost in $0.0001 units of the pr-summarizer and issue-linker calls (#1055).
+def _preflight_agent_results(
+    usage: Sequence[tuple[str, str, int, LLMResponse]],
+) -> list[_AgentResult]:
+    """Turn recorded pr-summarizer and issue-linker calls into agent rows (#1055).
 
-    Fail-soft: a pricing-file or arithmetic error returns 0, so the
-    ``COST_RECONCILE`` line still logs (it then under-counts, as before).
-    A model with no pricing entry adds 0, matching the pre-flight estimate.
+    The two preflight agents return only text, so their usage never reached
+    ``result.agent_results``. These rows put them in the token table, the
+    compact usage line, the high-usage warning, and ``COST_RECONCILE``, so
+    every report counts the same agents as the pre-flight estimate.
+    Each entry is ``(agent_name, model_id, max_tokens, response)``.
     """
-    if not usage:
-        return 0
-    try:
-        from ai_pr_review.pricing import TokenEntry, compute_totals, load_pricing
+    from ai_pr_review.agents.dispatch import AgentResult, TokenUsage
 
-        entries = [
-            TokenEntry(
-                agent="preflight", model=model_id,
-                input_tokens=resp.input_tokens, output_tokens=resp.output_tokens,
-                cache_creation_tokens=resp.cache_creation_tokens,
-                cache_read_tokens=resp.cache_read_tokens,
-            )
-            for model_id, resp in usage
-        ]
-        pricing_data = load_pricing(str(script_dir / "config" / "model-pricing.json"))
-        return compute_totals(entries, pricing_data).cost_units
-    except Exception as exc:
-        logger.warning("COST_RECONCILE: could not price preflight agents: %s", exc)
-        return 0
+    return [
+        AgentResult(
+            name=name,
+            output="",
+            token_log=TokenUsage(
+                input=resp.input_tokens,
+                output=resp.output_tokens,
+                cache_creation=resp.cache_creation_tokens,
+                cache_read=resp.cache_read_tokens,
+                model=model_id,
+                thinking_tokens=resp.thinking_tokens,
+            ),
+            truncated=resp.stop_reason in ("max_tokens", "length", "MAX_TOKENS"),
+            effective_max_tokens=max_tokens,
+        )
+        for name, model_id, max_tokens, resp in usage
+    ]
 
 
 async def _run_review_async(config: ReviewConfig) -> int:
     """Execute the review pipeline; return CLI exit code."""
-    from ai_pr_review.agents.dispatch import AgentResult as _AgentResult
     from ai_pr_review.llm.client import call_llm
     from ai_pr_review.orchestrate import run_review
     from ai_pr_review.review.runtime import SkipPlan, build_review_runtime
@@ -377,16 +379,22 @@ async def _run_review_async(config: ReviewConfig) -> int:
     from ai_pr_review.review.preflight import should_run_issue_linker, should_run_summarizer
 
     # #1055: the pr-summarizer and issue-linker return only text, so their
-    # token usage never reaches result.agent_results. Record it here so the
-    # COST_RECONCILE actual covers the same agents as the pre-flight estimate.
-    # Only the reconcile line reads this. The token table and the high-usage
-    # warning stay as they were.
-    _preflight_usage: list[tuple[str, LLMResponse]] = []
+    # token usage never reached result.agent_results. Record it here and add
+    # it back as agent rows, so the token table, the usage line, the
+    # high-usage warning and COST_RECONCILE count the same agents as the
+    # pre-flight estimate.
+    _preflight_usage: list[tuple[str, str, int, LLMResponse]] = []
 
-    async def _preflight_llm_call(req: LLMRequest) -> LLMResponse:
-        resp = await _llm_call(req)
-        _preflight_usage.append((req.model_id, resp))
-        return resp
+    def _preflight_recorder(agent_name: str) -> Callable[[LLMRequest], Awaitable[LLMResponse]]:
+        async def _call(req: LLMRequest) -> LLMResponse:
+            resp = await _llm_call(req)
+            _preflight_usage.append((agent_name, req.model_id, req.max_tokens, resp))
+            return resp
+
+        return _call
+
+    def _with_preflight(results: Sequence[_AgentResult]) -> list[_AgentResult]:
+        return [*results, *_preflight_agent_results(_preflight_usage)]
 
     # Run pr-summarizer on first review (fail-soft; skip on incremental runs).
     # Also skip if the consumer has excluded it via the agents denylist or allowlist.
@@ -408,7 +416,7 @@ async def _run_review_async(config: ReviewConfig) -> int:
             # walkthrough must stay a flat table there.
             collapse_walkthrough=rc.vcs_provider != "bitbucket",
             suppress_walkthrough=rc.suppress_walkthrough,
-            llm_call=_preflight_llm_call,
+            llm_call=_preflight_recorder("pr-summarizer"),
         )
 
     # Run issue-linker on first review in full mode when the VCS provider is GitHub.
@@ -433,7 +441,7 @@ async def _run_review_async(config: ReviewConfig) -> int:
             github_repository=rc.github_repository,
             model=rc.model_standard,
             temperature=rc.temperature,
-            llm_call=_preflight_llm_call,
+            llm_call=_preflight_recorder("issue-linker"),
         )
         if issue_linker_md:
             summary_text += "\n\n" + issue_linker_md
@@ -458,7 +466,7 @@ async def _run_review_async(config: ReviewConfig) -> int:
         used to be duplicated inline here.
         """
         return _render_token_usage_block(
-            successes, runtime.sarif_elapsed_s, runtime.script_dir,
+            _with_preflight(successes), runtime.sarif_elapsed_s, runtime.script_dir,
             mode=rc.token_usage_display,
             effective_max_tokens=runtime.dispatch_context.max_tokens_per_agent,
             judge_input_tokens=judge_input_tokens,
@@ -508,7 +516,7 @@ async def _run_review_async(config: ReviewConfig) -> int:
             # safety notice built above must still be returned.
             try:
                 totals = _compute_token_totals(
-                    successes, runtime.script_dir,
+                    _with_preflight(successes), runtime.script_dir,
                     effective_max_tokens=runtime.dispatch_context.max_tokens_per_agent,
                     judge_input_tokens=judge_input_tokens,
                     judge_output_tokens=judge_output_tokens,
@@ -561,7 +569,7 @@ async def _run_review_async(config: ReviewConfig) -> int:
     # table sees.
     if runtime.pre_flight_cost_estimate_units is not None:
         _actual_totals = _compute_token_totals(
-            result.agent_results, runtime.script_dir,
+            _with_preflight(result.agent_results), runtime.script_dir,
             effective_max_tokens=runtime.dispatch_context.max_tokens_per_agent,
             judge_input_tokens=result.judge_input_tokens,
             judge_output_tokens=result.judge_output_tokens,
@@ -572,14 +580,11 @@ async def _run_review_async(config: ReviewConfig) -> int:
         if _actual_totals is not None:
             from ai_pr_review.pricing import format_cost as _format_cost
 
-            _preflight_units = _preflight_actual_units(_preflight_usage, runtime.script_dir)
-            _actual_units = _actual_totals.cost_units + _preflight_units
             logger.warning(
-                "COST_RECONCILE estimate=%s actual=%s delta=%s preflight_actual=%s",
+                "COST_RECONCILE estimate=%s actual=%s delta=%s",
                 _format_cost(runtime.pre_flight_cost_estimate_units),
-                _format_cost(_actual_units),
-                _format_cost(_actual_units - runtime.pre_flight_cost_estimate_units),
-                _format_cost(_preflight_units),
+                _format_cost(_actual_totals.cost_units),
+                _format_cost(_actual_totals.cost_units - runtime.pre_flight_cost_estimate_units),
             )
 
     # Full per-agent breakdown, always echoed to the CI job log regardless of
@@ -590,7 +595,7 @@ async def _run_review_async(config: ReviewConfig) -> int:
     # matching "no token-usage content" for that mode.
     token_table_full = (
         _build_full_token_table(
-            result.agent_results, runtime.sarif_elapsed_s, runtime.script_dir,
+            _with_preflight(result.agent_results), runtime.sarif_elapsed_s, runtime.script_dir,
             effective_max_tokens=runtime.dispatch_context.max_tokens_per_agent,
             judge_input_tokens=result.judge_input_tokens,
             judge_output_tokens=result.judge_output_tokens,
