@@ -7,17 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.23.0] - 2026-10-13
+
 ### Added
 
-- **The review now skips before any LLM call when the diff does not fit the model context window (#1056).** `config/model-pricing.json` accepts an optional `context_window` (maximum input tokens) for each model. It is set for Sonnet 5.5, Opus 5.5, and Haiku 5.5, and a model without it is not checked. The engine compares the estimated input tokens plus the output cap of each agent with `AI_CONTEXT_WINDOW_MARGIN` (default `0.9`, `0` turns it off) times that window. A skip comment names the agent, the numbers, and `AI_EXCLUDE_PATTERNS` as the fix for generated files. The check runs without `AI_MAX_COST_USD`. A skip exits 0 by default, and `AI_FAIL_ON_CONTEXT_WINDOW=true` exits 2. A provider "prompt is too long" error that gets past the estimate is not yet treated as a skip.
-
-### Fixed
-
-- **`COST_RECONCILE` delta no longer prints a wrong negative amount, and the actual now includes the pr-summarizer and issue-linker (#1055).** `format_cost` rendered a negative amount through floor division, so a delta of -$0.3070 printed as `$-1.6930`. It now prints `-$0.3070`. The actual total also left out the two preflight agents that the estimate counts. The line now adds their measured cost and logs it as `preflight_actual=`. The token table and the high-usage warning are unchanged.
+- **The review now skips before any LLM call when the diff does not fit the model context window (#1056).** `config/model-pricing.json` accepts an optional `context_window` (maximum input tokens) for each model. It is set for Sonnet 5.5, Opus 5.5, and Haiku 5.5, and a model without it is not checked. The engine compares the estimated input tokens plus the output cap of each agent with `AI_CONTEXT_WINDOW_MARGIN` (default `0.9`, `0` turns it off) times that window. A skip comment names the agent, the numbers, and `AI_EXCLUDE_PATTERNS` as the fix for generated files. The check runs without `AI_MAX_COST_USD`. A skip exits 0 by default, and `AI_FAIL_ON_CONTEXT_WINDOW=true` exits 2. The action inputs are `context-window-margin` and `fail-on-context-window`, and rescan and review-full forward both. Behavior change: a diff that used to fail at the provider with "prompt is too long" is now a skip. A provider "prompt is too long" error that gets past the estimate is not yet treated as a skip.
 
 ### Changed
 
-- **The token table, the usage line, the high-usage warning and `COST_RECONCILE` now count the pr-summarizer and issue-linker (#1055).** Their usage was missing from every report, so the reported cost was lower than the real spend. The table shows a row for each preflight agent that ran. The `AI_TOKEN_USAGE_WARN_USD` check sees the higher total. The `preflight_actual=` field is gone, because the actual now includes them.
+- **Behavior change: the token table, the usage line, the high-usage warning and `COST_RECONCILE` now count the pr-summarizer and issue-linker (#1055).** Their usage was missing from every report, so the reported cost was lower than the real spend. The table shows a row for each preflight agent that ran, and the reported cost and the agent count are higher. The `AI_TOKEN_USAGE_WARN_USD` check sees the higher total, so it can fire on a run that did not fire it before.
+
+### Fixed
+
+- **The `COST_RECONCILE` delta no longer prints a wrong negative amount (#1055).** `format_cost` rendered a negative amount through floor division, so a delta of -$0.3070 printed as `$-1.6930`. It now prints `-$0.3070`.
 
 ## [2.22.1] - 2026-10-12
 

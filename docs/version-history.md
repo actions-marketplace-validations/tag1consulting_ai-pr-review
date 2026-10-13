@@ -12,6 +12,7 @@ What changed in each release, newest first. Every release from v2.8.0 onward has
 
 | Version | Highlights |
 |---------|-----------|
+| [v2.23.0](version-history/v2.23.0) | The review skips before any LLM call when the diff does not fit the model context window (new `AI_CONTEXT_WINDOW_MARGIN` and `AI_FAIL_ON_CONTEXT_WINDOW`, #1056), reports now count the pr-summarizer and issue-linker so reported cost is higher (behavior change, #1055), and the `COST_RECONCILE` delta prints the right sign |
 | [v2.22.1](version-history/v2.22.1) | The review headline follows a dismissal (#1049), a changed file that resolves outside the workspace is dropped for every analyzer (#1047), and new route key `when.paths-all` stops one docs file from routing a mixed PR to no review (#1039) |
 | [v2.22.0](version-history/v2.22.0) | The phpcs analyzer honors the repo's own ruleset and gives Drupal standards only to Drupal repos (behavior change, #1042), and a merged finding from two analyzer tools keeps both messages (#1044) |
 | [v2.21.0](version-history/v2.21.0) | Each finding shows where its evidence came from, new `dep-exists` analyzer flags unknown new dependencies (behavior change, on by default), the comment says what the review did not look at, and the pre-flight cost estimate is about 2.2 times higher (behavior change, #1013). Sonnet 5.5 cache-read price, Opus 5 id matching, and Haiku 5.5 temperature handling are fixed. |
