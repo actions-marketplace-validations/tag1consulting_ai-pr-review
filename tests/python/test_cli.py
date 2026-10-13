@@ -1853,29 +1853,55 @@ class TestCostReconciliationLogging:
         assert "delta=" in caplog.text
 
 
-class TestPreflightActualUnits:
-    """#1055: COST_RECONCILE counts the pr-summarizer and issue-linker calls."""
+class TestPreflightAgentResults:
+    """#1055: the pr-summarizer and issue-linker usage becomes agent rows."""
 
-    def test_empty_usage_is_zero(self) -> None:
-        from ai_pr_review.cli import _preflight_actual_units
+    def test_empty_usage_gives_no_rows(self) -> None:
+        from ai_pr_review.cli import _preflight_agent_results
 
-        assert _preflight_actual_units([], Path(".")) == 0
+        assert _preflight_agent_results([]) == []
 
-    def test_prices_usage_with_bundled_pricing(self) -> None:
-        from ai_pr_review.cli import _preflight_actual_units
+    def test_rows_carry_name_model_usage_and_cap(self) -> None:
+        from ai_pr_review.cli import _preflight_agent_results
         from ai_pr_review.llm.base import LLMResponse
+
+        resp = LLMResponse(
+            text="x", input_tokens=10_000, output_tokens=1_000,
+            cache_creation_tokens=200, cache_read_tokens=300,
+        )
+        rows = _preflight_agent_results([("pr-summarizer", "claude-sonnet-4-6", 2048, resp)])
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.name == "pr-summarizer"
+        assert row.effective_max_tokens == 2048
+        assert row.truncated is False
+        usage = row.token_log
+        assert usage is not None
+        assert (usage.input, usage.output) == (10_000, 1_000)
+        assert (usage.cache_creation, usage.cache_read) == (200, 300)
+        assert usage.model == "claude-sonnet-4-6"
+
+    def test_truncated_response_is_flagged(self) -> None:
+        from ai_pr_review.cli import _preflight_agent_results
+        from ai_pr_review.llm.base import LLMResponse
+
+        resp = LLMResponse(text="x", input_tokens=1, output_tokens=1, stop_reason="max_tokens")
+        rows = _preflight_agent_results([("issue-linker", "m", 512, resp)])
+        assert rows[0].truncated is True
+
+    def test_rows_are_priced_by_the_shared_totals(self) -> None:
+        """The rows feed the same totals the token table renders from."""
+        from ai_pr_review.cli import _preflight_agent_results
+        from ai_pr_review.llm.base import LLMResponse
+        from ai_pr_review.review.reporting import compute_token_totals
 
         script_dir = Path(__file__).resolve().parents[2]
-        resp = LLMResponse(text="", input_tokens=10_000, output_tokens=1_000)
-        units = _preflight_actual_units([("claude-sonnet-4-6", resp)], script_dir)
-        assert units > 0
-
-    def test_pricing_error_returns_zero(self, tmp_path: Path) -> None:
-        from ai_pr_review.cli import _preflight_actual_units
-        from ai_pr_review.llm.base import LLMResponse
-
-        resp = LLMResponse(text="", input_tokens=10, output_tokens=10)
-        assert _preflight_actual_units([("claude-sonnet-4-6", resp)], tmp_path) == 0
+        resp = LLMResponse(text="x", input_tokens=10_000, output_tokens=1_000)
+        rows = _preflight_agent_results([("pr-summarizer", "claude-sonnet-4-6", 2048, resp)])
+        totals = compute_token_totals(rows, script_dir, effective_max_tokens=0)
+        assert totals is not None
+        assert totals.cost_units > 0
+        assert totals.agent_count == 1
 
 
 class TestEmitTelemetryThinkingTokens:

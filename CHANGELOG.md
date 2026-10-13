@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`COST_RECONCILE` delta no longer prints a wrong negative amount, and the actual now includes the pr-summarizer and issue-linker (#1055).** `format_cost` rendered a negative amount through floor division, so a delta of -$0.3070 printed as `$-1.6930`. It now prints `-$0.3070`. The actual total also left out the two preflight agents that the estimate counts. The line now adds their measured cost and logs it as `preflight_actual=`. The token table and the high-usage warning are unchanged.
 
+### Changed
+
+- **The token table, the usage line, the high-usage warning and `COST_RECONCILE` now count the pr-summarizer and issue-linker (#1055).** Their usage was missing from every report, so the reported cost was lower than the real spend. The table shows a row for each preflight agent that ran. The `AI_TOKEN_USAGE_WARN_USD` check sees the higher total. The `preflight_actual=` field is gone, because the actual now includes them.
+
 ## [2.22.1] - 2026-10-12
 
 ### Fixed
