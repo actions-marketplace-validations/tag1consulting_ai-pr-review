@@ -1904,6 +1904,75 @@ class TestPreflightAgentResults:
         assert totals.agent_count == 1
 
 
+class TestContextWindowSkipExitCode:
+    """#1056: a context-window skip exits 0 unless AI_FAIL_ON_CONTEXT_WINDOW is set.
+
+    These tests run the real cli._run_review_async SkipPlan branch with a mocked
+    build_review_runtime, so they fail if the context_window_failed branch or
+    the telemetry outcome is removed from cli.py.
+    """
+
+    async def _run(
+        self, tmp_path: Path, *, is_context_window_skip: bool, **config_overrides: object,
+    ) -> tuple[int, str]:
+        from ai_pr_review.cli import _run_review_async
+        from ai_pr_review.review.runtime import SkipPlan
+        from ai_pr_review.vcs.protocol import SummaryResult, VcsProvider
+
+        sink_path = tmp_path / "telemetry.jsonl"
+        config = _make_config(
+            telemetry_enabled=True,
+            telemetry_sink=f"file://{sink_path}",
+            **config_overrides,
+        )
+        provider = MagicMock(spec=VcsProvider)
+        provider.post_skip_comment.return_value = SummaryResult(
+            comment_id=1, created=True, updated=False,
+        )
+        skip_plan = SkipPlan(
+            reason="The diff is too large for the model context window.",
+            provider=provider,
+            is_context_window_skip=is_context_window_skip,
+        )
+        with patch(
+            "ai_pr_review.review.runtime.build_review_runtime",
+            new=AsyncMock(return_value=skip_plan),
+        ):
+            exit_code = await _run_review_async(config)
+        event = json.loads(sink_path.read_text().splitlines()[0])
+        return exit_code, event["outcome"]
+
+    @pytest.mark.anyio
+    async def test_exits_0_by_default(self, tmp_path: Path) -> None:
+        exit_code, outcome = await self._run(tmp_path, is_context_window_skip=True)
+        assert exit_code == 0
+        assert outcome == "skipped"
+
+    @pytest.mark.anyio
+    async def test_exits_2_when_opted_in(self, tmp_path: Path) -> None:
+        exit_code, outcome = await self._run(
+            tmp_path, is_context_window_skip=True, fail_on_context_window=True,
+        )
+        assert exit_code == 2
+        assert outcome == "skipped_context_window_failed"
+
+    @pytest.mark.anyio
+    async def test_cost_ceiling_flag_does_not_apply(self, tmp_path: Path) -> None:
+        exit_code, outcome = await self._run(
+            tmp_path, is_context_window_skip=True, fail_on_cost_ceiling=True,
+        )
+        assert exit_code == 0
+        assert outcome == "skipped"
+
+    @pytest.mark.anyio
+    async def test_other_skip_ignores_the_flag(self, tmp_path: Path) -> None:
+        exit_code, outcome = await self._run(
+            tmp_path, is_context_window_skip=False, fail_on_context_window=True,
+        )
+        assert exit_code == 0
+        assert outcome == "skipped"
+
+
 class TestEmitTelemetryThinkingTokens:
     """#592: telemetry's per-agent dict must carry thinking_tokens/stop_reason
     so a consumer can alert on truncation/thinking-exhaustion without a human

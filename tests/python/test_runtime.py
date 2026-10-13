@@ -556,6 +556,62 @@ class TestBuildReviewRuntimeCostCeiling:
         assert result.provider is provider
 
     @pytest.mark.anyio
+    async def test_context_window_exceeded_returns_context_window_skip_plan(
+        self, tmp_path: Path,
+    ) -> None:
+        # #1056: claude-sonnet-5-5 has a 1M token window in the bundled
+        # pricing file. A margin this small puts the limit at one token, so
+        # any estimate exceeds it. No cost ceiling is set.
+        config = _make_config(model_standard="claude-sonnet-5-5", context_window_margin=0.000001)
+        provider = _make_fake_provider()
+        diff_file = tmp_path / "diff.txt"
+
+        with (
+            patch("ai_pr_review.diff.compute.compute_diff", return_value=_make_diff_result()),
+            patch("ai_pr_review.agents.gates.evaluate_gates", return_value={}),
+            patch.dict("os.environ", {"AI_PR_REVIEW_DIFF_FILE": str(diff_file)}, clear=False),
+        ):
+            result = await build_review_runtime(config, provider_factory=lambda: provider)
+
+        assert isinstance(result, SkipPlan)
+        assert result.is_context_window_skip is True
+        assert result.is_cost_ceiling_skip is False
+        assert "context window" in result.reason
+        assert "AI_EXCLUDE_PATTERNS" in result.reason
+        assert result.provider is provider
+
+    @pytest.mark.anyio
+    async def test_context_window_margin_zero_does_not_skip(self, tmp_path: Path) -> None:
+        config = _make_config(model_standard="claude-sonnet-5-5", context_window_margin=0.0)
+        provider = _make_fake_provider()
+        diff_file = tmp_path / "diff.txt"
+
+        with (
+            patch("ai_pr_review.diff.compute.compute_diff", return_value=_make_diff_result()),
+            patch("ai_pr_review.agents.gates.evaluate_gates", return_value={}),
+            patch.dict("os.environ", {"AI_PR_REVIEW_DIFF_FILE": str(diff_file)}, clear=False),
+        ):
+            result = await build_review_runtime(config, provider_factory=lambda: provider)
+
+        assert isinstance(result, ReviewRuntime)
+
+    @pytest.mark.anyio
+    async def test_model_without_context_window_is_not_skipped(self, tmp_path: Path) -> None:
+        # claude-sonnet-4-6 has no context_window in the bundled pricing file.
+        config = _make_config(context_window_margin=0.000001)
+        provider = _make_fake_provider()
+        diff_file = tmp_path / "diff.txt"
+
+        with (
+            patch("ai_pr_review.diff.compute.compute_diff", return_value=_make_diff_result()),
+            patch("ai_pr_review.agents.gates.evaluate_gates", return_value={}),
+            patch.dict("os.environ", {"AI_PR_REVIEW_DIFF_FILE": str(diff_file)}, clear=False),
+        ):
+            result = await build_review_runtime(config, provider_factory=lambda: provider)
+
+        assert isinstance(result, ReviewRuntime)
+
+    @pytest.mark.anyio
     async def test_ceiling_not_exceeded_returns_runtime(self, tmp_path: Path) -> None:
         config = _make_config(max_cost_usd=1000.00)
         provider = _make_fake_provider()
