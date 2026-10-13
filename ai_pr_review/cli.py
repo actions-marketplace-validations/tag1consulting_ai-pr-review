@@ -257,6 +257,36 @@ def review() -> None:
     sys.exit(exit_code)
 
 
+def _preflight_actual_units(
+    usage: Sequence[tuple[str, LLMResponse]], script_dir: Path,
+) -> int:
+    """Cost in $0.0001 units of the pr-summarizer and issue-linker calls (#1055).
+
+    Fail-soft: a pricing-file or arithmetic error returns 0, so the
+    ``COST_RECONCILE`` line still logs (it then under-counts, as before).
+    A model with no pricing entry adds 0, matching the pre-flight estimate.
+    """
+    if not usage:
+        return 0
+    try:
+        from ai_pr_review.pricing import TokenEntry, compute_totals, load_pricing
+
+        entries = [
+            TokenEntry(
+                agent="preflight", model=model_id,
+                input_tokens=resp.input_tokens, output_tokens=resp.output_tokens,
+                cache_creation_tokens=resp.cache_creation_tokens,
+                cache_read_tokens=resp.cache_read_tokens,
+            )
+            for model_id, resp in usage
+        ]
+        pricing_data = load_pricing(str(script_dir / "config" / "model-pricing.json"))
+        return compute_totals(entries, pricing_data).cost_units
+    except Exception as exc:
+        logger.warning("COST_RECONCILE: could not price preflight agents: %s", exc)
+        return 0
+
+
 async def _run_review_async(config: ReviewConfig) -> int:
     """Execute the review pipeline; return CLI exit code."""
     from ai_pr_review.agents.dispatch import AgentResult as _AgentResult
@@ -346,6 +376,18 @@ async def _run_review_async(config: ReviewConfig) -> int:
 
     from ai_pr_review.review.preflight import should_run_issue_linker, should_run_summarizer
 
+    # #1055: the pr-summarizer and issue-linker return only text, so their
+    # token usage never reaches result.agent_results. Record it here so the
+    # COST_RECONCILE actual covers the same agents as the pre-flight estimate.
+    # Only the reconcile line reads this. The token table and the high-usage
+    # warning stay as they were.
+    _preflight_usage: list[tuple[str, LLMResponse]] = []
+
+    async def _preflight_llm_call(req: LLMRequest) -> LLMResponse:
+        resp = await _llm_call(req)
+        _preflight_usage.append((req.model_id, resp))
+        return resp
+
     # Run pr-summarizer on first review (fail-soft; skip on incremental runs).
     # Also skip if the consumer has excluded it via the agents denylist or allowlist.
     # should_run_summarizer (#848) is the single source of this gate, shared
@@ -366,7 +408,7 @@ async def _run_review_async(config: ReviewConfig) -> int:
             # walkthrough must stay a flat table there.
             collapse_walkthrough=rc.vcs_provider != "bitbucket",
             suppress_walkthrough=rc.suppress_walkthrough,
-            llm_call=_llm_call,
+            llm_call=_preflight_llm_call,
         )
 
     # Run issue-linker on first review in full mode when the VCS provider is GitHub.
@@ -391,7 +433,7 @@ async def _run_review_async(config: ReviewConfig) -> int:
             github_repository=rc.github_repository,
             model=rc.model_standard,
             temperature=rc.temperature,
-            llm_call=_llm_call,
+            llm_call=_preflight_llm_call,
         )
         if issue_linker_md:
             summary_text += "\n\n" + issue_linker_md
@@ -530,11 +572,14 @@ async def _run_review_async(config: ReviewConfig) -> int:
         if _actual_totals is not None:
             from ai_pr_review.pricing import format_cost as _format_cost
 
+            _preflight_units = _preflight_actual_units(_preflight_usage, runtime.script_dir)
+            _actual_units = _actual_totals.cost_units + _preflight_units
             logger.warning(
-                "COST_RECONCILE estimate=%s actual=%s delta=%s",
+                "COST_RECONCILE estimate=%s actual=%s delta=%s preflight_actual=%s",
                 _format_cost(runtime.pre_flight_cost_estimate_units),
-                _format_cost(_actual_totals.cost_units),
-                _format_cost(_actual_totals.cost_units - runtime.pre_flight_cost_estimate_units),
+                _format_cost(_actual_units),
+                _format_cost(_actual_units - runtime.pre_flight_cost_estimate_units),
+                _format_cost(_preflight_units),
             )
 
     # Full per-agent breakdown, always echoed to the CI job log regardless of

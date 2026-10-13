@@ -1853,6 +1853,31 @@ class TestCostReconciliationLogging:
         assert "delta=" in caplog.text
 
 
+class TestPreflightActualUnits:
+    """#1055: COST_RECONCILE counts the pr-summarizer and issue-linker calls."""
+
+    def test_empty_usage_is_zero(self) -> None:
+        from ai_pr_review.cli import _preflight_actual_units
+
+        assert _preflight_actual_units([], Path(".")) == 0
+
+    def test_prices_usage_with_bundled_pricing(self) -> None:
+        from ai_pr_review.cli import _preflight_actual_units
+        from ai_pr_review.llm.base import LLMResponse
+
+        script_dir = Path(__file__).resolve().parents[2]
+        resp = LLMResponse(text="", input_tokens=10_000, output_tokens=1_000)
+        units = _preflight_actual_units([("claude-sonnet-4-6", resp)], script_dir)
+        assert units > 0
+
+    def test_pricing_error_returns_zero(self, tmp_path: Path) -> None:
+        from ai_pr_review.cli import _preflight_actual_units
+        from ai_pr_review.llm.base import LLMResponse
+
+        resp = LLMResponse(text="", input_tokens=10, output_tokens=10)
+        assert _preflight_actual_units([("claude-sonnet-4-6", resp)], tmp_path) == 0
+
+
 class TestEmitTelemetryThinkingTokens:
     """#592: telemetry's per-agent dict must carry thinking_tokens/stop_reason
     so a consumer can alert on truncation/thinking-exhaustion without a human
