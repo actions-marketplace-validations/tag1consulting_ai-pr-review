@@ -2,7 +2,8 @@
 
 Proximity-based dedup: findings in the same file within PROXIMITY_LINES of
 each other are clustered; the highest-severity finding survives with a union
-of sources.
+of sources. When the cluster mixes two different analyzer tools, the other
+tool's message is kept in `Finding.also_reported` so it is not lost (#1044).
 
 Closes #185 (dedup preserves distinct nearby findings; merges exact
 cross-source duplicates).
@@ -12,8 +13,9 @@ from __future__ import annotations
 
 import logging
 
-from ai_pr_review.findings.models import Finding, Severity
+from ai_pr_review.findings.models import Finding, Severity, combine_also_reported
 from ai_pr_review.findings.provenance import boosted_confidence, is_corroborated
+from ai_pr_review.findings.scope import is_analyzer_source
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +140,47 @@ def _dedup_file(findings: list[Finding]) -> list[Finding]:
     return [_collapse_cluster(c) for c in clusters]
 
 
+_MAX_NOTE_CHARS = 300
+
+
+def _analyzer_tools(f: Finding) -> frozenset[str] | None:
+    """Return the analyzer tool names behind *f*, or None if any source is not an analyzer."""
+    sources = f.sources or ([f.source] if f.source else [])
+    if not sources or not all(is_analyzer_source(s) for s in sources):
+        return None
+    return frozenset(s.lower() for s in sources)
+
+
+def _also_reported_notes(cluster: list[Finding], best: Finding) -> list[str]:
+    """Compose one note per distinct message that the collapse would otherwise drop.
+
+    Only analyzer-vs-analyzer members from a different tool set than `best`
+    qualify. Two different tools report different rules, so their messages are
+    not duplicates. Agent members and same-tool members are the "same issue
+    found twice" case and stay collapsed silently.
+    """
+    best_tools = _analyzer_tools(best)
+    if best_tools is None:
+        return []
+    notes: list[str] = []
+    seen: set[str] = set()
+    for f in sorted(cluster, key=lambda m: m.line or 0):
+        if f is best:
+            continue
+        tools = _analyzer_tools(f)
+        if tools is None or tools == best_tools:
+            continue
+        text = " ".join(f.finding.split())
+        if len(text) > _MAX_NOTE_CHARS:
+            text = text[: _MAX_NOTE_CHARS - 1] + "…"
+        where = f" (line {f.line})" if f.line else ""
+        note = f"{', '.join(sorted(tools))}{where}: {text}"
+        if note not in seen:
+            seen.add(note)
+            notes.append(note)
+    return combine_also_reported([notes])
+
+
 def _collapse_cluster(cluster: list[Finding]) -> Finding:
     """Collapse a cluster to the highest-severity representative."""
     best = min(cluster, key=lambda f: _SEVERITY_ORDER.get(f.severity, 99))
@@ -150,6 +193,9 @@ def _collapse_cluster(cluster: list[Finding]) -> Finding:
                 all_sources.append(s)
 
     update: dict[str, object] = {"sources": sorted(all_sources)}
+    also_reported = _also_reported_notes(cluster, best)
+    if also_reported:
+        update["also_reported"] = also_reported
     # _cluster_category_compatible guarantees a surviving cluster has at most
     # one distinct non-"other" category. Preserve it even if `best` (chosen by
     # severity alone) happens to be the "other"-tagged member.

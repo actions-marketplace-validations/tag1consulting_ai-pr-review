@@ -68,6 +68,26 @@ jobs:
 
 Reviews start on the next PR.
 
+## What's new in v2.22.1
+
+**The review headline follows a dismissal.** After you dismiss a finding, the risk and the finding counts update. A review posted before this release keeps a simpler update until the next rescan.
+
+**A changed file that points outside the workspace is dropped for every analyzer.** v2.22.0 did this for phpcs only.
+
+**New policy route key `paths-all`.** A route matches only if every changed file matches. A docs file next to real code no longer sends the whole PR to a no-review policy.
+
+See [Version History → v2.22.1](version-history/v2.22.1) for details.
+
+## What's new in v2.22.0
+
+**The phpcs analyzer follows your repo's ruleset.** It reads `phpcs.xml` or `phpcs.xml.dist` as data, uses its file scope and excludes, and never lets phpcs load it, because a ruleset can load PHP from the repo. If the ruleset names a standard that the image lacks, such as WordPress, phpcs runs a style-neutral fallback and the log names the missing standard.
+
+**Behavior change: Drupal standards apply only to Drupal repos.** With no ruleset, a repo gets the Drupal standard only when it shows Drupal signals. Other PHP repos get PSR12. Open pull requests can see new findings.
+
+**A merged finding keeps both analyzer messages.** When two analyzer tools report nearby lines, the finding lists the second message as `Also reported by:`.
+
+See [Version History → v2.22.0](version-history/v2.22.0) for details.
+
 ## What's new in v2.21.0
 
 **Each finding shows where its evidence came from.** A short label and the confidence score follow the finding text, for example `(corroborated by analyzer, confidence 88)`. It is display text only. Set `finding-badges: 'false'` to hide it.
@@ -79,20 +99,6 @@ Reviews start on the next PR.
 **Behavior change: the cost estimate is about 2.2 times higher.** The estimate now uses a measured ratio of characters to tokens. A repository that sets `AI_MAX_COST_USD` can see a review skipped that passed before.
 
 See [Version History → v2.21.0](version-history/v2.21.0) for details.
-
-## What's new in v2.20.0
-
-**`/ai-pr-review full` now works.** It is an alias for `/ai-pr-review review-full`. Both start the same full-mode review and get the same reply, and the `help` reply lists the alias.
-
-**A Critical finding that two sources reported now gets an inline comment.** On a review with many findings, a Critical finding that an agent and an analyzer both reported could fall past the 25-comment cap and get no inline comment. On Bitbucket that meant no Code Insights annotation. Findings now keep their severity order, so the most severe ones get the inline slots first.
-
-See [Version History → v2.20.0](version-history/v2.20.0) for details.
-
-## What's new in v2.19.0
-
-**You can now leave the Walkthrough table out of the summary comment.** Set `suppress-walkthrough: 'true'` (the `AI_SUPPRESS_WALKTHROUGH` environment variable on Bitbucket and GitLab). The Summary text, Type and Effort stay. This is most useful on Bitbucket, which cannot collapse the table the way GitHub and GitLab do. The default is `false`, so nothing changes unless you set it. On Bitbucket a summary comment that already has a table loses it on the next run.
-
-See [Version History → v2.19.0](version-history/v2.19.0) for details.
 
 ## Learn more
 

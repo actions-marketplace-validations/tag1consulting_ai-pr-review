@@ -36,6 +36,31 @@ Category = Literal[
 CATEGORIES: tuple[str, ...] = get_args(Category)
 
 
+MAX_ALSO_REPORTED = 5
+_ALSO_REPORTED_OVERFLOW_PREFIX = "(+"
+
+
+def combine_also_reported(groups: list[list[str]]) -> list[str]:
+    """Union several `Finding.also_reported` lists, keep order, drop repeats, apply the cap.
+
+    Used by `merge._collapse_cluster` and by `scope.rollup_repeated_findings`,
+    so a collapsed group keeps the notes of every member (#1044). The overflow
+    marker of an input list is dropped and recounted.
+    """
+    notes: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for note in group:
+            if note.startswith(_ALSO_REPORTED_OVERFLOW_PREFIX) or note in seen:
+                continue
+            seen.add(note)
+            notes.append(note)
+    if len(notes) > MAX_ALSO_REPORTED:
+        extra = len(notes) - MAX_ALSO_REPORTED
+        notes = [*notes[:MAX_ALSO_REPORTED], f"(+{extra} more from other analyzers)"]
+    return notes
+
+
 class Finding(BaseModel):
     """A single finding from an agent or static analyzer."""
 
@@ -96,6 +121,14 @@ class Finding(BaseModel):
     # `corroborated` field this Finding already carries. Internal-only: not
     # serialised by to_dict().
     judge_verdict: JudgeVerdict | None = None
+    # Set by merge._collapse_cluster when two different analyzer tools report
+    # nearby lines (#1044). Each entry is one lost message, already composed as
+    # "<tool> (line N): <message>". The surviving finding keeps its own
+    # `finding` text unchanged because vcs/_finding_ids.fingerprint() hashes
+    # it. Kept out of `remediation` so suppression rules (which match on
+    # finding + remediation) cannot hide the surviving finding through the
+    # other tool's text. Internal-only: not serialised by to_dict().
+    also_reported: list[str] = Field(default_factory=list)
 
     @field_validator("severity", mode="before")
     @classmethod

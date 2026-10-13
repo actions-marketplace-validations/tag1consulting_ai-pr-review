@@ -10,7 +10,12 @@ import httpx
 from ai_pr_review.findings.models import Finding
 from ai_pr_review.vcs.github import GitHubConfig, GitHubProvider, _blob_link
 from ai_pr_review.vcs.http import RecordingClient, RetryPolicy, TapeRecorder
-from ai_pr_review.vcs.marker import INLINE_MARKER, extract_judge_map, extract_verdicts
+from ai_pr_review.vcs.marker import (
+    INLINE_MARKER,
+    extract_headline_map,
+    extract_judge_map,
+    extract_verdicts,
+)
 from ai_pr_review.vcs.protocol import DiffContext
 
 
@@ -278,6 +283,39 @@ def test_post_findings_body_finding_never_judged_has_no_judge_map_entry() -> Non
     assert result.ok
     assert bodies
     assert fingerprint(ood) not in extract_judge_map(bodies[0])
+
+
+def test_post_findings_emits_headline_map_matching_the_headline() -> None:
+    """#1049: the headline-map marker lists exactly the findings behind the
+    headline count (an out-of-diff finding is counted by neither), so a later
+    dismissal can recompute the headline."""
+    from ai_pr_review.vcs._finding_ids import fingerprint
+
+    body_f = Finding(
+        severity="High", confidence=50, finding="body level finding",
+        source="code-reviewer", file="a.py", line=195, demoted_to_body=True,
+    )
+    ood = Finding(
+        severity="Low", confidence=80, finding="pre-existing style issue",
+        source="phpcs", file="app.py", line=99, out_of_diff=True,
+    )
+    diff = DiffContext(diff_text=_DIFF, head_sha=_VALID_SHA)
+    bodies: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        import json
+
+        if req.method == "POST" and "/reviews" in str(req.url):
+            body = json.loads(req.content) if req.content else {}
+            bodies.append(body.get("body", ""))
+            return httpx.Response(201, json={"id": 1, "state": "COMMENTED"})
+        return httpx.Response(404)
+
+    prov, _ = _make_provider(handler)
+    assert prov.post_findings([body_f, ood], diff, event="REQUEST_CHANGES").ok
+
+    assert "**Overall Risk:** High | **Findings:** 1 (0 inline)" in bodies[0]
+    assert extract_headline_map(bodies[0]) == {fingerprint(body_f): ("High", False)}
 
 
 def test_ood_only_prior_review_preserves_finding_id() -> None:

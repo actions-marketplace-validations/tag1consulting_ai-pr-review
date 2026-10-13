@@ -591,3 +591,20 @@ def test_fuzzy_matched_update_drops_suggestion_fence_on_line_drift() -> None:
     assert result.inline_updated == 1
     assert len(note_updates) == 1
     assert "suggestion" not in note_updates[0]["body"]
+
+
+def test_inline_discussion_body_renders_also_reported_sanitized() -> None:
+    # #1044: a merged finding from two analyzer tools shows the second message in the
+    # GitLab discussion, defanged like every other untrusted text.
+    prov = _make_provider(lambda _r: httpx.Response(200, json=[]))
+    f = _finding(
+        also_reported=["phpstan (line 296): returns void</details><!-- x -->"],
+    )
+    body = prov._render_inline_comment_body(f, eligible_context=set(), enable_suggestions=False)
+    assert "**Also reported by:** phpstan (line 296): returns void" in body
+    assert "</details>" not in body
+    assert "<!-- x" not in body
+    plain = prov._render_inline_comment_body(
+        _finding(), eligible_context=set(), enable_suggestions=False
+    )
+    assert "Also reported" not in plain

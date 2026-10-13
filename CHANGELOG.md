@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.22.1] - 2026-10-12
+
+### Fixed
+
+- **The review headline now follows a dismissal (#1049).** After a maintainer dismissed a finding, the "Overall Risk | Findings" line kept the old risk and counts until the next full review. Every review body now carries a hidden `headline-map` marker (fingerprint, severity and place of each counted finding). A dismissal removes the finding from it and recomputes the headline, for carried-forward, inline and body-level findings. The marker is the first one dropped when the body is near the size limit. A review posted before this release has no marker, so a dismissed carried-forward finding only lowers the counts and the risk reads `<risk> or lower`.
+- **A changed file that resolves outside the workspace is dropped for every analyzer (#1047, item 1).** A symlink, or a file under a symlinked directory, could point at a file elsewhere on the runner. v2.22.0 fixed this for phpcs only. `build_changed_files` now applies the rule once, so no analyzer or agent gets the path.
+- **A docs file no longer routes a mixed pull request to no review (#1039).** `when.paths` matches if any one changed file matches, so one `docs/` file next to real code gave the whole PR `agents: []` and `analyzers: []` under this repository's own docs route.
+
+### Added
+
+- **New policy route key `when.paths-all` (#1039).** A route with `paths-all` matches only if every changed file matches at least one of its globs, and never matches an empty file list. `paths` keeps its meaning, so no existing policy file changes. This repository's docs route now uses `paths-all`.
+
+## [2.22.0] - 2026-10-12
+
+### Fixed
+
+- **The phpcs analyzer now honors the repo's own ruleset (#1042).** It applied the Drupal standard to every PHP repo and ignored `phpcs.xml`, so a WordPress plugin got High indentation findings on test files that its ruleset does not lint. The analyzer reads `.phpcs.xml`, `phpcs.xml`, `.phpcs.xml.dist` or `phpcs.xml.dist` as data and gives phpcs a generated ruleset. phpcs never reads the repo file, because a ruleset can load PHP from the workspace (`installed_paths`, `bootstrap`, `autoload`, path-style `rule ref`), which is the same threat as #739. The analyzer keeps the `<file>` scope, the exclude patterns, the rules that name installed standards or sniffs, and their `exclude`, `severity`, `type` and `properties` settings. It rejects a ruleset with a DOCTYPE or ENTITY declaration, a NUL byte, a size over 256 KiB, or a symlink. It applies the `<file>` scope and `type="relative"` exclude patterns itself, because phpcs ignores both for files given on the command line. It matches those patterns without a backtracking regex, so a hostile pattern cannot stall the review. It logs the first five ruleset entries that it drops, then the total. phpcs runs from an empty temporary directory with absolute file paths, and a rule ref or exclude name that is shaped like a file or that exists as a path in the workspace is dropped, because phpcs resolves such a name against its working directory and would load it as a ruleset. A changed file that is a symlink, or sits under a symlinked directory, and resolves to a file outside the workspace is skipped, so phpcs cannot read a file elsewhere on the runner.
+- **A merged finding from two different analyzer tools no longer loses the second message (#1044).** When phpcs and phpstan reported nearby lines, the merged finding kept only the highest-severity text, while the badge still named both tools. The merged finding now keeps its own text and lists the other tool's message as `Also reported by:` in the GitHub inline comment, the GitLab discussion, the review body, and the Bitbucket Code Insights annotation. The text is not appended to the finding, because the finding fingerprint hashes it. The roll-up step keeps the notes of every occurrence.
+
+### Changed
+
+- **Behavior change: a PHP repo that is not a Drupal repo no longer gets the Drupal standard.** With no phpcs ruleset, the Drupal and DrupalPractice standards apply only when the repo shows Drupal signals: a `*.info.yml` file, a Drupal 7 `*.info` file with `name` and `core` keys, a `.module`, `.install`, `.theme` or `.profile` file, a composer `type` of `drupal-*`, or a `drupal/core` requirement. Other repos get PSR12 with the docblock sniff. Open pull requests can see new findings and stale threads that resolve.
+- **A ruleset that names a standard the image does not have gets a style-neutral fallback.** For example, `WordPress-Extra` is not installed. phpcs then runs seven correctness sniffs with no code-style opinion, plus the repo rules that name installed sniffs, and the log names the missing standard. PSR12 is not the fallback, because it requires spaces and tab-indented code would fail on almost every line. If phpcs rejects the generated ruleset, the analyzer retries once without the repo rules and keeps the repo's top-level exclude patterns.
+- **Bugfixes now land directly on `main`.** A defect fix that deserves a patch release no longer goes through a `release/vX.Y.Z` branch. The maintainer cuts the patch release from `main`. Features and other planned changes still use the release branch. This is a process change only, with no engine or workflow code changes. See "Bugfix path" in `CLAUDE.md`.
+- **A stale comment in the analyzer bridge is fixed (#1019).** The header of `ai_pr_review/analyzers/bridge.py` said 13 analyzers. It now points at `ANALYZER_NAMES`, so the number cannot go stale.
+- **Dependency updates.** Python is 3.15 in the workflows (#1040) and `ruby/setup-ruby` is v1.329.0 (#1041).
+
+### Known limits
+
+- WPCS (the WordPress standard) is not in the image, because WPCS 3.4.1 needs phpcs 3 and `drupal/coder` 9 needs phpcs 4 (#1043).
+- Rule-level `type="relative"` exclude patterns are passed to phpcs, which does not apply them to files given on the command line.
+
 ## [2.21.0] - 2026-10-09
 
 ### Added

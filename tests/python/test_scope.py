@@ -416,3 +416,34 @@ def test_rollup_does_not_merge_across_diff_boundary() -> None:
     assert len(in_diff_results) == 1, "in-diff High finding must not be collapsed"
     assert in_diff_results[0].severity == "High"
     assert len(ood_results) == 5
+
+
+def test_rollup_unions_also_reported_notes_of_all_occurrences() -> None:
+    """#1044: a rolled-up group keeps the notes of every member, not only the first."""
+    from ai_pr_review.findings.scope import rollup_repeated_findings
+
+    findings = [
+        Finding(
+            severity="High",
+            confidence=90,
+            finding="Same sniff",
+            source="phpcs",
+            file="a.php",
+            line=10 + i * 20,
+            category="lint",
+            also_reported=[f"phpstan (line {11 + i * 20}): msg{i}"],
+        )
+        for i in range(4)
+    ]
+    result = rollup_repeated_findings(findings, threshold=3)
+    assert len(result) == 1
+    assert result[0].also_reported == [f"phpstan (line {11 + i * 20}): msg{i}" for i in range(4)]
+
+
+def test_combine_also_reported_caps_and_recounts_overflow() -> None:
+    from ai_pr_review.findings.models import combine_also_reported
+
+    notes = combine_also_reported([[f"n{i}" for i in range(4)], ["n3", "(+9 more from other analyzers)", "n4", "n5", "n6"]])
+    assert notes[:5] == ["n0", "n1", "n2", "n3", "n4"]
+    assert notes[5] == "(+2 more from other analyzers)"
+

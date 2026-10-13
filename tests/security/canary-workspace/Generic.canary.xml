@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<!-- SECURITY CANARY: do not remove or modify.
+     If phpcs ever loads this file as a ruleset because a rule ref or an
+     exclude name pointed at it, the bootstrap line runs canary-bootstrap.php. -->
+<ruleset name="canary-ref-file">
+  <arg name="bootstrap" value="canary-bootstrap.php"/>
+</ruleset>
