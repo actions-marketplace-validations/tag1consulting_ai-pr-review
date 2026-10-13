@@ -1878,6 +1878,50 @@ class TestPreflightActualUnits:
         assert _preflight_actual_units([("claude-sonnet-4-6", resp)], tmp_path) == 0
 
 
+class TestContextWindowExitCode:
+    """#1056: a context-window skip exits 0 unless AI_FAIL_ON_CONTEXT_WINDOW is set.
+
+    Mirrors the context-window half of cli._run_review_async's SkipPlan branch,
+    like TestCostCeilingExitCode above.
+    """
+
+    def _exit_code(
+        self, *, is_context_window_skip: bool, fail_on_context_window: bool,
+        fail_on_cost_ceiling: bool = False, ok: bool = True,
+    ) -> int:
+        config = _make_config(
+            fail_on_context_window=fail_on_context_window,
+            fail_on_cost_ceiling=fail_on_cost_ceiling,
+        )
+        runtime = MagicMock()
+        runtime.is_context_window_skip = is_context_window_skip
+        runtime.is_cost_ceiling_skip = False
+        result = MagicMock()
+        result.ok = ok
+        if runtime.is_context_window_skip and config.fail_on_context_window and result.ok:
+            return 2
+        return 0 if result.ok else 1
+
+    def test_exits_0_by_default(self) -> None:
+        assert self._exit_code(is_context_window_skip=True, fail_on_context_window=False) == 0
+
+    def test_exits_2_when_opted_in(self) -> None:
+        assert self._exit_code(is_context_window_skip=True, fail_on_context_window=True) == 2
+
+    def test_cost_ceiling_flag_does_not_apply(self) -> None:
+        assert self._exit_code(
+            is_context_window_skip=True, fail_on_context_window=False, fail_on_cost_ceiling=True,
+        ) == 0
+
+    def test_other_skip_ignores_the_flag(self) -> None:
+        assert self._exit_code(is_context_window_skip=False, fail_on_context_window=True) == 0
+
+    def test_posting_failure_exits_1(self) -> None:
+        assert self._exit_code(
+            is_context_window_skip=True, fail_on_context_window=True, ok=False,
+        ) == 1
+
+
 class TestEmitTelemetryThinkingTokens:
     """#592: telemetry's per-agent dict must carry thinking_tokens/stop_reason
     so a consumer can alert on truncation/thinking-exhaustion without a human

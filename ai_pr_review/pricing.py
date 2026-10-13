@@ -36,6 +36,9 @@ class ModelRates:
     cache_write_rate: int = 0
     cache_read_rate: int = 0
     long_prompt: LongPromptRates | None = None
+    context_window: int = 0
+    """Maximum input tokens the model accepts (#1056). 0 means unknown, and the
+    pre-flight context-window check skips the model."""
 
 
 @dataclass
@@ -152,6 +155,7 @@ def model_pricing(model_id: str, pricing_data: list[dict[str, object]]) -> Model
                     cache_write_rate=_as_int(entry.get("cache_write_rate", 0)),
                     cache_read_rate=_as_int(entry.get("cache_read_rate", 0)),
                     long_prompt=long_prompt,
+                    context_window=_as_int(entry.get("context_window", 0)),
                 )
     return ModelRates(display_name=model_id, input_rate=0, output_rate=0)
 

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The review now skips before any LLM call when the diff does not fit the model context window (#1056).** `config/model-pricing.json` accepts an optional `context_window` (maximum input tokens) for each model. It is set for Sonnet 5.5, Opus 5.5, and Haiku 5.5, and a model without it is not checked. The engine compares the estimated input tokens plus the output cap of each agent with `AI_CONTEXT_WINDOW_MARGIN` (default `0.9`, `0` turns it off) times that window. A skip comment names the agent, the numbers, and `AI_EXCLUDE_PATTERNS` as the fix for generated files. The check runs without `AI_MAX_COST_USD`. A skip exits 0 by default, and `AI_FAIL_ON_CONTEXT_WINDOW=true` exits 2. A provider "prompt is too long" error that gets past the estimate is not yet treated as a skip.
+
 ### Fixed
 
 - **`COST_RECONCILE` delta no longer prints a wrong negative amount, and the actual now includes the pr-summarizer and issue-linker (#1055).** `format_cost` rendered a negative amount through floor division, so a delta of -$0.3070 printed as `$-1.6930`. It now prints `-$0.3070`. The actual total also left out the two preflight agents that the estimate counts. The line now adds their measured cost and logs it as `preflight_actual=`. The token table and the high-usage warning are unchanged.

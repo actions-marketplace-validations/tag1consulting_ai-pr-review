@@ -148,6 +148,17 @@ class UnpricedModelCeiling(CostCeilingExceeded):
     """
 
 
+class ContextWindowExceeded(RuntimeError):
+    """Raised when an agent's estimated prompt does not fit the model's context
+    window (#1056).
+
+    Not a subclass of ``CostCeilingExceeded`` on purpose: the cause is the size
+    of the diff, not the cost. The caller turns it into the same skip comment,
+    and ``AI_FAIL_ON_CONTEXT_WINDOW`` (not ``AI_FAIL_ON_COST_CEILING``)
+    controls its exit code. No LLM call has been made when this is raised.
+    """
+
+
 @dataclass(frozen=True)
 class AgentCostEstimate:
     """One agent's contribution to a review's pre-flight cost estimate."""
@@ -338,6 +349,45 @@ def merge_cost_estimates(*parts: CostEstimate | AgentCostEstimate) -> CostEstima
         per_agent=per_agent,
         total_cost_units=sum(a.estimated_cost_units for a in per_agent),
         any_unknown_pricing=any(a.unknown_pricing for a in per_agent),
+    )
+
+
+def check_context_window(
+    estimate: CostEstimate,
+    *,
+    pricing_data: list[dict[str, object]],
+    margin: float,
+) -> None:
+    """Raise ``ContextWindowExceeded`` if any agent's estimated tokens exceed
+    *margin* times its model's context window (#1056).
+
+    The tokens counted are the estimated input plus the output cap, because
+    the provider needs room for both. A model with no ``context_window`` in
+    the pricing file is not checked. A *margin* of 0 (or less) disables the
+    check. The estimate is the same one the cost ceiling uses, so it is
+    approximate in both directions. The margin is the allowance for that.
+    """
+    if margin <= 0:
+        return
+    worst: tuple[int, int, int, AgentCostEstimate] | None = None
+    for agent in estimate.per_agent:
+        window = model_pricing(agent.model, pricing_data).context_window if agent.model else 0
+        if window <= 0:
+            continue
+        limit = int(window * margin)
+        needed = agent.estimated_input_tokens + agent.estimated_output_tokens
+        if needed > limit and (worst is None or needed - limit > worst[0] - worst[1]):
+            worst = (needed, limit, window, agent)
+    if worst is None:
+        return
+    needed, limit, window, agent = worst
+    raise ContextWindowExceeded(
+        f"The diff is too large for the model context window. "
+        f"The {agent.agent} agent ({agent.model}) needs an estimated {needed:,} tokens "
+        f"({agent.estimated_input_tokens:,} input plus {agent.estimated_output_tokens:,} output cap). "
+        f"The limit is {limit:,} tokens ({margin:.0%} of the {window:,} token context window). "
+        f"No LLM call was made. Exclude generated files with AI_EXCLUDE_PATTERNS "
+        f"or review a smaller diff. MAX_DIFF_LINES counts lines, not tokens."
     )
 
 

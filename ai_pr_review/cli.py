@@ -344,6 +344,11 @@ async def _run_review_async(config: ReviewConfig) -> int:
         cost_ceiling_failed = (
             runtime.is_cost_ceiling_skip and resolved_cfg.fail_on_cost_ceiling and result.ok
         )
+        # #1056: a context-window skip has its own opt-in, because it is
+        # not about cost.
+        context_window_failed = (
+            runtime.is_context_window_skip and resolved_cfg.fail_on_context_window and result.ok
+        )
         # #896: a skip can now carry real findings (analyzer/SARIF, computed
         # before the ceiling check). AI_FAIL_ON_FINDINGS applies to them the
         # same way it does on a normal run -- reads the classifier's
@@ -358,12 +363,14 @@ async def _run_review_async(config: ReviewConfig) -> int:
             # exit-0 skip path -- both reported the identical outcome string.
             if cost_ceiling_failed:
                 outcome_override = "skipped_cost_ceiling_failed"
+            elif context_window_failed:
+                outcome_override = "skipped_context_window_failed"
             elif fail_on_findings_failed:
                 outcome_override = "skipped_fail_on_findings_failed"
             else:
                 outcome_override = "skipped"
             await _emit_telemetry(result, resolved_cfg, 0, outcome_override=outcome_override)
-        if cost_ceiling_failed or fail_on_findings_failed:
+        if cost_ceiling_failed or context_window_failed or fail_on_findings_failed:
             return 2
         return 0 if result.ok else 1
 
