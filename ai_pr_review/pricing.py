@@ -157,10 +157,16 @@ def model_pricing(model_id: str, pricing_data: list[dict[str, object]]) -> Model
 
 
 def format_cost(microdollars: int) -> str:
-    """Format an integer in $0.0001 units as a dollar string."""
-    whole = microdollars // 10000
-    frac = microdollars % 10000
-    return f"${whole}.{frac:04d}"
+    """Format an integer in $0.0001 units as a dollar string.
+
+    A negative value (the ``COST_RECONCILE`` delta, #1055) renders with the
+    sign in front of the dollar sign, for example ``-$0.3070``. Floor
+    division of a negative integer would otherwise render -3070 as
+    ``$-1.6930``.
+    """
+    sign = "-" if microdollars < 0 else ""
+    whole, frac = divmod(abs(microdollars), 10000)
+    return f"{sign}${whole}.{frac:04d}"
 
 
 def token_cost_units(

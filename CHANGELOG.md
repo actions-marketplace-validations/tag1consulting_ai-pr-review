@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`COST_RECONCILE` delta no longer prints a wrong negative amount, and the actual now includes the pr-summarizer and issue-linker (#1055).** `format_cost` rendered a negative amount through floor division, so a delta of -$0.3070 printed as `$-1.6930`. It now prints `-$0.3070`. The actual total also left out the two preflight agents that the estimate counts. The line now adds their measured cost and logs it as `preflight_actual=`. The token table and the high-usage warning are unchanged.
+
 ## [2.22.1] - 2026-10-12
 
 ### Fixed

@@ -37,6 +37,14 @@ def test_format_cost_zero() -> None:
     assert format_cost(0) == "$0.0000"
 
 
+def test_format_cost_negative() -> None:
+    """#1055: a negative amount keeps its magnitude and shows the sign first."""
+    assert format_cost(-3070) == "-$0.3070"
+    assert format_cost(-7200) == "-$0.7200"
+    assert format_cost(-10000) == "-$1.0000"
+    assert format_cost(-1) == "-$0.0001"
+
+
 def test_format_cost_nonzero() -> None:
     # 10000 units = $1.0000
     assert format_cost(10000) == "$1.0000"
