@@ -68,6 +68,14 @@ jobs:
 
 Reviews start on the next PR.
 
+## What's new in v2.23.0
+
+**The review skips when the diff does not fit the model context window.** Before, a very large diff went to the provider, which rejected it, and the comment said "2 failed agents". Now the review stops before any LLM call and says which agent does not fit. Use `exclude-patterns` for generated files. Set `context-window-margin: '0'` to turn the check off.
+
+**Behavior change: reported cost is higher.** The token table and the usage line now count the pr-summarizer and issue-linker, which were left out before. `token-usage-warn-usd` can fire on a run that did not fire it before.
+
+See [Version History → v2.23.0](version-history/v2.23.0) for details.
+
 ## What's new in v2.22.1
 
 **The review headline follows a dismissal.** After you dismiss a finding, the risk and the finding counts update. A review posted before this release keeps a simpler update until the next rescan.
@@ -87,18 +95,6 @@ See [Version History → v2.22.1](version-history/v2.22.1) for details.
 **A merged finding keeps both analyzer messages.** When two analyzer tools report nearby lines, the finding lists the second message as `Also reported by:`.
 
 See [Version History → v2.22.0](version-history/v2.22.0) for details.
-
-## What's new in v2.21.0
-
-**Each finding shows where its evidence came from.** A short label and the confidence score follow the finding text, for example `(corroborated by analyzer, confidence 88)`. It is display text only. Set `finding-badges: 'false'` to hide it.
-
-**Behavior change: a new analyzer checks new dependencies.** `dep-exists` asks the public registry whether each dependency that a diff adds really exists. An unknown name is a High finding, because a model can invent a package name and an attacker can register it. A High finding makes the review request changes, so a private package that the public registry does not know can block a pull request. Turn the analyzer off with `exclude-analyzers: dep-exists`.
-
-**The review comment says what it did not look at.** A short `Not reviewed:` note lists your `exclude-patterns`, the agents that did not run, and whether the review is incremental.
-
-**Behavior change: the cost estimate is about 2.2 times higher.** The estimate now uses a measured ratio of characters to tokens. A repository that sets `AI_MAX_COST_USD` can see a review skipped that passed before.
-
-See [Version History → v2.21.0](version-history/v2.21.0) for details.
 
 ## Learn more
 

@@ -1853,6 +1853,126 @@ class TestCostReconciliationLogging:
         assert "delta=" in caplog.text
 
 
+class TestPreflightAgentResults:
+    """#1055: the pr-summarizer and issue-linker usage becomes agent rows."""
+
+    def test_empty_usage_gives_no_rows(self) -> None:
+        from ai_pr_review.cli import _preflight_agent_results
+
+        assert _preflight_agent_results([]) == []
+
+    def test_rows_carry_name_model_usage_and_cap(self) -> None:
+        from ai_pr_review.cli import _preflight_agent_results
+        from ai_pr_review.llm.base import LLMResponse
+
+        resp = LLMResponse(
+            text="x", input_tokens=10_000, output_tokens=1_000,
+            cache_creation_tokens=200, cache_read_tokens=300,
+        )
+        rows = _preflight_agent_results([("pr-summarizer", "claude-sonnet-4-6", 2048, resp)])
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.name == "pr-summarizer"
+        assert row.effective_max_tokens == 2048
+        assert row.truncated is False
+        usage = row.token_log
+        assert usage is not None
+        assert (usage.input, usage.output) == (10_000, 1_000)
+        assert (usage.cache_creation, usage.cache_read) == (200, 300)
+        assert usage.model == "claude-sonnet-4-6"
+
+    def test_truncated_response_is_flagged(self) -> None:
+        from ai_pr_review.cli import _preflight_agent_results
+        from ai_pr_review.llm.base import LLMResponse
+
+        resp = LLMResponse(text="x", input_tokens=1, output_tokens=1, stop_reason="max_tokens")
+        rows = _preflight_agent_results([("issue-linker", "m", 512, resp)])
+        assert rows[0].truncated is True
+
+    def test_rows_are_priced_by_the_shared_totals(self) -> None:
+        """The rows feed the same totals the token table renders from."""
+        from ai_pr_review.cli import _preflight_agent_results
+        from ai_pr_review.llm.base import LLMResponse
+        from ai_pr_review.review.reporting import compute_token_totals
+
+        script_dir = Path(__file__).resolve().parents[2]
+        resp = LLMResponse(text="x", input_tokens=10_000, output_tokens=1_000)
+        rows = _preflight_agent_results([("pr-summarizer", "claude-sonnet-4-6", 2048, resp)])
+        totals = compute_token_totals(rows, script_dir, effective_max_tokens=0)
+        assert totals is not None
+        assert totals.cost_units > 0
+        assert totals.agent_count == 1
+
+
+class TestContextWindowSkipExitCode:
+    """#1056: a context-window skip exits 0 unless AI_FAIL_ON_CONTEXT_WINDOW is set.
+
+    These tests run the real cli._run_review_async SkipPlan branch with a mocked
+    build_review_runtime, so they fail if the context_window_failed branch or
+    the telemetry outcome is removed from cli.py.
+    """
+
+    async def _run(
+        self, tmp_path: Path, *, is_context_window_skip: bool, **config_overrides: object,
+    ) -> tuple[int, str]:
+        from ai_pr_review.cli import _run_review_async
+        from ai_pr_review.review.runtime import SkipPlan
+        from ai_pr_review.vcs.protocol import SummaryResult, VcsProvider
+
+        sink_path = tmp_path / "telemetry.jsonl"
+        config = _make_config(
+            telemetry_enabled=True,
+            telemetry_sink=f"file://{sink_path}",
+            **config_overrides,
+        )
+        provider = MagicMock(spec=VcsProvider)
+        provider.post_skip_comment.return_value = SummaryResult(
+            comment_id=1, created=True, updated=False,
+        )
+        skip_plan = SkipPlan(
+            reason="The diff is too large for the model context window.",
+            provider=provider,
+            is_context_window_skip=is_context_window_skip,
+        )
+        with patch(
+            "ai_pr_review.review.runtime.build_review_runtime",
+            new=AsyncMock(return_value=skip_plan),
+        ):
+            exit_code = await _run_review_async(config)
+        event = json.loads(sink_path.read_text().splitlines()[0])
+        return exit_code, event["outcome"]
+
+    @pytest.mark.anyio
+    async def test_exits_0_by_default(self, tmp_path: Path) -> None:
+        exit_code, outcome = await self._run(tmp_path, is_context_window_skip=True)
+        assert exit_code == 0
+        assert outcome == "skipped"
+
+    @pytest.mark.anyio
+    async def test_exits_2_when_opted_in(self, tmp_path: Path) -> None:
+        exit_code, outcome = await self._run(
+            tmp_path, is_context_window_skip=True, fail_on_context_window=True,
+        )
+        assert exit_code == 2
+        assert outcome == "skipped_context_window_failed"
+
+    @pytest.mark.anyio
+    async def test_cost_ceiling_flag_does_not_apply(self, tmp_path: Path) -> None:
+        exit_code, outcome = await self._run(
+            tmp_path, is_context_window_skip=True, fail_on_cost_ceiling=True,
+        )
+        assert exit_code == 0
+        assert outcome == "skipped"
+
+    @pytest.mark.anyio
+    async def test_other_skip_ignores_the_flag(self, tmp_path: Path) -> None:
+        exit_code, outcome = await self._run(
+            tmp_path, is_context_window_skip=False, fail_on_context_window=True,
+        )
+        assert exit_code == 0
+        assert outcome == "skipped"
+
+
 class TestEmitTelemetryThinkingTokens:
     """#592: telemetry's per-agent dict must carry thinking_tokens/stop_reason
     so a consumer can alert on truncation/thinking-exhaustion without a human

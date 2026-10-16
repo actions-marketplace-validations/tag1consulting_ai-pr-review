@@ -36,6 +36,9 @@ class ModelRates:
     cache_write_rate: int = 0
     cache_read_rate: int = 0
     long_prompt: LongPromptRates | None = None
+    context_window: int = 0
+    """Maximum input tokens the model accepts (#1056). 0 means unknown, and the
+    pre-flight context-window check skips the model."""
 
 
 @dataclass
@@ -152,15 +155,22 @@ def model_pricing(model_id: str, pricing_data: list[dict[str, object]]) -> Model
                     cache_write_rate=_as_int(entry.get("cache_write_rate", 0)),
                     cache_read_rate=_as_int(entry.get("cache_read_rate", 0)),
                     long_prompt=long_prompt,
+                    context_window=_as_int(entry.get("context_window", 0)),
                 )
     return ModelRates(display_name=model_id, input_rate=0, output_rate=0)
 
 
 def format_cost(microdollars: int) -> str:
-    """Format an integer in $0.0001 units as a dollar string."""
-    whole = microdollars // 10000
-    frac = microdollars % 10000
-    return f"${whole}.{frac:04d}"
+    """Format an integer in $0.0001 units as a dollar string.
+
+    A negative value (the ``COST_RECONCILE`` delta, #1055) renders with the
+    sign in front of the dollar sign, for example ``-$0.3070``. Floor
+    division of a negative integer would otherwise render -3070 as
+    ``$-1.6930``.
+    """
+    sign = "-" if microdollars < 0 else ""
+    whole, frac = divmod(abs(microdollars), 10000)
+    return f"{sign}${whole}.{frac:04d}"
 
 
 def token_cost_units(

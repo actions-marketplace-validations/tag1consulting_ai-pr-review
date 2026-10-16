@@ -96,6 +96,8 @@ _KNOWN_AI_VARS: frozenset[str] = frozenset(
         "AI_MAX_COST_USD",
         "AI_FAIL_ON_COST_CEILING",
         "AI_COST_CEILING_UNPRICED",
+        "AI_CONTEXT_WINDOW_MARGIN",
+        "AI_FAIL_ON_CONTEXT_WINDOW",
         # --- Structured logging ---
         "AI_LOG_FORMAT",
         "AI_LOG_LEVEL",
@@ -613,6 +615,13 @@ class ReviewConfig(BaseModel):
     # "block" skips the review before any LLM call, through the same skip
     # path as an exceeded ceiling. No effect when max_cost_usd is 0.
     cost_ceiling_unpriced: str = "warn"
+    # #1056: skip the review before any LLM call when an agent's estimated
+    # tokens (input plus output cap) exceed this fraction of the model's
+    # context window (``context_window`` in config/model-pricing.json). 0
+    # disables the check. A model with no ``context_window`` is not checked.
+    context_window_margin: float = 0.9
+    # Exit 2 instead of 0 on a context-window skip, like fail_on_cost_ceiling.
+    fail_on_context_window: bool = False
 
     # --- Slash commands + feedback loop ---
     enable_feedback_loop: bool = False
@@ -782,6 +791,15 @@ class ReviewConfig(BaseModel):
             raise ValueError(f"cost_ceiling_unpriced must be 'warn' or 'block', got {v!r}")
         return normalized
 
+    @field_validator("context_window_margin")
+    @classmethod
+    def _validate_context_window_margin(cls, v: float) -> float:
+        # Raise, not clamp: a margin above 1 would let a prompt past the
+        # window, and a typo such as 90 (meaning 90%) must not pass silently.
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(f"context_window_margin must be between 0 and 1, got {v!r}")
+        return v
+
     @field_validator("token_usage_display")
     @classmethod
     def _validate_token_usage_display(cls, v: str) -> str:
@@ -950,6 +968,8 @@ class ReviewConfig(BaseModel):
             max_cost_usd=_float("AI_MAX_COST_USD", 0.0),
             fail_on_cost_ceiling=_bool("AI_FAIL_ON_COST_CEILING"),
             cost_ceiling_unpriced=os.environ.get("AI_COST_CEILING_UNPRICED", "warn").strip() or "warn",
+            context_window_margin=_float("AI_CONTEXT_WINDOW_MARGIN", 0.9),
+            fail_on_context_window=_bool("AI_FAIL_ON_CONTEXT_WINDOW"),
             enable_feedback_loop=_bool("AI_FEEDBACK_LOOP"),
             feedback_branch=os.environ.get("AI_FEEDBACK_BRANCH", "ai-pr-review-bot"),
             feedback_max_tokens=_int("AI_FEEDBACK_MAX_TOKENS", 2048),

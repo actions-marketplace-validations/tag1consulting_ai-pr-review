@@ -9,9 +9,11 @@ import pytest
 from ai_pr_review.agents.roster import AgentSpec
 from ai_pr_review.review.cost_ceiling import (
     AgentCostEstimate,
+    ContextWindowExceeded,
     CostCeilingExceeded,
     CostEstimate,
     UnpricedModelCeiling,
+    check_context_window,
     enforce_cost_ceiling,
     estimate_preflight_agent_cost,
     estimate_review_cost,
@@ -629,3 +631,90 @@ class TestEnforceUnpricedModels:
             enforce_cost_ceiling(est, ceiling_usd=0.00001, unpriced_mode="block")
         assert not isinstance(exc.value, UnpricedModelCeiling)
         assert "exceeds" in str(exc.value)
+
+
+_WINDOW_PRICING = [
+    {
+        "patterns": ["windowed-model"],
+        "display_name": "Windowed Model",
+        "input_rate": 100_000_000,
+        "output_rate": 200_000_000,
+        "context_window": 1000,
+    },
+    {
+        "patterns": ["no-window-model"],
+        "display_name": "No Window Model",
+        "input_rate": 100_000_000,
+        "output_rate": 200_000_000,
+    },
+]
+
+
+def _est(agent: str, model: str, in_tokens: int, out_tokens: int) -> AgentCostEstimate:
+    return AgentCostEstimate(
+        agent=agent, model=model,
+        estimated_input_tokens=in_tokens, estimated_output_tokens=out_tokens,
+        estimated_cost_units=0, unknown_pricing=False,
+    )
+
+
+def _estimate(*agents: AgentCostEstimate) -> CostEstimate:
+    return CostEstimate(per_agent=tuple(agents), total_cost_units=0, any_unknown_pricing=False)
+
+
+class TestCheckContextWindow:
+    """#1056: skip before any LLM call when the prompt cannot fit the window."""
+
+    def test_under_the_limit_passes(self) -> None:
+        est = _estimate(_est("a", "windowed-model", 800, 50))  # 850 <= 900
+        check_context_window(est, pricing_data=_WINDOW_PRICING, margin=0.9)
+
+    def test_exactly_at_the_limit_passes(self) -> None:
+        est = _estimate(_est("a", "windowed-model", 850, 50))  # 900 == 900
+        check_context_window(est, pricing_data=_WINDOW_PRICING, margin=0.9)
+
+    def test_over_the_limit_raises_with_numbers_and_advice(self) -> None:
+        est = _estimate(_est("code-reviewer", "windowed-model", 900, 50))  # 950 > 900
+        with pytest.raises(ContextWindowExceeded) as exc:
+            check_context_window(est, pricing_data=_WINDOW_PRICING, margin=0.9)
+        msg = str(exc.value)
+        assert "code-reviewer" in msg
+        assert "950" in msg and "900" in msg and "1,000" in msg
+        assert "AI_EXCLUDE_PATTERNS" in msg
+        assert "MAX_DIFF_LINES" in msg
+
+    def test_counts_the_output_cap_not_only_the_input(self) -> None:
+        # Input alone fits (800 <= 900). Input plus the 200 token cap does not.
+        est = _estimate(_est("a", "windowed-model", 800, 200))
+        with pytest.raises(ContextWindowExceeded):
+            check_context_window(est, pricing_data=_WINDOW_PRICING, margin=0.9)
+
+    def test_model_without_a_window_is_not_checked(self) -> None:
+        est = _estimate(_est("a", "no-window-model", 10_000_000, 0))
+        check_context_window(est, pricing_data=_WINDOW_PRICING, margin=0.9)
+
+    def test_unknown_model_is_not_checked(self) -> None:
+        est = _estimate(_est("a", "other-model", 10_000_000, 0))
+        check_context_window(est, pricing_data=_WINDOW_PRICING, margin=0.9)
+
+    def test_empty_model_id_is_not_checked(self) -> None:
+        est = _estimate(_est("a", "", 10_000_000, 0))
+        check_context_window(est, pricing_data=_WINDOW_PRICING, margin=0.9)
+
+    def test_margin_zero_disables_the_check(self) -> None:
+        est = _estimate(_est("a", "windowed-model", 10_000_000, 0))
+        check_context_window(est, pricing_data=_WINDOW_PRICING, margin=0.0)
+
+    def test_reports_the_agent_that_overflows_the_most(self) -> None:
+        est = _estimate(
+            _est("small-over", "windowed-model", 905, 0),
+            _est("big-over", "windowed-model", 5000, 0),
+            _est("fits", "windowed-model", 100, 0),
+        )
+        with pytest.raises(ContextWindowExceeded) as exc:
+            check_context_window(est, pricing_data=_WINDOW_PRICING, margin=0.9)
+        assert "big-over" in str(exc.value)
+
+    def test_is_not_a_cost_ceiling_exception(self) -> None:
+        """The cause is the diff size, so cost-ceiling handlers must not catch it."""
+        assert not issubclass(ContextWindowExceeded, CostCeilingExceeded)

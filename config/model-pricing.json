@@ -2,6 +2,7 @@
   {
     "patterns": ["claude-sonnet-5-5(?!\\d)(?![-.]\\d(?!\\d))", "claude-sonnet-5\\.5(?!\\d)(?![-.]\\d(?!\\d))"],
     "display_name": "Sonnet 5.5",
+    "context_window": 1000000,
     "input_rate": 2000000,
     "output_rate": 10000000,
     "cache_write_rate": 2500000,
@@ -26,6 +27,7 @@
   {
     "patterns": ["claude-opus-5-5(?!\\d)(?![-.]\\d(?!\\d))", "claude-opus-5\\.5(?!\\d)(?![-.]\\d(?!\\d))"],
     "display_name": "Opus 5.5",
+    "context_window": 1000000,
     "input_rate": 4000000,
     "output_rate": 20000000,
     "cache_write_rate": 5000000,
@@ -58,6 +60,7 @@
   {
     "patterns": ["claude-haiku-5-5(?!\\d)(?![-.]\\d(?!\\d))", "claude-haiku-5\\.5(?!\\d)(?![-.]\\d(?!\\d))"],
     "display_name": "Haiku 5.5",
+    "context_window": 1000000,
     "input_rate": 100000,
     "output_rate": 500000,
     "cache_write_rate": 125000,

@@ -476,6 +476,30 @@ inputs:
     required: false
     default: 'warn'
 
+  context-window-margin:
+    description: >
+      Skip the review before any LLM call when an agent's estimated prompt
+      (input tokens plus the output cap) is larger than this fraction of the
+      model's context window. The window comes from `context_window` in
+      config/model-pricing.json, which is set for Sonnet 5.5, Opus 5.5 and
+      Haiku 5.5. A model without it is not checked. A skip comment names the
+      agent and the numbers. Use a number from 0 to 1. '0' turns the check
+      off. The check runs without max-cost-usd. max-diff-lines counts lines,
+      not tokens, so use exclude-patterns for generated files. Requires image
+      2.23.0 or later (older images ignore it).
+    required: false
+    default: '0.9'
+
+  fail-on-context-window:
+    description: >
+      When true, exit with code 2 on a context-window skip. When false
+      (default), the run still stops before any LLM call and posts a skip
+      comment, but exits 0. Independent of fail-on-cost-ceiling and
+      fail-on-findings. Requires image 2.23.0 or later (older images ignore
+      it).
+    required: false
+    default: 'false'
+
 runs:
   using: composite
   steps:
@@ -585,5 +609,7 @@ runs:
         AI_MAX_COST_USD: ${{ inputs.max-cost-usd }}
         AI_FAIL_ON_COST_CEILING: ${{ inputs.fail-on-cost-ceiling }}
         AI_COST_CEILING_UNPRICED: ${{ inputs.cost-ceiling-unpriced }}
+        AI_CONTEXT_WINDOW_MARGIN: ${{ inputs.context-window-margin }}
+        AI_FAIL_ON_CONTEXT_WINDOW: ${{ inputs.fail-on-context-window }}
         AI_PR_REVIEW_SCRIPT_DIR: ${{ github.action_path }}
       run: python3 -m ai_pr_review review
