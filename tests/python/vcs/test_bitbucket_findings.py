@@ -933,3 +933,55 @@ def test_id_map_marker_dropped_when_too_large_logs_and_records_error(caplog) -> 
     )
     assert any("too large" in msg for msg in caplog.messages), "must be logged, not silent"
     assert any("too large" in e for e in prov._errors), "must be recorded in provider._errors"
+
+
+def _fid_for(body: str, text: str) -> int:
+    match = re.search(r"\*\*\[F(\d+)\]\*\*[^\n]*" + re.escape(text), body)
+    assert match is not None, f"no F-ID bullet for {text!r} in {body!r}"
+    return int(match.group(1))
+
+
+def test_f_id_not_reused_after_a_run_with_no_findings() -> None:
+    """The id-map marker used to hold only the current run's findings, so a
+    run with zero findings wrote an empty map and the next run restarted at
+    F1. A verdict command still waiting on the old F1 could then land on an
+    unrelated new finding."""
+    finding_a = Finding(
+        severity="Medium", confidence=80, finding="first problem",
+        source="code-reviewer", file="a.py", line=5,
+    )
+    finding_b = Finding(
+        severity="High", confidence=90, finding="second problem",
+        source="code-reviewer", file="b.py", line=9,
+    )
+
+    run1 = _run_post_findings_cycle(_first_run_body(""), [finding_a])
+    assert _fid_for(run1, "first problem") == 1
+    run2 = _run_post_findings_cycle(run1, [])
+    run3 = _run_post_findings_cycle(run2, [finding_b])
+
+    assert _fid_for(run3, "second problem") == 2, "an F-ID must never be reused"
+
+
+def test_f_id_stays_resolvable_after_its_finding_leaves_the_run() -> None:
+    """An incremental run that does not report a finding again must not drop
+    that finding's F-ID from the marker. Without this, a verdict command that
+    could not be checked on one run gets 'F<n> was not found' on the next."""
+    from ai_pr_review.vcs._finding_ids import fingerprint, fingerprint_for_finding_id
+
+    finding_a = Finding(
+        severity="Medium", confidence=80, finding="first problem",
+        source="code-reviewer", file="a.py", line=5,
+    )
+    finding_b = Finding(
+        severity="High", confidence=90, finding="second problem",
+        source="code-reviewer", file="b.py", line=9,
+    )
+
+    run1 = _run_post_findings_cycle(_first_run_body(""), [finding_a, finding_b])
+    f_id_a = _fid_for(run1, "first problem")
+    run2 = _run_post_findings_cycle(run1, [finding_b])  # A not reported again
+
+    assert fingerprint_for_finding_id([run2], f_id_a) == fingerprint(finding_a)
+    run3 = _run_post_findings_cycle(run2, [finding_a, finding_b])
+    assert _fid_for(run3, "first problem") == f_id_a, "a returning finding keeps its F-ID"

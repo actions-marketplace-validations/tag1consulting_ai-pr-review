@@ -606,3 +606,41 @@ def test_ends_body_section_shared_by_both_scanners() -> None:
     # not have been picked up as a second finding by either.
     assert 99 not in classified
     assert len(classified) == 1
+
+
+class TestMergeIdMapsForPersistence:
+    def test_keeps_prior_entries_missing_from_current(self) -> None:
+        from ai_pr_review.vcs._finding_ids import merge_id_maps_for_persistence
+
+        merged = merge_id_maps_for_persistence({"a": 1, "b": 2}, {"b": 2, "c": 3})
+        assert merged == {"a": 1, "b": 2, "c": 3}
+
+    def test_empty_current_keeps_everything(self) -> None:
+        from ai_pr_review.vcs._finding_ids import merge_id_maps_for_persistence
+
+        assert merge_id_maps_for_persistence({"a": 1, "b": 2}, {}) == {"a": 1, "b": 2}
+
+    def test_over_budget_drops_lowest_ids_first_and_keeps_current(self) -> None:
+        from ai_pr_review.vcs._finding_ids import merge_id_maps_for_persistence
+
+        prior = {f"fp-{i}-{'x' * 40}": i for i in range(1, 11)}
+        current = {"now": 11}
+        merged = merge_id_maps_for_persistence(prior, current, max_carried_bytes=200)
+
+        assert merged["now"] == 11
+        carried_ids = sorted(v for k, v in merged.items() if k != "now")
+        assert carried_ids, "some carried entries must remain"
+        assert carried_ids[-1] == 10, "the highest carried ID must stay"
+        assert 1 not in carried_ids, "the lowest ID goes first"
+
+    def test_highest_prior_id_is_never_dropped_even_with_zero_budget(self) -> None:
+        from ai_pr_review.vcs._finding_ids import merge_id_maps_for_persistence
+
+        prior = {"a": 1, "b": 2, "c": 7}
+        merged = merge_id_maps_for_persistence(prior, {}, max_carried_bytes=0)
+        assert max(merged.values()) == 7
+
+    def test_no_prior_returns_current(self) -> None:
+        from ai_pr_review.vcs._finding_ids import merge_id_maps_for_persistence
+
+        assert merge_id_maps_for_persistence({}, {"a": 1}) == {"a": 1}

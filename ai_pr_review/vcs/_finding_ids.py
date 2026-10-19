@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import hashlib
 import html as _html
+import json
 import logging
 import re
 from collections.abc import Mapping, Sequence
@@ -487,3 +488,44 @@ def assemble_id_map(
             next_id += 1
 
     return result
+
+
+# Bytes of JSON payload the persisted id-map may use for entries carried over
+# from earlier runs. A Bitbucket summary comment has one 32 KB body that also
+# holds the findings, so the carried part needs its own small budget.
+_MAX_CARRIED_ID_MAP_BYTES: Final[int] = 8_000
+
+
+def merge_id_maps_for_persistence(
+    prior: Mapping[str, int],
+    current: Mapping[str, int],
+    *,
+    max_carried_bytes: int = _MAX_CARRIED_ID_MAP_BYTES,
+) -> dict[str, int]:
+    """Return the id-map to write into the comment for the next run.
+
+    Bitbucket keeps one summary comment and rewrites it every run, so the map
+    written now is the only record the next run has. A map with only the
+    current findings loses the ID of any finding that an incremental run did
+    not report again. After a run with no findings the map is empty and the
+    next run starts again at F1.
+
+    Entries in *current* always stay. Entries in *prior* that are not in
+    *current* stay while they fit in *max_carried_bytes* of JSON. The lowest
+    IDs are dropped first, and the entry with the highest ID is never dropped,
+    so ``max(ids) + 1`` can never fall and an ID is never used again.
+    """
+    carried = {fp: fid for fp, fid in prior.items() if fp not in current}
+    top_fp = max(prior, key=lambda fp: prior[fp], default=None)
+
+    def _size(entries: Mapping[str, int]) -> int:
+        return len(json.dumps(entries, separators=(",", ":")).encode("utf-8"))
+
+    for fp in sorted(carried, key=lambda key: carried[key]):
+        if _size(carried) <= max_carried_bytes or len(carried) <= 1:
+            break
+        if fp == top_fp:
+            continue
+        del carried[fp]
+
+    return {**carried, **current}

@@ -55,7 +55,11 @@ from ai_pr_review.vcs._body import (
 )
 from ai_pr_review.vcs._canonical import classify
 from ai_pr_review.vcs._code_insights import post_code_insights
-from ai_pr_review.vcs._finding_ids import assemble_id_map, fingerprint
+from ai_pr_review.vcs._finding_ids import (
+    assemble_id_map,
+    fingerprint,
+    merge_id_maps_for_persistence,
+)
 from ai_pr_review.vcs._inline import partition_findings
 from ai_pr_review.vcs._stale import is_owned_by_us
 from ai_pr_review.vcs._upsert import advance_sha_marker, upsert_comment
@@ -658,6 +662,13 @@ class BitbucketProvider:
         id_map = assemble_id_map(
             [existing_body] if existing_body else [], list(findings)
         )
+        # What gets written back is wider than what this run renders: the
+        # comment is rewritten every run, so an ID dropped here is gone for
+        # the next run. Without the carry-over, an incremental run that does
+        # not report a finding again makes a waiting verdict command for it
+        # fail with "not found", and a run with no findings restarts the
+        # numbering at F1.
+        persisted_id_map = merge_id_maps_for_persistence(prior_id_map, id_map)
 
         # #894 (root-cause follow-up to #874's narrower fix): `keep` is now
         # guaranteed bot-authored by `_list_summary_comments()` itself (or
@@ -1000,7 +1011,7 @@ class BitbucketProvider:
         # silently drop the marker and renumber every F-ID next cycle.
         id_map_marker = ""
         try:
-            id_map_marker = build_id_map_marker(id_map, hidden=True)
+            id_map_marker = build_id_map_marker(persisted_id_map, hidden=True)
         except Exception as exc:  # noqa: BLE001
             # Logged (not just appended to self._errors): orchestrate.py never
             # reads this provider's _errors list for a normal review run
