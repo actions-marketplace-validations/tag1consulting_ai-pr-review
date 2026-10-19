@@ -58,7 +58,7 @@ from ai_pr_review.vcs._code_insights import post_code_insights
 from ai_pr_review.vcs._finding_ids import (
     assemble_id_map,
     fingerprint,
-    merge_id_maps_for_persistence,
+    id_map_persistence_variants,
 )
 from ai_pr_review.vcs._inline import partition_findings
 from ai_pr_review.vcs._stale import is_owned_by_us
@@ -668,7 +668,6 @@ class BitbucketProvider:
         # not report a finding again makes a waiting verdict command for it
         # fail with "not found", and a run with no findings restarts the
         # numbering at F1.
-        persisted_id_map = merge_id_maps_for_persistence(prior_id_map, id_map)
 
         # #894 (root-cause follow-up to #874's narrower fix): `keep` is now
         # guaranteed bot-authored by `_list_summary_comments()` itself (or
@@ -1011,7 +1010,15 @@ class BitbucketProvider:
         # silently drop the marker and renumber every F-ID next cycle.
         id_map_marker = ""
         try:
-            id_map_marker = build_id_map_marker(persisted_id_map, hidden=True)
+            # Largest carry first. Fall back to a smaller one before the
+            # drop below, because dropping the marker restarts the numbering.
+            for persisted_id_map in id_map_persistence_variants(prior_id_map, id_map):
+                id_map_marker = build_id_map_marker(persisted_id_map, hidden=True)
+                if (
+                    len(id_map_marker.encode("utf-8")) + 2
+                    <= _MAX_BITBUCKET_BODY_SIZE - _MIN_BODY_BYTES
+                ):
+                    break
         except Exception as exc:  # noqa: BLE001
             # Logged (not just appended to self._errors): orchestrate.py never
             # reads this provider's _errors list for a normal review run
@@ -1920,22 +1927,42 @@ def _post_summary_impl(
     existing_list = provider._list_summary_comments()
     if existing_list:
         prior_body = _comment_body(existing_list[0])
-        carry_forward = ""
         prior_id_map = extract_id_map(prior_body)
-        if prior_id_map:
-            carry_forward += _hidden_marker_separator(
-                body + carry_forward
-            ) + build_id_map_marker(prior_id_map, hidden=True)
         prior_verdicts = extract_verdicts(prior_body)
-        if prior_verdicts:
-            carry_forward += _hidden_marker_separator(
-                body + carry_forward
-            ) + build_verdicts_marker(prior_verdicts, hidden=True)
         prior_acks = extract_acks(prior_body)
-        if prior_acks:
-            carry_forward += _hidden_marker_separator(
-                body + carry_forward
-            ) + build_acks_marker(sorted(prior_acks))
+
+        def _carry(id_map_to_carry: dict[str, int]) -> str:
+            carried = ""
+            if id_map_to_carry:
+                carried += _hidden_marker_separator(
+                    body + carried
+                ) + build_id_map_marker(id_map_to_carry, hidden=True)
+            if prior_verdicts:
+                carried += _hidden_marker_separator(
+                    body + carried
+                ) + build_verdicts_marker(prior_verdicts, hidden=True)
+            if prior_acks:
+                carried += _hidden_marker_separator(
+                    body + carried
+                ) + build_acks_marker(sorted(prior_acks))
+            return carried
+
+        # Try the full earlier id-map first, then smaller ones, before the
+        # check below drops all three markers. Dropping the id-map restarts
+        # the numbering and loses every waiting F<n>.
+        carry_forward = ""
+        for id_map_variant in id_map_persistence_variants(prior_id_map, {}):
+            carry_forward = _carry(id_map_variant)
+            if len((body + carry_forward).encode("utf-8")) <= _MAX_BITBUCKET_BODY_SIZE:
+                break
+        if prior_id_map and id_map_variant != prior_id_map:
+            _log.warning(
+                "bitbucket: carried-forward id-map reduced from %d to %d entries "
+                "to fit the summary comment for %s/%s PR #%s",
+                len(prior_id_map), len(id_map_variant),
+                provider.config.workspace, provider.config.repo_slug,
+                provider.config.pr_id,
+            )
         if carry_forward:
             if len((body + carry_forward).encode("utf-8")) <= _MAX_BITBUCKET_BODY_SIZE:
                 body += carry_forward

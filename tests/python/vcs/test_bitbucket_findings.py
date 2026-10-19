@@ -985,3 +985,50 @@ def test_f_id_stays_resolvable_after_its_finding_leaves_the_run() -> None:
     assert fingerprint_for_finding_id([run2], f_id_a) == fingerprint(finding_a)
     run3 = _run_post_findings_cycle(run2, [finding_a, finding_b])
     assert _fid_for(run3, "first problem") == f_id_a, "a returning finding keeps its F-ID"
+
+
+def test_carried_id_entries_shrink_before_the_marker_is_dropped() -> None:
+    """The current findings fit in the marker alone, but not together with a
+    full set of earlier entries. The marker must shrink the carried part and
+    stay. If it were dropped, the next run would restart at F1."""
+    import json
+
+    from ai_pr_review.vcs._finding_ids import fingerprint
+    from ai_pr_review.vcs.marker import build_id_map_marker, extract_id_map
+
+    long_path = "src/" + ("a" * 900) + ".py"
+    findings = [
+        Finding(
+            severity="Low", confidence=60, finding=f"nit {i}",
+            source="code-reviewer", file=long_path, line=i + 1,
+        )
+        for i in range(20)
+    ]
+    prior = {f"code-reviewer|old/{'b' * 150}_{i}.py|{i}|abc123": i for i in range(1, 60)}
+    existing_body = (
+        _first_run_body("") + "\n\n" + build_id_map_marker(prior, hidden=True)
+    )
+    captured: list[dict] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "GET":
+            return httpx.Response(
+                200, json={"values": [{"id": 42, "content": {"raw": existing_body}}]}
+            )
+        if req.method == "PUT":
+            captured.append(json.loads(req.content))
+            return httpx.Response(200, json={"id": 42})
+        return httpx.Response(404)
+
+    prov = _make_provider(handler)
+    result = prov.post_findings(
+        findings, DiffContext(diff_text="", head_sha=_HEAD), event="COMMENT"
+    )
+    assert result.ok
+
+    written = extract_id_map(captured[0]["content"]["raw"])
+    assert written, "the marker must stay when the current findings fit alone"
+    for finding in findings:
+        assert fingerprint(finding) in written
+    assert max(written.values()) >= 60, "numbering must continue past the earlier IDs"
+    assert len(written) < len(prior) + len(findings), "the carried part must shrink"

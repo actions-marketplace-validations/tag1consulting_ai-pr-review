@@ -51,7 +51,7 @@ import html as _html
 import json
 import logging
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, Final
 
 from ai_pr_review.findings.models import Finding
@@ -529,3 +529,24 @@ def merge_id_maps_for_persistence(
         del carried[fp]
 
     return {**carried, **current}
+
+
+# Budgets for the carried part, largest first. A caller that has to fit the
+# marker into a small space tries each in turn. The last one keeps only the
+# current findings and the highest earlier ID, so numbering still never
+# restarts.
+_CARRY_BUDGETS: Final[tuple[int, ...]] = (_MAX_CARRIED_ID_MAP_BYTES, 2_000, 0)
+
+
+def id_map_persistence_variants(
+    prior: Mapping[str, int], current: Mapping[str, int]
+) -> Iterator[dict[str, int]]:
+    """Yield id-maps to persist, from the one that keeps most to the one that
+    keeps least. Each step is the result of ``merge_id_maps_for_persistence``
+    at a smaller carry budget, and repeated results are skipped."""
+    previous: dict[str, int] | None = None
+    for budget in _CARRY_BUDGETS:
+        candidate = merge_id_maps_for_persistence(prior, current, max_carried_bytes=budget)
+        if candidate != previous:
+            yield candidate
+        previous = candidate
