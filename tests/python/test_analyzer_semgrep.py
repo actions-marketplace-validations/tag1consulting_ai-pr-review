@@ -223,6 +223,23 @@ class TestRunSemgrepFindings:
         findings = self._run_with_check_id(tmp_path, check_id, {"category": "security"})
         assert findings[0].category == "injection"
 
+    @pytest.mark.parametrize(
+        "check_id",
+        [
+            "go.lang.security.audit.crypto.use_of_weak_crypto.use-of-md5",
+            "go.lang.security.audit.crypto.math_random.math-random-used",
+            "python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5",
+            "javascript.lang.security.audit.weak-hash.sha1-hash",
+        ],
+    )
+    def test_category_maps_weak_crypto_rules_to_crypto(self, tmp_path: Path, check_id: str) -> None:
+        findings = self._run_with_check_id(tmp_path, check_id, {"category": "security"})
+        assert findings[0].category == "crypto"
+
+    def test_category_md5_needs_whole_token(self, tmp_path: Path) -> None:
+        findings = self._run_with_check_id(tmp_path, "python.lang.md5ification-config")
+        assert findings[0].category == "other"
+
     def test_category_exec_use_needs_whole_token(self, tmp_path: Path) -> None:
         findings = self._run_with_check_id(tmp_path, "python.lang.flexec-user-config")
         assert findings[0].category == "other"

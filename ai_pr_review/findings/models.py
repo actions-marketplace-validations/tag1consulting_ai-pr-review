@@ -18,13 +18,14 @@ JudgeVerdict = Literal["keep", "downrank"]
 # it runs before pydantic's type check and coerces any unknown/missing input
 # to "other" ahead of time, so the Literal type never sees an invalid value to
 # reject. CATEGORIES is derived from Category via get_args() so there is
-# exactly one place that lists the 11 values; the tuple form is what
+# exactly one place that lists the values; the tuple form is what
 # _normalise_category checks membership against.
 Category = Literal[
     "authz",
     "injection",
     "dependency-cve",
     "secret",
+    "crypto",
     "architecture-coupling",
     "test-gap",
     "edge-case",

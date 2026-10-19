@@ -159,7 +159,7 @@ so findings are preserved even if the response is truncated:
 ```
 `severity` must be exactly one of: `Critical`, `High`, `Medium`, `Low`.
 `confidence` must be an integer 0-100. Only include findings with confidence >= 75.
-`category` must be exactly one of: `authz`, `injection`, `dependency-cve`, `secret`,
+`category` must be exactly one of: `authz`, `injection`, `dependency-cve`, `secret`, `crypto`,
 `architecture-coupling`, `test-gap`, `edge-case`, `observability`, `docs`, `lint`, `other`.
 Use `other` if none fit.
 `source` must be exactly `"adversarial-general"`.

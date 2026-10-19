@@ -28,6 +28,8 @@ from pathlib import Path
 
 import pytest
 
+from ai_pr_review.findings.models import CATEGORIES
+
 PROMPTS_DIR = Path(__file__).resolve().parents[2] / "prompts"
 
 # Every prompt in this engine backs a tool-less HTTP call. None of these
@@ -114,3 +116,30 @@ def test_no_severity_derived_from_confidence(filename: str) -> None:
         "harm-based severity definition and letting a confidently-identified "
         "but harmless finding reach a level that blocks the merge (#798)"
     )
+
+
+# The prompts that carry their own copy of the `category` list. code-reviewer.md
+# and silent-failure-hunter.md rely on _trailer-findings.md alone.
+_CATEGORY_LIST_PROMPTS = (
+    "_trailer-findings.md",
+    "adversarial-general.md",
+    "architecture-reviewer.md",
+    "blind-hunter.md",
+    "edge-case-hunter.md",
+    "security-reviewer.md",
+)
+
+
+@pytest.mark.parametrize("filename", _CATEGORY_LIST_PROMPTS)
+def test_category_list_names_every_category(filename: str) -> None:
+    """A category the model is not told about is never chosen. Adding one to
+    findings/models.py must reach every prompt that lists the categories (#1076)."""
+    content = (PROMPTS_DIR / filename).read_text()
+    missing = [c for c in CATEGORIES if f"`{c}`" not in content]
+    assert not missing, f"{filename} does not list the categories {missing}"
+
+
+def test_security_reviewer_routes_crypto_findings_to_crypto_category() -> None:
+    content = (PROMPTS_DIR / "security-reviewer.md").read_text()
+    section = content.split("### Cryptographic Issues", 1)[1].split("###", 1)[0]
+    assert "`crypto`" in section

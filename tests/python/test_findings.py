@@ -153,6 +153,17 @@ def test_extract_findings_valid_category_round_trips() -> None:
     assert findings[0].to_dict()["category"] == "secret"
 
 
+def test_extract_findings_crypto_category_round_trips() -> None:
+    output = """
+```json-findings
+[{"severity": "High", "confidence": 80, "finding": "md5 token", "category": "crypto"}]
+```
+"""
+    findings = extract_findings(output, "agent")
+    assert findings[0].category == "crypto"
+    assert findings[0].to_dict()["category"] == "crypto"
+
+
 @pytest.mark.parametrize("raw_category", [42, None, True, ["secret"], {"a": 1}])
 def test_finding_non_string_category_normalises_to_other(raw_category: object) -> None:
     """A non-string category (number, null, bool, list, dict) must fall back to

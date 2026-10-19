@@ -54,6 +54,8 @@ assessments than surface-level pattern recognition.
 - Insecure deserialization of untrusted input
 
 ### Cryptographic Issues
+Report every finding in this section with `category` set to `crypto`.
+
 - Weak or deprecated algorithms (MD5, SHA1 for integrity, DES, RC4, ECB mode)
 - AES ECB mode specifically (`AES.MODE_ECB`, `modes.ECB`, `Cipher.MODE_ECB`)
 - Hardcoded cryptographic keys or IVs
@@ -201,8 +203,9 @@ so findings are preserved even if the response is truncated:
 
 `severity` must be exactly one of: `Critical`, `High`, `Medium`, `Low`.
 `confidence` must be an integer 0-100. Only include findings with confidence >= 75.
-`category` must be exactly one of: `authz`, `injection`, `dependency-cve`, `secret`,
+`category` must be exactly one of: `authz`, `injection`, `dependency-cve`, `secret`, `crypto`,
 `architecture-coupling`, `test-gap`, `edge-case`, `observability`, `docs`, `lint`, `other`.
+Use `crypto` for weak hashes, weak or predictable randomness, and insecure token or key handling.
 Use `other` if none fit.
 `source` must be exactly `"security-reviewer"`.
 If no findings, emit an empty array: `[]`
