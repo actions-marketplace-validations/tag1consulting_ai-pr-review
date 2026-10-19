@@ -143,3 +143,22 @@ def test_security_reviewer_routes_crypto_findings_to_crypto_category() -> None:
     content = (PROMPTS_DIR / "security-reviewer.md").read_text()
     section = content.split("### Cryptographic Issues", 1)[1].split("###", 1)[0]
     assert "`crypto`" in section
+
+
+@pytest.mark.parametrize("filename", _CATEGORY_LIST_PROMPTS)
+def test_embedded_schema_names_impact_and_trigger(filename: str) -> None:
+    """The example `json-findings` line is the schema the model copies (#1078)."""
+    lines = [
+        line
+        for line in (PROMPTS_DIR / filename).read_text().splitlines()
+        if line.startswith("[{") and '"remediation"' in line
+    ]
+    assert lines, f"{filename} has no json-findings example line"
+    for line in lines:
+        assert '"impact"' in line and '"trigger"' in line, f"{filename}: {line[:80]}"
+
+
+def test_trailer_asks_for_one_kind_of_defect_per_finding() -> None:
+    content = (PROMPTS_DIR / "_trailer-findings.md").read_text()
+    assert "Put one kind of defect in each finding" in content
+    assert "Do not move text from `finding` into `impact`" in content

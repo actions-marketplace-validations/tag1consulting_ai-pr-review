@@ -250,6 +250,13 @@ def _collapse_cluster(cluster: list[Finding]) -> Finding:
                 all_sources.append(s)
 
     update: dict[str, object] = {"sources": sorted(all_sources)}
+    # impact and trigger come from agents only. When an analyzer finding wins
+    # the headline, keep the text of the first member that has one (#1078).
+    for detail in ("impact", "trigger"):
+        if not getattr(best, detail):
+            value = next((getattr(m, detail) for m in cluster if getattr(m, detail)), "")
+            if value:
+                update[detail] = value
     also_reported = _also_reported_notes(cluster, best)
     if also_reported:
         update["also_reported"] = also_reported

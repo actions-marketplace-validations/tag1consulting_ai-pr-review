@@ -663,8 +663,8 @@ def test_semgrep_rollup_keeps_input_order_and_first_slot() -> None:
 def test_semgrep_rollup_keeps_impact_and_trigger_empty() -> None:
     """Agents set impact and trigger. Analyzer groups have none to reconcile."""
     result = rollup_repeated_findings([_semgrep(31), _semgrep(65)])
-    assert getattr(result[0], "impact", "") == ""
-    assert getattr(result[0], "trigger", "") == ""
+    assert result[0].impact == ""
+    assert result[0].trigger == ""
 
 
 def test_non_semgrep_analyzer_still_needs_more_than_the_global_threshold() -> None:

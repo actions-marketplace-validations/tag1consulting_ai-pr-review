@@ -2874,6 +2874,7 @@ def _build_inline_comment_body(
     from ai_pr_review.vcs._body import (
         also_reported_notes,
         badge_suffix,
+        detail_lines,
         format_source_tag,
         sanitize_bullet_text,
         severity_icon,
@@ -2886,6 +2887,7 @@ def _build_inline_comment_body(
     id_token = f" **[F{finding_id}]**" if finding_id is not None else ""
     header = f"{icon} **[{f.severity}]**{id_token} {tag} {sanitize_bullet_text(f.finding)}{badge_suffix(f)}".strip()
     parts = [header]
+    parts.extend(f"\n**{label}:** {text}" for label, text in detail_lines(f))
     if f.remediation:
         parts.append(f"\n**Remediation:** {sanitize_bullet_text(f.remediation)}")
     parts.extend(f"\n**Also reported by:** {note}" for note in also_reported_notes(f))

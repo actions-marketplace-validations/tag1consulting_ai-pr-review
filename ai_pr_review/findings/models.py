@@ -36,6 +36,9 @@ Category = Literal[
 ]
 CATEGORIES: tuple[str, ...] = get_args(Category)
 
+# Longest `impact` or `trigger` text that a Finding keeps (#1078).
+MAX_DETAIL_CHARS = 300
+
 
 MAX_ALSO_REPORTED = 5
 MAX_ALSO_REPORTED_STORED = 100
@@ -94,6 +97,12 @@ class Finding(BaseModel):
     line: int | None = Field(default=None, ge=1)
     start_line: int | None = Field(default=None, ge=1)
     remediation: str = ""
+    # Optional text from the agent (#1078). `impact` says who is harmed and
+    # how, in one sentence. `trigger` gives a concrete input or call that
+    # reaches the defect. They are display text only: neither one enters the
+    # fingerprint, the clustering, the judge payload or any approval decision.
+    impact: str = ""
+    trigger: str = ""
     suggested_code: str = ""
     sources: list[str] = Field(default_factory=list)
     # cve-check only: "dependency-check" tag required in the output.
@@ -173,6 +182,19 @@ class Finding(BaseModel):
             return v
         return "other"
 
+    @field_validator("impact", "trigger", mode="before")
+    @classmethod
+    def _normalise_detail(cls, v: object) -> object:
+        # Permissive like _normalise_category: a missing or odd value must never
+        # drop the finding. A non-string becomes empty, and a long string is cut
+        # so one verbose agent cannot fill a comment.
+        if not isinstance(v, str):
+            return ""
+        text = " ".join(v.split())
+        if len(text) > MAX_DETAIL_CHARS:
+            text = text[: MAX_DETAIL_CHARS - 1] + "…"
+        return text
+
     @model_validator(mode="after")
     def _populate_sources(self) -> Finding:
         if self.source and not self.sources:
@@ -194,6 +216,10 @@ class Finding(BaseModel):
             d["line"] = self.line
         if self.start_line is not None:
             d["start_line"] = self.start_line
+        if self.impact:
+            d["impact"] = self.impact
+        if self.trigger:
+            d["trigger"] = self.trigger
         if self.remediation:
             d["remediation"] = self.remediation
         if self.suggested_code:

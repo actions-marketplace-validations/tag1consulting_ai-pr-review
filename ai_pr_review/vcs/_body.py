@@ -351,6 +351,20 @@ def badge_suffix(finding: Finding) -> str:
     return f" _({sanitize_bullet_text(finding_badge(finding))})_"
 
 
+def detail_lines(finding: Finding) -> list[tuple[str, str]]:
+    """Return the ``(label, text)`` pairs for a finding's impact and trigger (#1078).
+
+    The text comes from an agent, so it goes through ``sanitize_bullet_text``
+    like the finding text. A finding with neither field returns an empty list.
+    """
+    pairs: list[tuple[str, str]] = []
+    if finding.impact:
+        pairs.append(("Impact", sanitize_bullet_text(finding.impact)))
+    if finding.trigger:
+        pairs.append(("Trigger", sanitize_bullet_text(finding.trigger)))
+    return pairs
+
+
 def format_body_finding(
     finding: Finding,
     *,
@@ -410,6 +424,11 @@ def format_body_finding(
     out = "- " + " ".join(header_parts)
     if location:
         out += f" *(at `{location}`{location_note})*"
+    # Impact and trigger are detail sub-bullets, so the shortened Bitbucket bullet
+    # (include_remediation=False) leaves them out too (#1078).
+    if include_remediation:
+        for label, text in detail_lines(finding):
+            out += f"\n  - **{label}:** {text}"
     if include_remediation and finding.remediation:
         out += f"\n  - **Remediation:** {sanitize_bullet_text(finding.remediation)}"
     # The shortened Bitbucket bullet (include_remediation=False) leaves out detail
@@ -473,6 +492,10 @@ def build_agent_prompt(findings: Sequence[Finding]) -> str:
         }
         if location:
             entry["location"] = location
+        if f.impact:
+            entry["impact"] = f.impact
+        if f.trigger:
+            entry["trigger"] = f.trigger
         if f.remediation:
             entry["remediation"] = f.remediation
         items.append(entry)
