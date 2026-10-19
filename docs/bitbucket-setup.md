@@ -119,7 +119,7 @@ In your Bitbucket repo, go to **Repository settings → Pipelines → Repository
 | `BITBUCKET_API_TOKEN` | Yes | The API token from step 1 |
 | `ANTHROPIC_API_KEY` | Yes | Your Anthropic API key (or swap for your provider) |
 | `AI_PROVIDER` | No | `anthropic` (default). Alternatives: `openai`, `google`, `bedrock-proxy` |
-| `AI_REVIEW_MODE` | No | Empty (default): defer to `.github/ai-pr-review/policy.yml` route matching if present, else `quick`. Set to `full` to override. |
+| `AI_REVIEW_MODE` | No | Empty (default): defer to `.ai-pr-review/policy.yml` route matching if present, else `quick`. Set to `full` to override. |
 | `AI_FAIL_ON_FINDINGS` | No | `true` (default, see the starter pipeline). Exit code 2 when Critical/High findings block approval, failing the pipeline step. Set to `false` to always exit 0. |
 | `AI_REVIEW_IMAGE_TAG` | No | Container tag to pull, for example `latest`. Required, no default. The `image.name` field of the starter pipeline uses this variable through the Bitbucket `${{VAR}}` syntax. That syntax cannot resolve a secured variable at all, so this variable must stay non-secured. |
 | `AI_BITBUCKET_VERDICTS` | No | `false` (default). Set to `true` to enable the `dismiss`, `false-positive`, `wont-fix`, `fixed`, and `feedback` comment commands. See [Dismissing findings](#dismissing-findings). |

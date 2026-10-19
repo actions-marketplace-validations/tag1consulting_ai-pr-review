@@ -10,7 +10,7 @@
 #
 # Optional CI/CD variables:
 #   AI_PROVIDER             (default: anthropic)
-#   AI_REVIEW_MODE          (default: quick; set to 'full' for deep agents)
+#   AI_REVIEW_MODE          (default: empty, which uses the policy.yml route and else quick; set to 'full' for deep agents)
 #   AI_REVIEW_IMAGE_TAG     (default: latest; set to 'dev' to dogfood pre-release
 #                            builds, or pin to a release like '0.11.0': image
 #                            tags strip the 'v' prefix from the git tag)
@@ -59,7 +59,7 @@ ai-review:
   script:
     - export VCS_PROVIDER=gitlab
     - export AI_PROVIDER="${AI_PROVIDER:-anthropic}"
-    # Empty (default): defer to .github/ai-pr-review/policy.yml route
+    # Empty (default): defer to .ai-pr-review/policy.yml route
     # matching if present, else 'quick'. Set AI_REVIEW_MODE=full to override.
     - export AI_REVIEW_MODE="${AI_REVIEW_MODE:-}"
     - export AI_IGNORE_MERGE_COMMITS="${AI_IGNORE_MERGE_COMMITS:-true}"
@@ -67,11 +67,12 @@ ai-review:
     - export AI_CONTEXT_ENRICHMENT="${AI_CONTEXT_ENRICHMENT:-false}"
     - export AI_SARIF_PATHS="${AI_SARIF_PATHS:-}"
     - export PR_NUMBER="$CI_MERGE_REQUEST_IID"
+    - export MR_IID="$CI_MERGE_REQUEST_IID"
     - export BASE_REF="$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
     - export HEAD_REF="$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME"
     - export HEAD_SHA="$CI_COMMIT_SHA"
     - export GITLAB_PROJECT_ID="$CI_PROJECT_ID"
-    - export GITLAB_MR_DIFF_BASE_SHA="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+    - export GITLAB_DIFF_BASE_SHA="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
     - export GITLAB_TOKEN="${GITLAB_TOKEN:-}"
     - export GITHUB_REPOSITORY="$CI_PROJECT_PATH"
     # ANTHROPIC_API_KEY (or your provider's key) comes from CI/CD variables.

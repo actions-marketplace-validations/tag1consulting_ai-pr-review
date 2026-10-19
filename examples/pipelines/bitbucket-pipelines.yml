@@ -33,7 +33,7 @@
 #
 # Optional repository variables:
 #   AI_PROVIDER             (plain, default: anthropic)
-#   AI_REVIEW_MODE          (plain, default: quick; set to 'full' for deep agents)
+#   AI_REVIEW_MODE          (plain, default: empty, which uses the policy.yml route and else quick; set to 'full' for deep agents)
 #   AI_IGNORE_MERGE_COMMITS (plain, default: true; strip base-branch merges
 #                            from the diff before review; set to false to include upstream merges)
 #   AI_FAIL_ON_FINDINGS     (plain, default: true; exit 2 when Critical/High
@@ -58,7 +58,7 @@
 #                           file is always read from the target branch, so
 #                           set BASE_REF. See docs/bitbucket-setup.md.)
 #   AI_BITBUCKET_VERDICTS  (plain, default: false; poll PR comments for
-#                           /ai-pr-review dismiss|false-positive|wont-fix|fixed
+#                           /ai-pr-review dismiss|false-positive|wont-fix|fixed|feedback
 #                           F<n> commands at the start of the next run.
 #                           See docs/configuration.md)
 #   AI_BITBUCKET_VERDICT_MIN_ROLE (plain, default: write; minimum Bitbucket
@@ -69,7 +69,7 @@
 #                           .bitbucket/CODEOWNERS (a `*` line) instead.
 #                           Only meaningful when AI_BITBUCKET_VERDICTS=true.)
 #   AI_FEEDBACK_LOOP        (plain, default: false; persist false-positive/
-#                           wont-fix verdicts to the cross-repo learning-loop
+#                           wont-fix verdicts and feedback notes to the cross-repo learning-loop
 #                           store, same as GitHub -- issue #906. Also
 #                           requires AI_BITBUCKET_VERDICTS=true above, AND
 #                           a Repository:Write scope on BITBUCKET_API_TOKEN
@@ -135,7 +135,7 @@ pipelines:
             - git fetch origin "$BITBUCKET_PR_DESTINATION_BRANCH":"refs/remotes/origin/$BITBUCKET_PR_DESTINATION_BRANCH"
             - export VCS_PROVIDER=bitbucket
             - export AI_PROVIDER="${AI_PROVIDER:-anthropic}"
-            # Empty (default): defer to .github/ai-pr-review/policy.yml route
+            # Empty (default): defer to .ai-pr-review/policy.yml route
             # matching if present, else 'quick'. Set AI_REVIEW_MODE=full to override.
             - export AI_REVIEW_MODE="${AI_REVIEW_MODE:-}"
             - export AI_IGNORE_MERGE_COMMITS="${AI_IGNORE_MERGE_COMMITS:-true}"
