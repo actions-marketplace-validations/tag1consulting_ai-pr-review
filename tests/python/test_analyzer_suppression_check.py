@@ -93,8 +93,17 @@ class TestLongLines:
     def test_a_marker_inside_a_string_before_the_comment_still_matches(self) -> None:
         assert _describe('x = "#"; y = f()  # nosec') == ["nosec"]
 
-    def test_text_past_the_line_cap_is_not_read(self) -> None:
-        assert _describe("# " + "a" * 9000 + " nosec") == []
+    def test_a_directive_far_along_a_very_long_line_is_still_found(self) -> None:
+        """No length cap: padding must not hide a directive (#1077)."""
+        assert _describe("# " + "a" * 200_000 + " nosec") == ["nosec"]
+        assert _describe("x = '" + "b" * 200_000 + "'  # noqa: S301") == ["noqa: S301"]
+
+    @pytest.mark.parametrize("filler", ["noqa" + " " * 50, "nosec" * 3 + " ", "phpcs:ignore ", "eslint-disable "])
+    def test_repeated_directive_words_are_fast(self, filler: str) -> None:
+        line = "# " + filler * (400_000 // len(filler))
+        start = time.monotonic()
+        _describe(line)
+        assert time.monotonic() - start < 1.0
 
 
 class TestRun:

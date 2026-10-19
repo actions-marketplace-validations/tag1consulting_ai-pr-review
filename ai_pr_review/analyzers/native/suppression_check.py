@@ -37,10 +37,6 @@ _SOURCE = "suppression-check"
 # that line.
 _MARKER = re.compile(r"#|//|/\*|<!--")
 
-# The longest line the analyzer reads. A comment past this point on a very long
-# line (for example minified code) is not seen. The cap bounds the work per line.
-_MAX_LINE_CHARS = 8192
-
 # Rule names and codes are copied into the finding text. Keep only characters
 # that a rule name can hold, so a comment cannot smuggle prose into a review.
 _RULE_TOKEN = re.compile(r"[A-Za-z0-9_.\-/@:]+")
@@ -71,10 +67,12 @@ def _tokens(text: str) -> list[str]:
 def _describe(text: str) -> list[str]:
     """Return one short label for each security directive found in *text*."""
     labels: list[str] = []
-    marker = _MARKER.search(text[:_MAX_LINE_CHARS])
+    # The whole line is read, with no length cap: a cap would let a PR author hide a
+    # directive behind padding. Every pattern below is linear in the line length.
+    marker = _MARKER.search(text)
     if marker is None:
         return labels
-    text = text[marker.end() : _MAX_LINE_CHARS]
+    text = text[marker.end() :]
 
     noqa = _NOQA.search(text)
     if noqa:
