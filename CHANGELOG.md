@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.23.1] - 2026-10-19
+
+### Fixed
+
+- **Bitbucket finding numbers are kept across runs (#1065).** Bitbucket keeps one summary comment and rewrites it on every run. The hidden id-map marker held only the findings of the current run. An incremental run that did not report a finding again dropped its `F<n>`, so a waiting verdict command got "F<n> was not found in the current review". A run with no findings restarted the numbering at F1, so a waiting command could apply to a different finding. The marker now keeps earlier entries within a size budget of 4,000 bytes of JSON (about 5.4 KB in the comment). The lowest numbers go first and the highest number always stays. A finding that returns after a run without it keeps its number and no longer gets the "new" badge. A WARNING in the job log shows when earlier entries were dropped. This change affects Bitbucket only.
+
+### Changed
+
+- **Container image tool updates (#1061, #1062, #1063).** The image now uses ruff 0.17.1, golangci-lint 2.15.0, and a newer digest of the Ubuntu 26.04 base image.
+
 ## [2.23.0] - 2026-10-13
 
 ### Added

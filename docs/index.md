@@ -68,6 +68,12 @@ jobs:
 
 Reviews start on the next PR.
 
+## What's new in v2.23.1
+
+**Bitbucket finding numbers stay stable across runs.** A finding that an incremental run does not report again keeps its `F<n>`, so a waiting `/ai-pr-review false-positive F<n>` command can still find it. A run with no findings no longer restarts the numbering at F1. GitHub and GitLab are unchanged.
+
+See [Version History → v2.23.1](version-history/v2.23.1) for details.
+
 ## What's new in v2.23.0
 
 **The review skips when the diff does not fit the model context window.** Before, a very large diff went to the provider, which rejected it, and the comment said "2 failed agents". Now the review stops before any LLM call and says which agent does not fit. Use `exclude-patterns` for generated files. Set `context-window-margin: '0'` to turn the check off.
@@ -85,16 +91,6 @@ See [Version History → v2.23.0](version-history/v2.23.0) for details.
 **New policy route key `paths-all`.** A route matches only if every changed file matches. A docs file next to real code no longer sends the whole PR to a no-review policy.
 
 See [Version History → v2.22.1](version-history/v2.22.1) for details.
-
-## What's new in v2.22.0
-
-**The phpcs analyzer follows your repo's ruleset.** It reads `phpcs.xml` or `phpcs.xml.dist` as data, uses its file scope and excludes, and never lets phpcs load it, because a ruleset can load PHP from the repo. If the ruleset names a standard that the image lacks, such as WordPress, phpcs runs a style-neutral fallback and the log names the missing standard.
-
-**Behavior change: Drupal standards apply only to Drupal repos.** With no ruleset, a repo gets the Drupal standard only when it shows Drupal signals. Other PHP repos get PSR12. Open pull requests can see new findings.
-
-**A merged finding keeps both analyzer messages.** When two analyzer tools report nearby lines, the finding lists the second message as `Also reported by:`.
-
-See [Version History → v2.22.0](version-history/v2.22.0) for details.
 
 ## Learn more
 
