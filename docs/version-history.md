@@ -12,6 +12,7 @@ What changed in each release, newest first. Every release from v2.8.0 onward has
 
 | Version | Highlights |
 |---------|-----------|
+| [v2.23.2](version-history/v2.23.2) | Bitbucket verdict owners: an `@nickname` owner line no longer grants and the owners file is read from the target branch only (behavior change, #1071) |
 | [v2.23.1](version-history/v2.23.1) | Bitbucket verdict commands are authorized from `.bitbucket/CODEOWNERS` (#1068), a 403 from the permission lookup gets its own reply, Bitbucket finding numbers are kept across runs, so a waiting verdict command can still name its finding and a run with no findings no longer restarts the numbering at F1 (#1065). Image tool updates (#1061, #1062, #1063). |
 | [v2.23.0](version-history/v2.23.0) | The review skips before any LLM call when the diff does not fit the model context window (new `AI_CONTEXT_WINDOW_MARGIN` and `AI_FAIL_ON_CONTEXT_WINDOW`, #1056), reports now count the pr-summarizer and issue-linker so reported cost is higher (behavior change, #1055), and the `COST_RECONCILE` delta prints the right sign |
 | [v2.22.1](version-history/v2.22.1) | The review headline follows a dismissal (#1049), a changed file that resolves outside the workspace is dropped for every analyzer (#1047), and new route key `when.paths-all` stops one docs file from routing a mixed PR to no review (#1039) |

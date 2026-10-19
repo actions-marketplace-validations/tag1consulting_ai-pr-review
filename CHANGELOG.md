@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.23.2] - 2026-10-19
+
 ### Security
 
 - **Bitbucket verdict owners: `@nickname` lines no longer grant, and the owners file is read from the target branch only.** This is a behavior change. A nickname is not a unique identifier, so an `@nickname` line on a `*` line of `.bitbucket/CODEOWNERS` no longer authorizes a commenter. Only an `account_id` or a `{uuid}` grants. The review logs a warning that names each ignored `@nickname`. Replace each one with an `account_id` or a `{uuid}`. A person who is listed only by nickname gets the permission lookup, so they see the "not listed" reply until you change the file. The owners file is now always read from `origin/<BASE_REF>`. It no longer follows `AI_POLICY_SOURCE`, and the file in the pull request checkout is never read. A pipeline that set `AI_POLICY_SOURCE=workspace` and relied on an owners file in the pull request must merge that file into the target branch. This closes two ways in which a commenter could pass as an owner in v2.23.1. `policy.yml` still follows `AI_POLICY_SOURCE`.

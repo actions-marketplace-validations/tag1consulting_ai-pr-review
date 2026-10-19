@@ -205,12 +205,12 @@ By default the container runs in `quick` mode (code-reviewer, silent-failure-hun
 For reproducible runs, replace `:latest` with a specific version tag:
 
 ```bash
-ghcr.io/tag1consulting/ai-pr-review:2.23.1
+ghcr.io/tag1consulting/ai-pr-review:2.23.2
 # or pin to a major version:
 ghcr.io/tag1consulting/ai-pr-review:2
 ```
 
-Available tags: `latest`, `<major>` (e.g. `2`), `<major.minor>` (e.g. `2.23`), `<major.minor.patch>` (e.g. `2.23.1`).
+Available tags: `latest`, `<major>` (e.g. `2`), `<major.minor>` (e.g. `2.23`), `<major.minor.patch>` (e.g. `2.23.2`).
 
 ## Building the image locally
 
