@@ -9,6 +9,7 @@ from ai_pr_review.findings.models import Finding
 from ai_pr_review.findings.scope import (
     _ANALYZER_PREFIXES,
     ROLLUP_THRESHOLD,
+    SEMGREP_ROLLUP_THRESHOLD,
     _is_analyzer,
     apply_diff_scope,
     rollup_repeated_findings,
@@ -549,3 +550,123 @@ def test_also_reported_display_says_or_more_past_storage_bound() -> None:
     shown = also_reported_notes(f)
     assert len(shown) == 6
     assert shown[-1] == f"(+{MAX_ALSO_REPORTED_STORED - 5} or more from other analyzers)"
+
+
+# rollup_repeated_findings: semgrep rules (#1081)
+
+_SQL_RULE = "python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query"
+
+
+def _semgrep(
+    line: int,
+    rule: str = _SQL_RULE,
+    message: str = "Avoiding SQL string concatenation",
+    file: str = "api/user.py",
+    **kw: object,
+) -> Finding:
+    fields: dict[str, object] = {
+        "severity": "High",
+        "confidence": 90,
+        "finding": f"{rule}: {message}",
+        "source": "semgrep",
+        "file": file,
+        "line": line,
+    }
+    return Finding.model_validate(fields | kw)
+
+
+def test_semgrep_rule_rolls_up_at_two_occurrences() -> None:
+    assert SEMGREP_ROLLUP_THRESHOLD == 1
+    result = rollup_repeated_findings([_semgrep(31), _semgrep(65)])
+    assert len(result) == 1
+    assert "(2 occurrences in api/user.py, lines: 31, 65)" in result[0].finding
+
+
+def test_semgrep_single_hit_is_not_rolled_up() -> None:
+    findings = [_semgrep(31)]
+    assert rollup_repeated_findings(findings) == findings
+
+
+def test_semgrep_pr70_sql_hits_become_one_finding_at_first_line() -> None:
+    """PR #70: the same rule fired at lines 31, 65, 93 and 101 of api/user.py,
+    each with a message that names the site, so the text key never matched."""
+    findings = [
+        _semgrep(31, message="query built from search term"),
+        _semgrep(65, message="query built from user id"),
+        _semgrep(93, message="query built from new_email"),
+        _semgrep(101, message="query built from user id"),
+    ]
+    result = rollup_repeated_findings(findings)
+    assert len(result) == 1
+    assert result[0].line == 31
+    assert "(4 occurrences in api/user.py, lines: 31, 65, 93, 101)" in result[0].finding
+
+
+def test_semgrep_different_rules_and_files_stay_apart() -> None:
+    other_rule = "python.lang.security.audit.subprocess-shell-true.subprocess-shell-true"
+    result = rollup_repeated_findings(
+        [
+            _semgrep(31),
+            _semgrep(65),
+            _semgrep(37, rule=other_rule),
+            _semgrep(40, rule=other_rule),
+            _semgrep(5, file="api/other.py"),
+            _semgrep(9, file="api/other.py"),
+        ]
+    )
+    assert len(result) == 3
+    assert sorted(f.file for f in result) == ["api/other.py", "api/user.py", "api/user.py"]
+
+
+def test_semgrep_rule_id_is_case_insensitive_and_severity_still_splits() -> None:
+    result = rollup_repeated_findings(
+        [_semgrep(1), _semgrep(2, rule=_SQL_RULE.upper()), _semgrep(3, severity="Medium")]
+    )
+    assert len(result) == 2
+
+
+def test_semgrep_corroborated_finding_is_left_out_of_the_rollup() -> None:
+    corroborated = _semgrep(
+        31, corroborated=True, sources=["code-reviewer", "semgrep"], confidence=100
+    )
+    result = rollup_repeated_findings([corroborated, _semgrep(65), _semgrep(93)])
+    assert corroborated in result
+    assert len(result) == 2
+    rolled = next(f for f in result if f is not corroborated)
+    assert "(2 occurrences in api/user.py, lines: 65, 93)" in rolled.finding
+
+
+def test_semgrep_multi_source_finding_is_left_out_of_the_rollup() -> None:
+    merged = _semgrep(31, sources=["ruff", "semgrep"])
+    result = rollup_repeated_findings([merged, _semgrep(65)])
+    assert len(result) == 2
+
+
+def test_semgrep_text_without_rule_prefix_uses_the_text_key() -> None:
+    free = [
+        Finding(
+            severity="High", confidence=90, finding="no rule prefix here", source="semgrep",
+            file="api/user.py", line=i,
+        )
+        for i in (1, 2)
+    ]
+    assert len(rollup_repeated_findings(free)) == 2
+
+
+def test_semgrep_rollup_keeps_input_order_and_first_slot() -> None:
+    first = _agent("api/user.py", 1, text="agent first")
+    last = _agent("api/user.py", 200, text="agent last")
+    result = rollup_repeated_findings([first, _semgrep(31), _phpcs("x.php", 3), _semgrep(65), last])
+    assert [f.source for f in result] == ["code-reviewer", "semgrep", "phpcs", "code-reviewer"]
+
+
+def test_semgrep_rollup_keeps_impact_and_trigger_empty() -> None:
+    """Agents set impact and trigger. Analyzer groups have none to reconcile."""
+    result = rollup_repeated_findings([_semgrep(31), _semgrep(65)])
+    assert getattr(result[0], "impact", "") == ""
+    assert getattr(result[0], "trigger", "") == ""
+
+
+def test_non_semgrep_analyzer_still_needs_more_than_the_global_threshold() -> None:
+    assert len(rollup_repeated_findings(_make_repeated(2))) == 2
+    assert len(rollup_repeated_findings(_make_repeated(ROLLUP_THRESHOLD + 1))) == 1

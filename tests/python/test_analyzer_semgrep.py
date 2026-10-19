@@ -240,6 +240,12 @@ class TestRunSemgrepFindings:
         findings = self._run_with_check_id(tmp_path, "python.lang.md5ification-config")
         assert findings[0].category == "other"
 
+    def test_finding_text_starts_with_the_rule_id(self, tmp_path: Path) -> None:
+        """findings/scope.py reads the rule id from this prefix to roll up repeated
+        rules (#1081). Change the format and the rollup stops working."""
+        findings = self._run_with_check_id(tmp_path, "python.lang.security.audit.sql-injection")
+        assert findings[0].finding.startswith("python.lang.security.audit.sql-injection: ")
+
     def test_category_exec_use_needs_whole_token(self, tmp_path: Path) -> None:
         findings = self._run_with_check_id(tmp_path, "python.lang.flexec-user-config")
         assert findings[0].category == "other"

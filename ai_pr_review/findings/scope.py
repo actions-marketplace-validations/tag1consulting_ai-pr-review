@@ -63,6 +63,30 @@ _WHITESPACE = re.compile(r"\s+")
 # collapse the group into a single rollup finding.
 ROLLUP_THRESHOLD = 5
 
+# semgrep rules repeat at many sites with a message that names the site, so the
+# text-based key above misses them. They are grouped by rule id instead, and two
+# hits are enough to roll up (#1081).
+SEMGREP_ROLLUP_THRESHOLD = 1
+
+# `analyzers/native/semgrep.py` writes `finding=f"{check_id}: {message}"`.
+# A test in test_analyzer_semgrep.py pins that format, so a change there fails
+# a test instead of silently stopping the rollup.
+_SEMGREP_RULE_PREFIX = re.compile(r"^([A-Za-z0-9_.\-]+): ")
+
+
+def _semgrep_rule(finding: Finding) -> str | None:
+    """Return the semgrep rule id for a plain, single-source semgrep finding.
+
+    A finding that merged with another source is left out: its `corroborated`
+    flag and its merged sources belong to the cluster, and a rollup would keep
+    only the lowest-line member's copy of them.
+    """
+    sources = finding.sources or ([finding.source] if finding.source else [])
+    if sources != ["semgrep"] or finding.corroborated:
+        return None
+    match = _SEMGREP_RULE_PREFIX.match(finding.finding)
+    return match.group(1).lower() if match else None
+
 
 def is_analyzer_source(source: str) -> bool:
     """Return True when a single source string is a native static-analyzer tag.
@@ -140,6 +164,7 @@ def rollup_repeated_findings(
     findings: list[Finding],
     *,
     threshold: int = ROLLUP_THRESHOLD,
+    semgrep_threshold: int = SEMGREP_ROLLUP_THRESHOLD,
 ) -> list[Finding]:
     """Collapse repeated same-source+text analyzer findings within one file.
 
@@ -147,6 +172,9 @@ def rollup_repeated_findings(
     file, all occurrences are collapsed into one representative Finding.  The
     finding text gains a suffix like "(42 occurrences, lines: 15, 32, 47 ...)"
     so reviewers can see the scope without reading 42 separate entries.
+
+    semgrep findings are grouped by rule id, not by message text, and roll up
+    at more than `semgrep_threshold` occurrences (#1081).
 
     Non-analyzer findings and findings without a file are left unchanged.
 
@@ -168,12 +196,19 @@ def rollup_repeated_findings(
     GroupKey = tuple[str, str, str, str, bool]
     groups: dict[GroupKey, list[Finding]] = defaultdict(list)
     keys: list[GroupKey | None] = []
+    limits: dict[GroupKey, int] = {}
 
     for f in findings:
         if _is_analyzer(f) and f.file:
             src = f.source or (f.sources[0] if f.sources else "")
-            group_key: GroupKey = (f.file, src, _normalise(f.finding), f.severity, f.out_of_diff)
+            rule = _semgrep_rule(f)
+            if rule is not None:
+                text_key, limit = f"rule:{rule}", semgrep_threshold
+            else:
+                text_key, limit = _normalise(f.finding), threshold
+            group_key: GroupKey = (f.file, src, text_key, f.severity, f.out_of_diff)
             groups[group_key].append(f)
+            limits[group_key] = limit
             keys.append(group_key)
         else:
             keys.append(None)
@@ -181,7 +216,7 @@ def rollup_repeated_findings(
     result: list[Finding] = []
     collapsed: set[GroupKey] = set()
     for f, key in zip(findings, keys, strict=True):
-        if key is None or len(groups[key]) <= threshold:
+        if key is None or len(groups[key]) <= limits[key]:
             result.append(f)
             continue
         if key in collapsed:
