@@ -72,6 +72,8 @@ Reviews start on the next PR.
 
 **Bitbucket finding numbers stay stable across runs.** A finding that an incremental run does not report again keeps its `F<n>`, so a waiting `/ai-pr-review false-positive F<n>` command can still find it. A run with no findings no longer restarts the numbering at F1. GitHub and GitLab are unchanged.
 
+**Bitbucket verdict commands work for a bot account with write access.** The review reads the people who may use `/ai-pr-review` commands from `.bitbucket/CODEOWNERS` (a `*` line). Before, the admin-only permission lookup failed for every commenter. See [Bitbucket setup](bitbucket-setup#dismissing-findings).
+
 See [Version History → v2.23.1](version-history/v2.23.1) for details.
 
 ## What's new in v2.23.0

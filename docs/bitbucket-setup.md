@@ -56,7 +56,40 @@ Enable this feature with `AI_BITBUCKET_VERDICTS=true` (default `false`). You can
 
 `dismiss` is an alias for `false-positive`. You can put more than one command in a comment (one per line). The review applies all of them, as on GitHub and GitLab.
 
-**Authorization is fail-closed.** Before the review applies a command, it checks the Bitbucket repository permission of the commenter against `AI_BITBUCKET_VERDICT_MIN_ROLE`. If the permission lookup fails, the review rejects the command. The bot replies to every command it processes. The reply says if the command was applied, rejected for insufficient access, or rejected because the permission check did not complete. The reply text shows which case occurred. This tells you if you must fix your access or only retry. The review never ignores a command silently.
+**Authorization is fail-closed.** Before the review applies a command, it must confirm that the commenter may use it. It checks two sources in this order:
+
+1. **The owners file.** The review reads `.bitbucket/CODEOWNERS`. This is the file that Bitbucket uses for code owners. Only a line with the pattern `*` counts. It is a global list of people who may use `/ai-pr-review` commands. A commenter who is on that list is authorized. No API call is needed, so this works when the bot account has only write access.
+2. **The repository permission.** A commenter who is not on the list is checked against the Bitbucket repository permission and `AI_BITBUCKET_VERDICT_MIN_ROLE`. Bitbucket allows that lookup only for repository admins, so it works only if the bot account is an admin of the repository.
+
+If neither source confirms the commenter, the review rejects the command. A missing, oversized, or unreadable owners file is the same as an empty one. The review never applies a command on a guess.
+
+Write the list like this:
+
+```
+# People who may dismiss AI review findings
+* @alice 557058:9aa59bdf-2b71-431a-af18-286802c44d56 {9f49742f-b2a6-491a-84aa-6bbf3a935756}
+```
+
+- `@nickname` matches the nickname of the commenter, without regard to case. Only ASCII nicknames match. A nickname with a space (for example a display name such as `Ada Lovelace`) cannot be written on a line, so use the `account_id` for those people.
+- An Atlassian `account_id` or a `{uuid}` matches the account. These never change. Prefer them. Unverified: whether Bitbucket lets a user change a nickname or take a free one, so a nickname is the weaker match.
+- Email addresses, `workspace/group` names, and `@teams/...` entries are ignored and logged at INFO level. A comment carries no email address, and a group lookup also needs admin.
+- Lines with another pattern (for example `*.py` or `docs/`) are ignored by this feature. Bitbucket still uses them for its own reviewer suggestions. The review does not scope owners by path, because the owner of `docs/` must not be able to dismiss a security finding in code.
+- If `AI_BITBUCKET_VERDICT_MIN_ROLE` is `admin`, the owners file is not used. An operator who asked for admins only did not ask for a list of names.
+- Bitbucket reads `.bitbucket/CODEOWNERS` to suggest reviewers when a pull request opens. Names on a `*` line are suggested on every pull request where that Bitbucket feature is on. Unverified: which Bitbucket plan has that feature, and how Bitbucket treats an `account_id` or `{uuid}` entry it does not know.
+
+**Where the owners file is read from.** The review reads it from the same source as `policy.yml`, which `AI_POLICY_SOURCE` selects:
+
+- `base-ref` (the default of the engine): the file on the target branch, with `git show origin/<BASE_REF>:.bitbucket/CODEOWNERS`. The changes in a pull request cannot change who may dismiss findings on it. A change to the file takes effect after it is merged. Use this if the authors of pull requests are not all trusted to dismiss findings. Push access to the repository is still the trust boundary: a person who can push can retarget a pull request to a branch with a different owners file, and can edit `bitbucket-pipelines.yml`.
+- `workspace`: the file in the checkout, which includes the changes of the pull request. A change to the file takes effect at once. **A pull request can then add its own author to the list.** If a commenter is listed in the file of the pull request but not on the target branch, the review still applies the command. The reply then carries a note, and the job log shows which source granted it. Reviewers must check any change to `.bitbucket/CODEOWNERS` in a pull request.
+
+The bot replies to every command it processes. The reply says if the command was applied, rejected, or could not be checked. Two replies need your action:
+
+- "could not verify your repository permissions right now" means that the permission lookup failed for a temporary reason. The review tries again on the next run.
+- "you are not listed on a `*` line", "was not found, could not be read, or is larger than 64 KiB", and "`AI_BITBUCKET_VERDICT_MIN_ROLE` is `admin`" all mean that the permission lookup returned HTTP 403. The bot account is not an admin, or its token lacks the permission. A retry does not help. The reply names the fix for your case: add the commenter to the owners file on the target branch, add the file, or make the bot account an admin. The command stays pending, and the next review run applies it after you fix this.
+
+Earlier versions answered that HTTP 403 with "could not verify your repository permissions right now. Try again". That reply was wrong, because the error does not go away on its own. A command that already has that reply gets one new reply with the new text.
+
+The review never ignores a command silently.
 
 **Finding numbers stay stable across runs.** Bitbucket keeps one summary comment and rewrites it on each run, so the hidden id-map marker is the only record of finding numbers. The review keeps the entries of earlier runs in that marker. A finding that an incremental run does not report again keeps its `F<n>`, so a waiting command can still name it. A run with no findings does not restart the numbering at F1. A finding that returns after a run without it keeps its number and does not get the "new" badge. The earlier entries have a size budget of 4,000 bytes of JSON (about 5.4 KB in the comment). If the budget is full, the lowest numbers go first and the highest number always stays. If the summary comment is too large, the review keeps fewer earlier entries and writes a WARNING to the job log.
 
@@ -87,7 +120,7 @@ In your Bitbucket repo, go to **Repository settings → Pipelines → Repository
 | `AI_FAIL_ON_FINDINGS` | No | `true` (default, see the starter pipeline). Exit code 2 when Critical/High findings block approval, failing the pipeline step. Set to `false` to always exit 0. |
 | `AI_REVIEW_IMAGE_TAG` | No | Container tag to pull, for example `latest`. Required, no default. The `image.name` field of the starter pipeline uses this variable through the Bitbucket `${{VAR}}` syntax. That syntax cannot resolve a secured variable at all, so this variable must stay non-secured. |
 | `AI_BITBUCKET_VERDICTS` | No | `false` (default). Set to `true` to enable dismiss/false-positive/wont-fix/fixed comment commands. See [Dismissing findings](#dismissing-findings). |
-| `AI_BITBUCKET_VERDICT_MIN_ROLE` | No | `write` (default). Minimum Bitbucket repository permission (`read`, `write`, or `admin`) required to apply a verdict command. It has an effect only when `AI_BITBUCKET_VERDICTS=true`. |
+| `AI_BITBUCKET_VERDICT_MIN_ROLE` | No | `write` (default). Minimum Bitbucket repository permission (`read`, `write`, or `admin`) required to apply a verdict command through the permission lookup. With `admin`, the owners file `.bitbucket/CODEOWNERS` is not used. It has an effect only when `AI_BITBUCKET_VERDICTS=true`. |
 | `AI_BITBUCKET_REVIEW_STATE` | No | `true` (default). Set to `false` to stop the bot from calling the approve and request-changes endpoints of Bitbucket. The decided outcome still renders as heading text in the summary comment in both cases. |
 | `AI_FEEDBACK_LOOP` | No | `false` (default). Set to `true` to save `false-positive` and `wont-fix` verdicts to the cross-repo learning-loop store. See [Dismissing findings → Learning loop](#dismissing-findings). It also needs `AI_BITBUCKET_VERDICTS=true` and the **Repository:Write** scope below. |
 | `AI_FEEDBACK_BRANCH` | No | `ai-pr-review-bot` (default). Branch that holds the JSONL file of the learning-loop store. GitHub reads the same variable. |
@@ -98,6 +131,7 @@ The effective scopes of the API token follow the permissions of the user. The bo
 
 - **Repository:Read** on the repo that the review covers
 - **Pull request:Write** on the repo (to create and update comments)
+- **Repository admin** is needed only for the permission-lookup fallback of verdict commands (see [Dismissing findings](#dismissing-findings)). If you list your owners in `.bitbucket/CODEOWNERS`, the bot account does not need it.
 - **Account:Read** (`read:user:bitbucket` on a scoped API token). The review calls `GET /2.0/user` to find the account that it runs as. It trusts only summary comments that this account wrote (anti-spoofing). Without this scope, the lookup fails and the run logs a WARNING. Incremental review, in-place summary update, and verdict polling are then all off for that run. The result is a new summary comment on every push.
 
 **If `AI_FEEDBACK_LOOP=true`**, the token also needs **Repository:Write**. Read this before you grant it. Bitbucket cannot limit the write access of a token to one branch. GitHub can do this with branch protection rules on `ai-pr-review-bot`, even for a `contents:write` token. Repository:Write on this token means the token can push to *any* branch in the repo, not only the feedback-store branch. The added risk starts when the token *has* the scope, not only when `AI_FEEDBACK_LOOP=true` is set. A token with Repository:Write that is not in use is still a larger blast radius if it leaks. This token is a secured pipeline variable (see [Secret exposure to pipeline contributors](#secret-exposure-to-pipeline-contributors) below). Anyone who can change `bitbucket-pipelines.yml` on a branch they can push to can read it out. With this scope granted, that access also lets them push to your default and release branches, not only post comments and reactions. Grant Repository:Write only when you are ready to enable the learning loop. If your workspace has branch restrictions, first protect your default and release branches against this token. Use the same caution as for any bot token that gains write access.

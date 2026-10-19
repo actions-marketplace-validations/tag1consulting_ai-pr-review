@@ -9,9 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.23.1] - 2026-10-19
 
+### Added
+
+- **Bitbucket verdict commands are authorized from `.bitbucket/CODEOWNERS` (#1068).** Bitbucket allows the permission lookup that checks a commenter only for repository admins. A bot account with write access got HTTP 403 for every commenter, so no `/ai-pr-review` verdict command could be applied. The review now reads the owners first from the `*` lines of `.bitbucket/CODEOWNERS`. An owner can be an `@nickname` (ASCII), an Atlassian `account_id`, or a `{uuid}`. A listed commenter is authorized with no API call. Anyone else is checked through the old lookup. The file is read from the source that `AI_POLICY_SOURCE` selects: the target branch for `base-ref`, or the checkout for `workspace`. Under `workspace`, a commenter who is listed only in the file of the pull request is still authorized, and the reply says so. `AI_BITBUCKET_VERDICT_MIN_ROLE=admin` turns the owners file off. A missing or unreadable file means the old lookup decides. See [Bitbucket setup](docs/bitbucket-setup.md#dismissing-findings).
+
 ### Fixed
 
 - **Bitbucket finding numbers are kept across runs (#1065).** Bitbucket keeps one summary comment and rewrites it on every run. The hidden id-map marker held only the findings of the current run. An incremental run that did not report a finding again dropped its `F<n>`, so a waiting verdict command got "F<n> was not found in the current review". A run with no findings restarted the numbering at F1, so a waiting command could apply to a different finding. The marker now keeps earlier entries within a size budget of 4,000 bytes of JSON (about 5.4 KB in the comment). The lowest numbers go first and the highest number always stays. A finding that returns after a run without it keeps its number and no longer gets the "new" badge. A WARNING in the job log shows when earlier entries were dropped. This change affects Bitbucket only.
+- **A 403 from the permission lookup gets its own reply (#1068).** The reply used to say "could not verify your repository permissions right now, try again". A 403 does not go away on a retry. The reply now says what to fix: add the commenter to the owners file, add the file, or make the bot account an admin. The command stays pending and applies on the first run after the fix. A command that already has the old reply gets one new reply.
 
 ### Changed
 
