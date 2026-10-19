@@ -58,6 +58,12 @@ class LLMContentError(Exception):
 # `LLMError` behavior. Add a text here only after you see it in a real response.
 _CONTEXT_LENGTH_MARKERS: tuple[str, ...] = ("prompt is too long",)
 
+# The provider labels (`provider_label` of `retry_post`) whose 400 text is
+# verified. The match runs only for these. Another provider, or an
+# openai-compatible endpoint, can return a 400 that happens to contain the
+# phrase, and that must stay a plain failure.
+_CONTEXT_LENGTH_PROVIDERS: frozenset[str] = frozenset({"Anthropic"})
+
 
 def is_context_length_rejection(status_code: int, body: str) -> bool:
     """True when a non-2xx response is a verified "prompt too long" 400."""
@@ -140,7 +146,8 @@ async def retry_post(
                 )
             error_cls = (
                 LLMContextLengthError
-                if is_context_length_rejection(response.status_code, response.text)
+                if provider_label in _CONTEXT_LENGTH_PROVIDERS
+                and is_context_length_rejection(response.status_code, response.text)
                 else LLMError
             )
             raise error_cls(

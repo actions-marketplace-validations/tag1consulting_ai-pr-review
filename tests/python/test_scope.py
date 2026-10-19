@@ -467,6 +467,52 @@ def test_rollup_with_eight_notes_renders_five_plus_overflow_line() -> None:
     assert shown[5] == "(+3 more from other analyzers)"
 
 
+def _finding_with_notes(n: int) -> Finding:
+    return Finding(
+        severity="High", confidence=90, finding="Same sniff", source="phpcs",
+        file="a.php", line=10, category="lint",
+        also_reported=[f"phpstan: m{i}" for i in range(n)],
+    )
+
+
+@pytest.mark.parametrize(
+    ("count", "overflow"), [(1, None), (4, None), (5, None), (6, "(+1 more from other analyzers)")]
+)
+def test_also_reported_display_cap_boundary(count: int, overflow: str | None) -> None:
+    """The display cap is 5 notes. The overflow line appears only past it."""
+    from ai_pr_review.vcs._body import also_reported_notes
+
+    shown = also_reported_notes(_finding_with_notes(count))
+    assert shown[:min(count, 5)] == [f"phpstan: m{i}" for i in range(min(count, 5))]
+    if overflow is None:
+        assert len(shown) == count
+    else:
+        assert len(shown) == 6
+        assert shown[-1] == overflow
+
+
+def test_also_reported_storage_bound_boundary() -> None:
+    """100 notes fit. The 101st is cut and the render says "or more"."""
+    from ai_pr_review.findings.models import (
+        ALSO_REPORTED_TRUNCATED_NOTE,
+        MAX_ALSO_REPORTED_STORED,
+        combine_also_reported,
+    )
+    from ai_pr_review.vcs._body import also_reported_notes
+
+    exact = combine_also_reported([[f"n{i}" for i in range(MAX_ALSO_REPORTED_STORED)]])
+    assert len(exact) == MAX_ALSO_REPORTED_STORED
+    assert ALSO_REPORTED_TRUNCATED_NOTE not in exact
+    shown_exact = also_reported_notes(_finding_with_notes(0).model_copy(update={"also_reported": exact}))
+    assert shown_exact[-1] == f"(+{MAX_ALSO_REPORTED_STORED - 5} more from other analyzers)"
+
+    over = combine_also_reported([[f"n{i}" for i in range(MAX_ALSO_REPORTED_STORED + 1)]])
+    assert len(over) == MAX_ALSO_REPORTED_STORED + 1
+    assert over[-1] == ALSO_REPORTED_TRUNCATED_NOTE
+    shown_over = also_reported_notes(_finding_with_notes(0).model_copy(update={"also_reported": over}))
+    assert shown_over[-1] == f"(+{MAX_ALSO_REPORTED_STORED - 5} or more from other analyzers)"
+
+
 def test_combine_also_reported_drops_old_markers_and_keeps_order() -> None:
     from ai_pr_review.findings.models import combine_also_reported
 

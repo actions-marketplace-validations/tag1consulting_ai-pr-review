@@ -176,3 +176,33 @@ def test_collapse_still_works_when_not_suppressed(prompt_dir: Path) -> None:
     out = _run_text(prompt_dir, collapse_walkthrough=True)
     assert "<details>" in out
     assert "<summary>Walkthrough (" in out
+
+
+@pytest.mark.parametrize(("code", "soft"), [(4, True), (1, False), (2, False), (3, False)])
+def test_llm_system_exit(prompt_dir: Path, code: int, soft: bool) -> None:
+    """Exit code 4 (prompt too long, #1056) returns the failure notice and the
+    review continues. Codes 1 to 3 still stop the run, as before."""
+    from ai_pr_review.review.preflight import _SUMMARIZER_FAILURE_NOTICE
+
+    async def _boom(req: LLMRequest) -> LLMResponse:
+        raise SystemExit(code)
+
+    def _go() -> str:
+        return anyio.run(
+            lambda: run_summarizer(
+                diff_text="diff --git a/a.py b/a.py",
+                manifest_text="## Manifest\n- a.py",
+                base_ref="main",
+                script_dir=prompt_dir,
+                model="claude-haiku-4-5",
+                llm_call=_boom,
+            )
+        )
+
+    with patch("subprocess.run", return_value=_completed(stdout="abc1234 fix: test\n")):
+        if soft:
+            assert _go() == _SUMMARIZER_FAILURE_NOTICE
+        else:
+            with pytest.raises(SystemExit) as excinfo:
+                _go()
+            assert excinfo.value.code == code

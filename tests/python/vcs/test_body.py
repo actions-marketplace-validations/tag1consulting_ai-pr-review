@@ -228,6 +228,14 @@ def test_severity_icon_unknown_defaults() -> None:
     assert severity_icon("weird") == "💬"
 
 
+def test_severity_icon_status_values_and_shapes() -> None:
+    """none and unknown keep their own icons, and the four severities differ."""
+    assert severity_icon("none") == "✅"
+    assert severity_icon("unknown") == "❔"
+    severity_icons = [severity_icon(x) for x in ("critical", "high", "medium", "low")]
+    assert len(set(severity_icons)) == 4
+
+
 def test_format_source_tag_sources_preferred() -> None:
     f = Finding(
         severity="Low",

@@ -201,6 +201,40 @@ class TestRunIssueLinkerUserMessage:
         assert "## Open Issues" in user_msg
         assert "(unavailable)" in user_msg
 
+    @pytest.mark.parametrize(("code", "soft"), [(4, True), (1, False), (2, False), (3, False)])
+    def test_llm_system_exit(self, prompt_dir: Path, code: int, soft: bool) -> None:
+        """Exit code 4 (prompt too long, #1056) is soft. Codes 1 to 3 stop the run."""
+        async def _boom(req: LLMRequest) -> LLMResponse:
+            raise SystemExit(code)
+
+        with (
+            patch("subprocess.run") as mock_run,
+            patch("ai_pr_review.review.preflight.fetch_open_issues", return_value="(no open issues)"),
+        ):
+            mock_run.side_effect = [
+                _completed(stdout="abc1234 fix: test commit\n"),
+                _completed(stdout="feat/test-branch"),
+            ]
+            def _go() -> str:
+                return anyio.run(
+                    lambda: _run_issue_linker(
+                        manifest_text="## Manifest\n- src/foo.py",
+                        base_ref="main",
+                        script_dir=prompt_dir,
+                        provider="github",
+                        github_repository="owner/repo",
+                        model="claude-haiku-4-5",
+                        llm_call=_boom,
+                    )
+                )
+
+            if soft:
+                assert _go() == ""
+            else:
+                with pytest.raises(SystemExit) as excinfo:
+                    _go()
+                assert excinfo.value.code == code
+
     def test_llm_none_sentinel_returns_empty_string(self, prompt_dir: Path) -> None:
         """When the LLM returns NONE, _run_issue_linker returns ""."""
         result, _captured = self._run(prompt_dir, llm_text="NONE")

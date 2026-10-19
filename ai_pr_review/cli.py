@@ -640,9 +640,14 @@ async def _run_review_async(config: ReviewConfig) -> int:
         # Same outcome names as the pre-flight context-window skip above.
         rejected_outcome = ""
         if result.context_window_rejected is True:
-            rejected_outcome = (
-                "skipped_context_window_failed" if rc.fail_on_context_window else "skipped"
-            )
+            if rc.fail_on_context_window:
+                rejected_outcome = "skipped_context_window_failed"
+            elif rc.fail_on_findings and not result.outcome.may_approve:
+                # Analyzer findings on the skip can fail CI the same way, and
+                # the pre-flight skip reports it with this outcome name.
+                rejected_outcome = "skipped_fail_on_findings_failed"
+            else:
+                rejected_outcome = "skipped"
         await _emit_telemetry(result, rc, runtime.feedback_entries_count, runtime.sarif_elapsed_s,
                               is_incremental=runtime.is_incremental,
                               outcome_override=rejected_outcome)

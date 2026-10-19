@@ -11,6 +11,7 @@ import json
 from collections.abc import Callable
 
 import httpx
+import pytest
 
 from ai_pr_review.vcs._bitbucket_owners import OwnersLoad, parse_owners
 from ai_pr_review.vcs._finding_ids import split_fingerprint
@@ -152,6 +153,19 @@ def test_feedback_without_finding_id_is_stored_flagged_context_missing() -> None
     assert result.newly_acked_ids == (200,)
 
 
+@pytest.mark.parametrize("text", ["Fix the null check", "F-1 looks odd", "F1x is not an id", "Foo bar"])
+def test_feedback_text_starting_with_f_is_not_read_as_a_finding_id(text: str) -> None:
+    store = _RecordingStore()
+    _call_poller(
+        f"/ai-pr-review feedback {text}",
+        account_id=_OWNER_ID, permissions={}, owners=_owners(_OWNER_ID), store=store,
+    )
+    entry = store.entries[0]
+    assert entry.reason == text
+    assert "finding_id" not in entry.extras
+    assert entry.extras["context_missing"] is True
+
+
 def test_bracketed_finding_id_is_accepted() -> None:
     store = _RecordingStore()
     _call_poller(
@@ -191,6 +205,9 @@ def test_secret_looking_feedback_text_is_dropped_by_the_sanitizer() -> None:
     )
     assert store.entries == []
     assert "needs text" in result.replies[0][1]
+    # The reply must say that secret-looking text is removed, so the user can
+    # tell why a note that had text got the usage reply.
+    assert "looks like a secret" in result.replies[0][1]
 
 
 def test_feedback_text_is_sanitized_like_github() -> None:
@@ -354,6 +371,28 @@ def test_two_bare_feedback_lines_in_one_comment_are_both_stored_by_the_real_stor
     assert ok, err
     assert sorted(e["reason"] for e in _entries(repo)) == ["first point", "second point"]
     assert len(replies) == 2
+
+
+def test_two_feedback_lines_for_the_same_finding_are_both_stored() -> None:
+    """Same comment id and same F<n>: the line text must keep the keys apart."""
+    provider, repo, replies, _put = _setup(
+        "/ai-pr-review feedback F1 first point\n/ai-pr-review feedback F1 second point",
+        permissions={_OWNER_ID: "write"},
+    )
+    ok, err = _run(provider)
+    assert ok, err
+    assert sorted(e["reason"] for e in _entries(repo)) == ["first point", "second point"]
+    assert len(replies) == 2
+
+
+def test_a_verdict_and_a_feedback_line_for_the_same_finding_are_both_stored() -> None:
+    provider, repo, _replies, _put = _setup(
+        "/ai-pr-review false-positive F1 not exploitable\n/ai-pr-review feedback F1 see the guard in auth.py",
+        permissions={_OWNER_ID: "write"},
+    )
+    ok, err = _run(provider)
+    assert ok, err
+    assert sorted(e["command"] for e in _entries(repo)) == ["false-positive", "feedback"]
 
 
 def test_rerunning_the_same_bare_feedback_comment_adds_no_entries() -> None:

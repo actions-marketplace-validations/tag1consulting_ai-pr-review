@@ -28,10 +28,10 @@ OTHER_400_BODY = (
 )
 
 
-async def _post() -> httpx.Response:
+async def _post(provider_label: str = "Anthropic") -> httpx.Response:
     async with httpx.AsyncClient() as client:
         return await retry_post(
-            client, URL, headers={}, json={}, provider_label="Anthropic",
+            client, URL, headers={}, json={}, provider_label=provider_label,
             retry_count=0, retry_base_delay=0,
         )
 
@@ -77,6 +77,19 @@ class TestRetryPost:
             respx.post(URL).mock(return_value=httpx.Response(400, text=PROMPT_TOO_LONG_BODY))
             with pytest.raises(LLMError):
                 await _post()
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("label", ["Google Gemini", "Bedrock proxy", "OpenAI", "openai-compatible"])
+    async def test_the_phrase_from_an_unverified_provider_stays_a_plain_llm_error(
+        self, label: str
+    ) -> None:
+        """Only the Anthropic label is matched. A 400 from another provider that
+        contains the phrase must not become a skip."""
+        with respx.mock:
+            respx.post(URL).mock(return_value=httpx.Response(400, text=PROMPT_TOO_LONG_BODY))
+            with pytest.raises(LLMError) as excinfo:
+                await _post(label)
+        assert not isinstance(excinfo.value, LLMContextLengthError)
 
     @pytest.mark.anyio
     async def test_other_400_stays_a_plain_llm_error(self) -> None:

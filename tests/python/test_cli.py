@@ -1982,7 +1982,7 @@ class TestPromptTooLongRejectionExitCode:
 
     def _run(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, rejected: bool,
-        **config_overrides: object,
+        may_approve: bool = True, **config_overrides: object,
     ) -> tuple[int, str, MagicMock]:
         import anyio
 
@@ -2000,8 +2000,10 @@ class TestPromptTooLongRejectionExitCode:
             return ReviewResult(
                 findings=[],
                 outcome=ReviewOutcome(
-                    risk="None", event="APPROVE", incomplete=False, may_approve=True,
-                    finding_total=0,
+                    risk="None" if may_approve else "High",
+                    event="APPROVE" if may_approve else "REQUEST_CHANGES",
+                    incomplete=False, may_approve=may_approve,
+                    finding_total=0 if may_approve else 1,
                 ),
                 failed_agents=[],
                 summary=SummaryResult(comment_id=1, created=True, updated=False),
@@ -2048,6 +2050,28 @@ class TestPromptTooLongRejectionExitCode:
         assert exit_code == 2
         assert outcome == "skipped_context_window_failed"
         gate.assert_not_called()
+
+    def test_analyzer_findings_fail_ci_and_telemetry_says_so(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """AI_FAIL_ON_FINDINGS applies to the analyzer findings that the skip
+        carries. The telemetry outcome must match the exit code, as it does on
+        the pre-flight skip."""
+        exit_code, outcome, gate = self._run(
+            tmp_path, monkeypatch, rejected=True, may_approve=False, fail_on_findings=True,
+        )
+        assert exit_code == 2
+        assert outcome == "skipped_fail_on_findings_failed"
+        gate.assert_not_called()
+
+    def test_fail_on_findings_without_findings_still_exits_0(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        exit_code, outcome, _gate = self._run(
+            tmp_path, monkeypatch, rejected=True, may_approve=True, fail_on_findings=True,
+        )
+        assert exit_code == 0
+        assert outcome == "skipped"
 
     def test_flag_has_no_effect_on_an_ordinary_result(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
