@@ -16,6 +16,7 @@ the empty trusted ``--configuration`` file in ``phpstan.py`` (#739).
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import os
@@ -51,12 +52,12 @@ _TIMEOUT_SECS = 120
 _PHP_EXTENSIONS = {".php", ".module", ".inc", ".theme", ".install", ".profile"}
 
 # phpcs's --standard flag only accepts full ruleset names (or a path to a
-# ruleset.xml); it cannot mix a named standard with a bare sniff code
+# ruleset.xml). It cannot mix a named standard with a bare sniff code
 # (`--standard=PSR12,Squiz.Commenting.FunctionComment` errors: "the
 # Squiz.Commenting.FunctionComment coding standard is not installed").
-# Verified empirically against phpcs 4.0.4 this session. A small ruleset.xml
-# combining PSR12 with the one Squiz docblock sniff is the documented way to
-# add a single sniff on top of a named standard.
+# Verified empirically against phpcs 4.0.4. A generated ruleset.xml with a
+# `<rule ref>` for each is the way to add a single sniff on top of a named
+# standard.
 _PSR12_PLUS_DOCBLOCK_RULESET = """<?xml version="1.0"?>
 <ruleset name="PSR12PlusDocblock">
     <description>PSR12 with Squiz function-comment sniffs added.</description>
@@ -64,6 +65,7 @@ _PSR12_PLUS_DOCBLOCK_RULESET = """<?xml version="1.0"?>
     <rule ref="Squiz.Commenting.FunctionComment"/>
 </ruleset>
 """
+_PSR12_REFS = ("PSR12", "Squiz.Commenting.FunctionComment")
 
 # Correctness-only sniffs with no code-style opinion (no indentation, tabs,
 # line length, naming, or brace placement). Used when a repo ruleset names a
@@ -105,21 +107,42 @@ _ALWAYS_INSTALLED = frozenset({"Generic"})
 
 @dataclass
 class _Plan:
-    """What to run: a named standard or a generated ruleset, plus scope."""
+    """What to run: a named standard or a generated ruleset, plus scope.
+
+    A generated ruleset is stored as its inputs, the base refs and the
+    allowlisted repo ruleset. The XML is built only when phpcs needs it.
+    `static_xml` is the one fixed ruleset text, for the PSR12 default with no
+    repo ruleset. It holds no repo data.
+    """
 
     label: str
     remediation_standard: str
     named_standard: str | None = None
-    ruleset_xml: str | None = None
+    base_refs: tuple[str, ...] = ()
+    # The allowlisted subset of the repo ruleset. None when the plan carries
+    # nothing from the repo.
+    ruleset: _RepoRuleset | None = None
     files: list[str] = field(default_factory=list)
     drupal: bool = False
-    # True when the generated ruleset carries rules or patterns from the repo.
-    # Those can name a sniff that this phpcs version lacks, so a process error
-    # is retried once without them.
-    repo_rules: bool = False
-    # The repo's top-level exclude patterns. They survive a retry, because only
-    # the rules can name a sniff that this phpcs version lacks.
-    patterns: tuple[tuple[str, str], ...] = ()
+    static_xml: str | None = None
+
+    @property
+    def ruleset_xml(self) -> str | None:
+        """The generated ruleset for this plan. None for a named standard."""
+        if self.named_standard is not None:
+            return None
+        if self.static_xml is not None:
+            return self.static_xml
+        return _build_ruleset_xml(self.base_refs, self.ruleset)
+
+    @property
+    def repo_rules(self) -> bool:
+        """True when the generated ruleset carries rules or patterns from the repo.
+
+        Those can name a sniff that this phpcs version lacks, so a process
+        error is retried once without them.
+        """
+        return self.ruleset is not None
 
 
 def _installed_standards() -> set[str]:
@@ -245,7 +268,7 @@ def _plan_standard(php_files: list[str]) -> _Plan | None:
             return _Plan(
                 label="style-neutral fallback",
                 remediation_standard=ruleset_path.name,
-                ruleset_xml=_build_ruleset_xml(_STYLE_NEUTRAL_REFS, None),
+                base_refs=_STYLE_NEUTRAL_REFS,
                 files=php_files,
             )
         scoped = [f for f in php_files if _in_ruleset_scope(f, ruleset)]
@@ -261,20 +284,17 @@ def _plan_standard(php_files: list[str]) -> _Plan | None:
             return _Plan(
                 label="style-neutral fallback",
                 remediation_standard=ruleset.name,
-                ruleset_xml=_build_ruleset_xml(_STYLE_NEUTRAL_REFS, ruleset),
+                base_refs=_STYLE_NEUTRAL_REFS,
+                ruleset=ruleset,
                 files=scoped,
-                repo_rules=True,
-                patterns=ruleset.patterns,
             )
         if ruleset.has_standard_ref:
             return _Plan(
                 label="repo ruleset",
                 remediation_standard=ruleset.name,
-                ruleset_xml=_build_ruleset_xml((), ruleset),
+                ruleset=ruleset,
                 files=scoped,
                 drupal=any(r.get("ref", "").startswith("Drupal") for r in ruleset.rules),
-                repo_rules=True,
-                patterns=ruleset.patterns,
             )
         # A ruleset with no standard of its own: keep its scope and excludes
         # and pick the default standard below.
@@ -295,22 +315,20 @@ def _plan_standard(php_files: list[str]) -> _Plan | None:
         return _Plan(
             label="Drupal,DrupalPractice",
             remediation_standard=default_extra.name,
-            ruleset_xml=_build_ruleset_xml(("Drupal", "DrupalPractice"), default_extra),
+            base_refs=("Drupal", "DrupalPractice"),
+            ruleset=default_extra,
             files=php_files,
             drupal=True,
-            repo_rules=True,
-            patterns=default_extra.patterns,
         )
     if default_extra is not None:
         return _Plan(
             label="PSR12",
             remediation_standard=default_extra.name,
-            ruleset_xml=_build_ruleset_xml(("PSR12", "Squiz.Commenting.FunctionComment"), default_extra),
+            base_refs=_PSR12_REFS,
+            ruleset=default_extra,
             files=php_files,
-            repo_rules=True,
-            patterns=default_extra.patterns,
         )
-    return _Plan(label="PSR12", remediation_standard="PSR12", ruleset_xml=_PSR12_PLUS_DOCBLOCK_RULESET, files=php_files)
+    return _Plan(label="PSR12", remediation_standard="PSR12", static_xml=_PSR12_PLUS_DOCBLOCK_RULESET, files=php_files)
 
 
 @contextmanager
@@ -321,13 +339,14 @@ def _standard_arg(plan: _Plan) -> Iterator[str]:
     to a temp file that phpcs reads. The temp file never lives in the
     workspace.
     """
-    if plan.ruleset_xml is None:
+    xml = plan.ruleset_xml
+    if xml is None:
         yield plan.named_standard or ""
         return
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".xml", prefix="phpcs-ruleset-", delete=True
     ) as f:
-        f.write(plan.ruleset_xml)
+        f.write(xml)
         f.flush()
         yield f.name
 
@@ -403,21 +422,19 @@ def _run_phpcs(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
             "the repo's top-level exclude patterns are kept. stderr: %s",
             result.returncode, result.stderr[:200],
         )
-        plan = _Plan(
+        assert plan.ruleset is not None  # repo_rules is True only with a ruleset
+        plan = dataclasses.replace(
+            plan,
             label="style-neutral fallback",
-            remediation_standard=plan.remediation_standard,
-            ruleset_xml=_build_ruleset_xml(
-                _STYLE_NEUTRAL_REFS,
-                _RepoRuleset(
-                    name=plan.remediation_standard,
-                    files=(),
-                    patterns=plan.patterns,
-                    rules=(),
-                    has_standard_ref=False,
-                    missing_standards=(),
-                ),
+            base_refs=_STYLE_NEUTRAL_REFS,
+            ruleset=dataclasses.replace(
+                plan.ruleset,
+                files=(),
+                rules=(),
+                has_standard_ref=False,
+                missing_standards=(),
             ),
-            files=plan.files,
+            drupal=False,
         )
         result = _invoke_phpcs(plan)
         if result is None:
