@@ -68,6 +68,14 @@ jobs:
 
 Reviews start on the next PR.
 
+## What's new in v2.23.2
+
+**Behavior change: Bitbucket verdict owners are IDs only.** An `@nickname` on a `*` line of `.bitbucket/CODEOWNERS` no longer grants, because a nickname is not unique. List the `account_id` or the `{uuid}` instead. The review logs a warning that names each ignored nickname.
+
+**Behavior change: the owners file is read from the target branch only.** `AI_POLICY_SOURCE` no longer applies to it, so a pull request cannot add its own author to the list. Merge a changed owners file into the target branch first.
+
+See [Version History → v2.23.2](version-history/v2.23.2) for details.
+
 ## What's new in v2.23.1
 
 **Bitbucket finding numbers stay stable across runs.** A finding that an incremental run does not report again keeps its `F<n>`, so a waiting `/ai-pr-review false-positive F<n>` command can still find it. A run with no findings no longer restarts the numbering at F1. GitHub and GitLab are unchanged.
@@ -83,16 +91,6 @@ See [Version History → v2.23.1](version-history/v2.23.1) for details.
 **Behavior change: reported cost is higher.** The token table and the usage line now count the pr-summarizer and issue-linker, which were left out before. `token-usage-warn-usd` can fire on a run that did not fire it before.
 
 See [Version History → v2.23.0](version-history/v2.23.0) for details.
-
-## What's new in v2.22.1
-
-**The review headline follows a dismissal.** After you dismiss a finding, the risk and the finding counts update. A review posted before this release keeps a simpler update until the next rescan.
-
-**A changed file that points outside the workspace is dropped for every analyzer.** v2.22.0 did this for phpcs only.
-
-**New policy route key `paths-all`.** A route matches only if every changed file matches. A docs file next to real code no longer sends the whole PR to a no-review policy.
-
-See [Version History → v2.22.1](version-history/v2.22.1) for details.
 
 ## Learn more
 
