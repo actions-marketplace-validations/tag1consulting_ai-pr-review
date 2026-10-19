@@ -577,11 +577,9 @@ def _authorize(
     if owners is not None and owners.owners is not None and min_role != "admin":
         user = item.get("user") or {}
         uuid = user.get("uuid")
-        nickname = user.get("nickname")
         who = {
             "account_id": account_id,
             "uuid": str(uuid) if uuid else None,
-            "nickname": str(nickname) if nickname else None,
         }
         kind = owners.owners.matches(**who)
         if kind is not None:

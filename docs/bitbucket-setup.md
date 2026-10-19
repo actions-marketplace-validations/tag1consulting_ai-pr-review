@@ -67,11 +67,11 @@ Write the list like this:
 
 ```
 # People who may dismiss AI review findings
-* @alice 557058:9aa59bdf-2b71-431a-af18-286802c44d56 {9f49742f-b2a6-491a-84aa-6bbf3a935756}
+* 557058:9aa59bdf-2b71-431a-af18-286802c44d56 {9f49742f-b2a6-491a-84aa-6bbf3a935756}
 ```
 
-- `@nickname` matches the nickname of the commenter, without regard to case. Only ASCII nicknames match. A nickname with a space (for example a display name such as `Ada Lovelace`) cannot be written on a line, so use the `account_id` for those people.
-- An Atlassian `account_id` or a `{uuid}` matches the account. These never change. Prefer them. Unverified: whether Bitbucket lets a user change a nickname or take a free one, so a nickname is the weaker match.
+- An Atlassian `account_id` or a `{uuid}` matches the account. These never change. Use one of them for every owner. The `account_id` of a commenter is the `account_id` field of the comment `user` in the Bitbucket pull request API.
+- `@nickname` entries are ignored and logged as a warning. A nickname is not a unique identifier, so it can not authorize a commenter. Unverified: whether Bitbucket lets a user change a nickname. Version 2.23.1 matched on `@nickname`. Version 2.23.2 removed that, so replace each `@nickname` line with an `account_id` or a `{uuid}`. A command from a person who is listed only by nickname gets the permission lookup, as if the file did not list them.
 - Email addresses, `workspace/group` names, and `@teams/...` entries are ignored and logged at INFO level. A comment carries no email address, and a group lookup also needs admin.
 - Lines with another pattern (for example `*.py` or `docs/`) are ignored by this feature. Bitbucket still uses them for its own reviewer suggestions. The review does not scope owners by path, because the owner of `docs/` must not be able to dismiss a security finding in code.
 - If `AI_BITBUCKET_VERDICT_MIN_ROLE` is `admin`, the owners file is not used. An operator who asked for admins only did not ask for a list of names.
