@@ -343,3 +343,60 @@ def test_end_to_end_unauthorized_feedback_writes_nothing() -> None:
     assert ok, err
     assert _entries(repo) == []
     assert "write access" in replies[0]["content"]["raw"]
+
+
+def test_two_bare_feedback_lines_in_one_comment_are_both_stored_by_the_real_store() -> None:
+    provider, repo, replies, _put = _setup(
+        "/ai-pr-review feedback first point\n/ai-pr-review feedback second point",
+        permissions={_OWNER_ID: "write"},
+    )
+    ok, err = _run(provider)
+    assert ok, err
+    assert sorted(e["reason"] for e in _entries(repo)) == ["first point", "second point"]
+    assert len(replies) == 2
+
+
+def test_rerunning_the_same_bare_feedback_comment_adds_no_entries() -> None:
+    raw = "/ai-pr-review feedback first point\n/ai-pr-review feedback second point"
+    provider, repo, _replies, _put = _setup(raw, permissions={_OWNER_ID: "write"})
+    assert _run(provider)[0]
+    first = _entries(repo)
+    # A second run that sees the same comment un-acked (for example the summary
+    # body write failed) must not append the same two lines again.
+    provider3 = _make_provider(
+        _build_combined_handler(
+            comments=[
+                _summary_comment(100, _summary_body()),
+                _command_comment(200, raw, account_id=_OWNER_ID),
+            ],
+            permissions={_OWNER_ID: "write"},
+            repo=repo,
+            replies=[],
+            put_bodies=[],
+        ),
+        enable_feedback_loop=True,
+    )
+    assert _run(provider3)[0]
+    assert _entries(repo) == first
+    assert len(first) == 2
+
+
+def test_finding_id_feedback_still_dedups_on_the_comment_and_finding() -> None:
+    raw = "/ai-pr-review feedback F1 same point"
+    provider, repo, _replies, _put = _setup(raw, permissions={_OWNER_ID: "write"})
+    assert _run(provider)[0]
+    provider2 = _make_provider(
+        _build_combined_handler(
+            comments=[
+                _summary_comment(100, _summary_body()),
+                _command_comment(200, raw, account_id=_OWNER_ID),
+            ],
+            permissions={_OWNER_ID: "write"},
+            repo=repo,
+            replies=[],
+            put_bodies=[],
+        ),
+        enable_feedback_loop=True,
+    )
+    assert _run(provider2)[0]
+    assert len(_entries(repo)) == 1

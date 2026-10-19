@@ -819,6 +819,9 @@ def apply_pending_verdicts(
                         extras["finding_id"] = finding_id
                     else:
                         extras["context_missing"] = True
+                        # Separates two bare feedback lines in one comment in
+                        # the store's comment-id dedup key.
+                        extras["source_line_key"] = _reply_key_hash(feedback_reason)
                     # Same keys `slash/handlers.py:build_entry` always writes.
                     # This poller has no judge data to recover, so they stay at
                     # their "unknown" values.

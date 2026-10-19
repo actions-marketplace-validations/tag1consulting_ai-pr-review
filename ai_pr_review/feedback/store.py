@@ -28,7 +28,7 @@ import random
 import sys
 import time
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import httpx
 
@@ -181,6 +181,12 @@ def _find_comment_id_duplicate(
     `append()` still returned True and the reply claimed it was saved --
     caught in review before merge, never shipped.
 
+    A bare `feedback` line has no `finding_id`, so two such lines in one
+    comment would share `(comment_id, None)` and the second would be dropped.
+    The writer therefore adds `extras.source_line_key`, a short hash of the
+    line text, as a third part of the key. Entries without it compare as
+    `None`, so existing entries keep their old behavior.
+
     Inert for any entry without `extras.source_comment_id` -- GitHub's
     writer (`slash/handlers.py`'s `build_entry`) never sets this key, so
     this cannot change GitHub's dedup behavior.
@@ -188,11 +194,19 @@ def _find_comment_id_duplicate(
     comment_id = entry.extras.get("source_comment_id")
     if comment_id is None:
         return None
-    key = (comment_id, entry.extras.get("finding_id"))
+
+    def _key(e: FeedbackEntry) -> tuple[Any, Any, Any]:
+        return (
+            e.extras.get("source_comment_id"),
+            e.extras.get("finding_id"),
+            e.extras.get("source_line_key"),
+        )
+
+    key = _key(entry)
     for existing in existing_entries:
         if existing.extras.get("source_comment_id") is None:
             continue
-        if (existing.extras.get("source_comment_id"), existing.extras.get("finding_id")) == key:
+        if _key(existing) == key:
             return existing
     return None
 
