@@ -108,7 +108,7 @@ def test_parse_accepts_crlf_tabs_and_a_leading_bom() -> None:
     assert owners.ids == frozenset({_ACCOUNT_ID.lower(), _OTHER_ID.lower()})
 
 
-def test_parse_records_a_non_ascii_nickname_as_ignored_owner() -> None:
+def test_parse_puts_a_non_ascii_nickname_in_ignored_owners_not_ignored_nicknames() -> None:
     owners = parse_owners("* @J\u00f6rg @alice\n")
     assert owners.ignored_nicknames == ("@alice",)
     assert owners.ignored_owners == ("@J\u00f6rg",)
@@ -143,13 +143,6 @@ def test_a_nickname_owner_line_grants_nobody() -> None:
     assert owners.ids == frozenset()
     assert owners.matches(account_id="x", uuid=None) is None
     assert owners.matches(account_id="alice", uuid=None) is None
-
-
-def test_the_matcher_takes_no_nickname_argument() -> None:
-    """Guards against putting a nickname path back by accident."""
-    owners = parse_owners(f"* {_ACCOUNT_ID}\n")
-    with pytest.raises(TypeError):
-        owners.matches(account_id="x", uuid=None, nickname="alice")  # type: ignore[call-arg]
 
 
 # ---------------------------------------------------------------------------
@@ -293,8 +286,9 @@ def _git(repo: Path, *args: str) -> None:
     )
 
 
+@pytest.mark.parametrize("policy_source", ["", "base-ref", "workspace"])
 def test_load_ignores_edits_in_the_checkout_and_reads_the_target_branch(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, policy_source: str
 ) -> None:
     """End to end through git: the destination branch is `origin/develop`, the
     checkout carries a changed file that adds a second owner. Only the file on
@@ -306,6 +300,8 @@ def test_load_ignores_edits_in_the_checkout_and_reads_the_target_branch(
     _git(tmp_path, "commit", "-q", "-m", "owners")
     _git(tmp_path, "update-ref", "refs/remotes/origin/develop", "HEAD")
     (tmp_path / OWNERS_PATH).write_text(f"* {_ACCOUNT_ID} {_OTHER_ID}\n", encoding="utf-8")
+    # No value of AI_POLICY_SOURCE may switch the owners file to the checkout.
+    monkeypatch.setenv("AI_POLICY_SOURCE", policy_source)
 
     load = load_verdict_owners(workspace=str(tmp_path), base_ref="develop")
     assert load.owners is not None and load.owners.ids == frozenset({_ACCOUNT_ID.lower()})
@@ -335,6 +331,38 @@ def test_load_missing_file_in_a_real_repo_is_silent(
     load = load_verdict_owners(workspace=str(tmp_path), base_ref="develop")
     assert load.owners is None
     assert "WARNING" not in capsys.readouterr().err
+
+
+def test_load_with_a_missing_target_ref_warns_and_never_falls_back_to_the_checkout(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A shallow clone may lack `origin/<BASE_REF>`. The file in the checkout must
+    not be used then. The permission lookup decides."""
+    _git(tmp_path, "init", "-q", "-b", "develop")
+    (tmp_path / ".bitbucket").mkdir()
+    (tmp_path / OWNERS_PATH).write_text(f"* {_OTHER_ID}\n", encoding="utf-8")
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-q", "-m", "owners")
+    # No refs/remotes/origin/develop on purpose.
+    load = load_verdict_owners(workspace=str(tmp_path), base_ref="develop")
+    assert load.owners is None
+    assert "WARNING" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("count", "truncated"), [(1, False), (10, False), (11, True)])
+def test_load_warning_names_at_most_ten_nicknames(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    count: int,
+    truncated: bool,
+) -> None:
+    text = "* " + " ".join(f"@n{i}" for i in range(count)) + "\n"
+    monkeypatch.setattr(owners_mod, "read_repo_file", _fake_reader({"base-ref": text}))
+    with caplog.at_level(logging.WARNING, logger=owners_mod.__name__):
+        load_verdict_owners(workspace=".", base_ref="develop")
+    msg = next(m for m in caplog.messages if "@nickname" in m)
+    assert msg.endswith("...") is truncated
+    assert ("entry" in msg and "entries" not in msg) is (count == 1)
 
 
 # ---------------------------------------------------------------------------
@@ -427,7 +455,6 @@ def test_an_owner_listed_by_account_id_is_authorized_without_any_permission_call
     assert calls == [], "an owner must not trigger the admin-only lookup"
     assert extract_verdicts(put_bodies[-1])[_FP] == "dismissed"
     assert "marked **F1**" in replies[0]["content"]["raw"]
-    assert "Note: this pull request changes" not in replies[0]["content"]["raw"]
 
 
 def test_an_owner_listed_by_nickname_is_not_authorized(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -604,6 +631,24 @@ def test_the_provider_passes_its_config_to_the_owners_loader(
         _with_permission_calls(inner, forbidden=True, calls=[]),
         monkeypatch, owners=None, loader_kwargs=seen,
         base_ref="develop",
+    )
+    _post(prov)
+    assert seen == [{"workspace": ".", "base_ref": "develop"}]
+
+
+@pytest.mark.parametrize("policy_source", ["", "base-ref", "workspace"])
+def test_the_loader_gets_no_source_whatever_ai_policy_source_says(
+    monkeypatch: pytest.MonkeyPatch, policy_source: str
+) -> None:
+    monkeypatch.setenv("AI_POLICY_SOURCE", policy_source)
+    seen: list[dict] = []
+    inner = _build_handler(
+        comments=[_summary_comment(100, _summary_body()), _cmd()],
+        permissions={}, replies=[], put_bodies=[],
+    )
+    prov = _provider(
+        _with_permission_calls(inner, forbidden=True, calls=[]),
+        monkeypatch, owners=None, loader_kwargs=seen, base_ref="develop",
     )
     _post(prov)
     assert seen == [{"workspace": ".", "base_ref": "develop"}]

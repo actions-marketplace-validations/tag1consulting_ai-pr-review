@@ -30,10 +30,9 @@ group lookup needs admin as well. It also covers `@nickname`. A nickname is not
 a unique identifier: Atlassian names the `account_id` as the stable key for a
 user, and a nickname is not guaranteed to be unique. Unverified: whether a user
 can change a nickname. Authorization on a nickname could let a commenter pass as
-an owner who has the same nickname. v2.23.1
-matched on `@nickname`, and v2.23.2 removed that. The loader logs a warning
-that names each ignored `@nickname`, so an operator can replace it with an
-`account_id` or a `{uuid}`.
+an owner who has the same nickname. Version 2.23.1 matched on `@nickname`, and
+v2.23.2 removed that. The loader logs a warning that names each ignored
+`@nickname`, so an operator can replace it with an `account_id` or a `{uuid}`.
 """
 
 from __future__ import annotations
