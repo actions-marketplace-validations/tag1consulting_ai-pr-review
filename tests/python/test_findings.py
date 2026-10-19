@@ -586,6 +586,181 @@ def test_merge_corroboration_preserved_when_agent_omits_category() -> None:
 
 
 # ---------------------------------------------------------------------------
+# #1074: style findings do not absorb security findings
+# ---------------------------------------------------------------------------
+
+_PHP = "lib/data_processor.php"
+
+
+def test_merge_pr70_php_clusters_keep_security_findings_visible() -> None:
+    """Regression from ai-pr-review-test PR #70 (lib/data_processor.php).
+
+    A phpcs "Missing doc comment" ERROR sat within 3 lines of a security
+    finding. The `other` wildcard let them cluster, the phpcs text won the
+    headline on a tie, the semgrep or agent security text was dropped, and the
+    docblock finding showed "corroborated by analyzer, confidence 100".
+    """
+    docblocks = [
+        _make_finding(
+            file=_PHP, line=line, source="phpcs", confidence=90, category="lint",
+            finding=f"Squiz.Commenting.FunctionComment.Missing: Missing doc comment for function f{line}()",
+        )
+        for line in (7, 14, 21, 29, 35, 45)
+    ]
+    findings = [
+        *docblocks,
+        _make_finding(
+            file=_PHP, line=31, source="semgrep", confidence=90, category="injection",
+            finding="php.lang.security.exec-use.exec-use: Executing non-constant commands.",
+        ),
+        _make_finding(
+            file=_PHP, line=31, source="security-reviewer", severity="Critical", confidence=90,
+            category="injection", finding="runDiagnostic passes $host to shell_exec: command injection",
+        ),
+        _make_finding(
+            file=_PHP, line=37, source="semgrep", confidence=90, category="injection",
+            finding="php.lang.security.unserialize-use.unserialize-use: Calling unserialize().",
+        ),
+        _make_finding(
+            file=_PHP, line=37, source="security-reviewer", confidence=85, category="injection",
+            finding="unserialize() on $data enables PHP object injection",
+        ),
+        _make_finding(
+            file=_PHP, line=47, source="security-reviewer", confidence=80, category="other",
+            finding="generateToken uses md5 of the user id and time(): tokens are predictable",
+        ),
+    ]
+    result = merge_findings(findings)
+
+    # 6 docblock findings + exec cluster + unserialize cluster + md5 finding.
+    assert len(result) == 9
+    phpcs_only = [f for f in result if f.sources == ["phpcs"]]
+    assert len(phpcs_only) == 6
+    assert all(not f.corroborated and f.confidence == 90 for f in phpcs_only)
+
+    by_line = {f.line: f for f in result if f.sources != ["phpcs"]}
+    exec_finding = by_line[31]
+    assert exec_finding.source == "security-reviewer"
+    assert exec_finding.severity == "Critical"
+    assert exec_finding.corroborated is True
+    unserialize = by_line[37]
+    assert unserialize.source == "security-reviewer"  # tie on severity: the agent text wins
+    assert unserialize.corroborated is True
+    assert unserialize.sources == ["security-reviewer", "semgrep"]
+    md5 = by_line[47]
+    assert "md5" in md5.finding
+    assert md5.corroborated is False
+    assert md5.confidence == 80
+
+
+def test_merge_lint_does_not_cluster_with_other_category() -> None:
+    findings = [
+        _make_finding(file="a.php", line=10, source="phpcs", category="lint"),
+        _make_finding(file="a.php", line=11, source="security-reviewer", category="other"),
+    ]
+    assert len(merge_findings(findings)) == 2
+
+
+def test_merge_lint_does_not_cluster_with_real_category() -> None:
+    findings = [
+        _make_finding(file="a.php", line=10, source="phpcs", category="lint"),
+        _make_finding(file="a.php", line=11, source="semgrep", category="injection"),
+    ]
+    assert len(merge_findings(findings)) == 2
+
+
+def test_merge_docs_clusters_only_with_docs() -> None:
+    docs = [
+        _make_finding(file="a.md", line=10, source="docs-ref-check", category="docs"),
+        _make_finding(file="a.md", line=11, source="docs-drift-check", category="docs"),
+    ]
+    assert len(merge_findings(docs)) == 1
+    mixed = [
+        _make_finding(file="a.md", line=10, source="docs-ref-check", category="docs"),
+        _make_finding(file="a.md", line=11, source="code-reviewer", category="other"),
+    ]
+    assert len(merge_findings(mixed)) == 2
+
+
+def test_merge_other_still_bridges_real_categories_without_lint() -> None:
+    """The wildcard is unchanged outside lint and docs."""
+    findings = [
+        _make_finding(file="a.py", line=10, source="semgrep", category="injection"),
+        _make_finding(file="a.py", line=11, source="security-reviewer", category="other"),
+    ]
+    assert len(merge_findings(findings)) == 1
+
+
+def test_merge_tie_prefers_agent_text_over_analyzer() -> None:
+    findings = [
+        _make_finding(
+            file="a.py", line=10, source="semgrep", category="injection",
+            finding="python.lang.security.audit.sql-injection: generic rule message",
+        ),
+        _make_finding(
+            file="a.py", line=12, source="security-reviewer", category="injection",
+            finding="get_user concatenates user_id into the query",
+        ),
+    ]
+    result = merge_findings(findings)
+    assert len(result) == 1
+    assert result[0].source == "security-reviewer"
+    assert result[0].finding == "get_user concatenates user_id into the query"
+    assert result[0].sources == ["security-reviewer", "semgrep"]
+
+
+def test_merge_higher_severity_analyzer_keeps_dropped_agent_text() -> None:
+    findings = [
+        _make_finding(
+            file="a.py", line=10, source="semgrep", severity="High", category="injection",
+            finding="python.lang.security.audit.sql-injection: generic rule message",
+        ),
+        _make_finding(
+            file="a.py", line=12, source="code-reviewer", severity="Medium", category="injection",
+            finding="get_user concatenates user_id into the query",
+        ),
+    ]
+    result = merge_findings(findings)
+    assert len(result) == 1
+    assert result[0].source == "semgrep"
+    assert result[0].also_reported == [
+        "code-reviewer (line 12): get_user concatenates user_id into the query"
+    ]
+
+
+def test_merge_higher_severity_agent_adds_no_note() -> None:
+    findings = [
+        _make_finding(file="a.py", line=10, source="semgrep", severity="Medium", category="injection"),
+        _make_finding(file="a.py", line=12, source="code-reviewer", severity="High", category="injection"),
+    ]
+    result = merge_findings(findings)
+    assert result[0].source == "code-reviewer"
+    assert result[0].also_reported == []
+
+
+def test_merge_other_with_other_is_not_corroborated() -> None:
+    """Two `other` findings say nothing about whether they are the same defect."""
+    findings = [
+        _make_finding(file="a.py", line=10, source="semgrep", confidence=90),
+        _make_finding(file="a.py", line=12, source="security-reviewer", confidence=90),
+    ]
+    result = merge_findings(findings)
+    assert len(result) == 1
+    assert result[0].corroborated is False
+    assert result[0].confidence == 90
+
+
+def test_merge_different_real_categories_do_not_corroborate() -> None:
+    findings = [
+        _make_finding(file="a.py", line=10, source="semgrep", category="secret"),
+        _make_finding(file="a.py", line=12, source="security-reviewer", category="injection"),
+    ]
+    result = merge_findings(findings)
+    assert len(result) == 2
+    assert all(not f.corroborated for f in result)
+
+
+# ---------------------------------------------------------------------------
 # Finding model validation
 # ---------------------------------------------------------------------------
 
@@ -608,8 +783,10 @@ def test_finding_rejects_confidence_out_of_range() -> None:
 def test_merge_corroboration_boosts_confidence() -> None:
     """Analyzer + LLM-agent on the same location → corroborated + boosted."""
     findings = [
-        _make_finding(file="a.py", line=10, source="semgrep", confidence=90),
-        _make_finding(file="a.py", line=12, source="security-reviewer", confidence=90),
+        _make_finding(file="a.py", line=10, source="semgrep", confidence=90, category="injection"),
+        _make_finding(
+            file="a.py", line=12, source="security-reviewer", confidence=90, category="injection"
+        ),
     ]
     result = merge_findings(findings)
     assert len(result) == 1
@@ -657,8 +834,10 @@ def test_merge_single_finding_no_boost() -> None:
 def test_merge_corroboration_cap() -> None:
     """Boost is capped at 100 — 95 + 10 = 100, not 105."""
     findings = [
-        _make_finding(file="a.py", line=10, source="shellcheck", confidence=95),
-        _make_finding(file="a.py", line=12, source="security-reviewer", confidence=95),
+        _make_finding(file="a.py", line=10, source="shellcheck", confidence=95, category="injection"),
+        _make_finding(
+            file="a.py", line=12, source="security-reviewer", confidence=95, category="injection"
+        ),
     ]
     result = merge_findings(findings)
     assert len(result) == 1

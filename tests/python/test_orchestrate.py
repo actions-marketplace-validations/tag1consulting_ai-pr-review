@@ -1255,6 +1255,7 @@ def test_orchestrate_judge_on_downranks_weak_finding(tmp_path: Path) -> None:
         "confidence": 90,
         "file": "db.py",
         "line": 42,
+        "category": "injection",
         "finding": "SQL injection via f-string",
         "remediation": "Use parameterized queries",
         # source intentionally omitted; extract_findings stamps "code-reviewer"
@@ -1291,6 +1292,7 @@ def test_orchestrate_judge_on_downranks_weak_finding(tmp_path: Path) -> None:
         finding="SQL injection via f-string",
         source="semgrep",
         sources=["semgrep"],
+        category="injection",
         corroborated=False,
     )
 

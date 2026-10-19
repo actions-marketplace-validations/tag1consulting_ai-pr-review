@@ -2,7 +2,9 @@
 
 Proximity-based dedup: findings in the same file within PROXIMITY_LINES of
 each other are clustered; the highest-severity finding survives with a union
-of sources. When the cluster mixes two different analyzer tools, the other
+of sources. Style (`lint`) and `docs` findings cluster only with their own
+category, and a cluster counts as corroborated only when an analyzer member
+and an agent member describe the same kind of defect (#1074). When the cluster mixes two different analyzer tools, the other
 tool's message is kept in `Finding.also_reported` so it is not lost (#1044).
 
 Closes #185 (dedup preserves distinct nearby findings; merges exact
@@ -14,7 +16,7 @@ from __future__ import annotations
 import logging
 
 from ai_pr_review.findings.models import Finding, Severity, combine_also_reported
-from ai_pr_review.findings.provenance import boosted_confidence, is_corroborated
+from ai_pr_review.findings.provenance import boosted_confidence, is_corroborated_cluster
 from ai_pr_review.findings.scope import is_analyzer_source
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,12 @@ _SEVERITY_ORDER: dict[Severity, int] = {
 # Findings within this many lines of each other in the same file are
 # candidates for dedup.
 PROXIMITY_LINES = 3
+
+# A finding in one of these categories describes style or documentation, not a
+# defect in the behavior of the code. It clusters only with findings of the
+# same category. Without this rule, the "other" wildcard below let a phpcs
+# "Missing doc comment" finding absorb a nearby security finding (#1074).
+_STRICT_CATEGORIES = frozenset({"lint", "docs"})
 
 
 def merge_findings(
@@ -109,6 +117,12 @@ def _cluster_category_compatible(cluster: list[Finding], f: Finding) -> bool:
     within PROXIMITY_LINES of their neighbor), silently dropping one of them
     when the cluster collapses.
     """
+    if f.category in _STRICT_CATEGORIES or any(m.category in _STRICT_CATEGORIES for m in cluster):
+        # `categories_compatible` is not used here on purpose: it also drives
+        # the cross-run thread match in `vcs/_canonical.py`, and a change to it
+        # would change which old threads a new finding updates. Only the
+        # within-run clustering is strict.
+        return all(m.category == f.category for m in cluster)
     established = next((m.category for m in cluster if m.category != "other"), None)
     return categories_compatible(established, f.category)
 
@@ -154,10 +168,18 @@ def _analyzer_tools(f: Finding) -> frozenset[str] | None:
 def _also_reported_notes(cluster: list[Finding], best: Finding) -> list[str]:
     """Compose one note per distinct message that the collapse would otherwise drop.
 
-    Only analyzer-vs-analyzer members from a different tool set than `best`
-    qualify. Two different tools report different rules, so their messages are
-    not duplicates. Agent members and same-tool members are the "same issue
-    found twice" case and stay collapsed silently.
+    This applies only when `best` is an analyzer finding:
+
+    - An analyzer member from a different tool set than `best` qualifies. Two
+      different tools report different rules, so their messages are not
+      duplicates.
+    - An agent member qualifies too (#1074). The agent text usually names the
+      impact in the context of the code, and the analyzer text is a generic
+      rule message. The analyzer won the headline only because its severity
+      was higher.
+
+    Same-tool members stay collapsed silently. When `best` is an agent
+    finding, nothing is added: the badge already says an analyzer agreed.
     """
     best_tools = _analyzer_tools(best)
     if best_tools is None:
@@ -168,22 +190,43 @@ def _also_reported_notes(cluster: list[Finding], best: Finding) -> list[str]:
         if f is best:
             continue
         tools = _analyzer_tools(f)
-        if tools is None or tools == best_tools:
+        if tools == best_tools:
             continue
+        if tools is None:
+            names = sorted({s for s in (f.sources or ([f.source] if f.source else [])) if s})
+            if not names:
+                continue
+            label = ", ".join(names)
+        else:
+            label = ", ".join(sorted(tools))
         text = " ".join(f.finding.split())
         if len(text) > _MAX_NOTE_CHARS:
             text = text[: _MAX_NOTE_CHARS - 1] + "…"
         where = f" (line {f.line})" if f.line else ""
-        note = f"{', '.join(sorted(tools))}{where}: {text}"
+        note = f"{label}{where}: {text}"
         if note not in seen:
             seen.add(note)
             notes.append(note)
     return combine_also_reported([notes])
 
 
+def _headline_key(f: Finding) -> tuple[int, int, int]:
+    """Sort key for the finding that represents a cluster.
+
+    Severity decides first. On a tie, a finding that is not style-only wins,
+    then an agent finding wins over an analyzer finding, because agent text
+    carries the context. Ties after that keep the input order (`min` is stable).
+    """
+    return (
+        _SEVERITY_ORDER.get(f.severity, 99),
+        1 if f.category == "lint" else 0,
+        1 if _analyzer_tools(f) is not None else 0,
+    )
+
+
 def _collapse_cluster(cluster: list[Finding]) -> Finding:
     """Collapse a cluster to the highest-severity representative."""
-    best = min(cluster, key=lambda f: _SEVERITY_ORDER.get(f.severity, 99))
+    best = min(cluster, key=_headline_key)
     all_sources: list[str] = []
     seen: set[str] = set()
     for f in cluster:
@@ -214,7 +257,7 @@ def _collapse_cluster(cluster: list[Finding]) -> Finding:
             sorted(non_other_categories),
             best.category,
         )
-    if is_corroborated(all_sources):
+    if is_corroborated_cluster(cluster):
         update["corroborated"] = True
         update["confidence"] = boosted_confidence(best.confidence)
     return best.model_copy(update=update)

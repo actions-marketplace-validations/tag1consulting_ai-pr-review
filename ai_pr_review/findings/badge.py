@@ -18,13 +18,15 @@ Labels, in order:
 from __future__ import annotations
 
 from ai_pr_review.findings.models import Finding
-from ai_pr_review.findings.provenance import is_corroborated
 from ai_pr_review.findings.scope import is_analyzer_source
 
 
 def finding_label(finding: Finding) -> str:
     sources = finding.sources or ([finding.source] if finding.source else [])
-    if finding.corroborated or is_corroborated(sources):
+    # `finding.corroborated` is set by the merge, which looks at the categories
+    # of the members. The sources alone cannot tell whether an analyzer and an
+    # agent described the same defect (#1074).
+    if finding.corroborated:
         return "corroborated by analyzer"
     if sources and all(is_analyzer_source(s) for s in sources):
         return "analyzer finding"
