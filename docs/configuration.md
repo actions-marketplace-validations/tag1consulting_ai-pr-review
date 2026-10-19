@@ -273,6 +273,16 @@ GitLab never posts a real approval state. On GitLab a ceiling other than `approv
 | `AI_CONTEXT_WINDOW_MARGIN` | `0.9` | Action input `context-window-margin`. Skip the review before any LLM call when an agent's estimated prompt does not fit the model context window. The engine adds the estimated input tokens and the output cap of each agent, and compares the sum with this fraction of the `context_window` of the model in `config/model-pricing.json`. A skip comment explains the cause and names the agent. The check runs whether or not `AI_MAX_COST_USD` is set. Use a number from `0` to `1`. `0` turns the check off. A model with no `context_window` entry is not checked. The bundled file lists `context_window` for Sonnet 5.5, Opus 5.5, and Haiku 5.5. The token estimate is approximate, and the margin is the allowance for that. `MAX_DIFF_LINES` counts lines and not tokens, so it cannot protect against this failure. Set `AI_EXCLUDE_PATTERNS` to exclude generated files and build output. |
 | `AI_FAIL_ON_CONTEXT_WINDOW` | `false` | Action input `fail-on-context-window`. When `true`, a context-window skip exits with code 2 and not the default 0. This works like `AI_FAIL_ON_COST_CEILING`, and the two settings are independent. The run always stops before any LLM call, whatever this setting is. |
 
+**Reading the cost estimate: a worked example.** The `COST_ESTIMATE` line ends with two fields, `input=` and `output_cap=`. They split the total into the cost of the estimated input tokens and the cost of the output cap. The two fields add up to `total=`. The output cap part is a fixed amount for each agent. It does not depend on the diff. The input part grows with the diff.
+
+Use the rates in `config/model-pricing.json` for the model. Sonnet 5.5 costs $2.00 for each million input tokens and $10.00 for each million output tokens. The default output cap is 32,768 tokens for each agent. Take a ceiling of $1.00 and one agent:
+
+1. The output cap costs 32,768 x $10.00 / 1,000,000 = $0.32768.
+2. The input budget is $1.00 - $0.32768 = $0.67232.
+3. The input budget buys $0.67232 / ($2.00 / 1,000,000) = 336,160 estimated input tokens.
+
+Thus a ceiling of $1.00 allows about 336,000 estimated input tokens for one agent on Sonnet 5.5. Each agent that runs adds its own output cap and its own input. With two agents that read the same diff, the output caps cost 2 x $0.32768 = $0.65536. The remaining $0.34464 buys about 86,160 estimated input tokens for each agent. To get more room, lower `AI_MAX_TOKENS_PER_AGENT`, remove agents with `AI_EXCLUDE_AGENTS`, or raise the ceiling. The rates in the pricing file can change, so read the file again before you rely on these numbers.
+
 #### Quiet reruns and cross-run finding dedup
 
 | Variable | Default | Description |

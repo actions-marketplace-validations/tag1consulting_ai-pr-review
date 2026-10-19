@@ -81,7 +81,7 @@ from dataclasses import dataclass
 
 from ai_pr_review.agents.roster import AgentSpec
 from ai_pr_review.context.budget import estimate_tokens
-from ai_pr_review.pricing import format_cost, model_pricing, token_cost_units
+from ai_pr_review.pricing import ModelRates, format_cost, model_pricing, token_cost_units
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +173,13 @@ class AgentCostEstimate:
     estimated_cost_units is 0 in that case and it is excluded from the
     ceiling comparison. ``enforce_cost_ceiling`` and the posted review
     report it (#977) -- see the module docstring."""
+    estimated_input_cost_units: int = 0
+    """Part of ``estimated_cost_units`` that the input tokens cause (#1055).
+    Zero for an unpriced model."""
+    estimated_output_cost_units: int = 0
+    """Part of ``estimated_cost_units`` that the output cap causes (#1055).
+    This is an upper bound. The input and output parts add up to
+    ``estimated_cost_units``. Zero for an unpriced model."""
 
 
 @dataclass(frozen=True)
@@ -182,10 +189,29 @@ class CostEstimate:
     per_agent: tuple[AgentCostEstimate, ...]
     total_cost_units: int  # $0.0001 units; excludes unknown-pricing agents
     any_unknown_pricing: bool
+    total_input_cost_units: int = 0  # part of total_cost_units, #1055
+    total_output_cost_units: int = 0  # part of total_cost_units, the output cap, #1055
 
     @property
     def total_cost_usd(self) -> float:
         return self.total_cost_units / 10000
+
+
+def _split_cost_units(
+    rates: ModelRates, *, input_tokens: int, output_tokens: int
+) -> tuple[int | None, int, int]:
+    """Return ``(total, input_part, output_part)`` in $0.0001 units.
+
+    The total comes from ``token_cost_units``, so a long-prompt tier applies to
+    both parts. The input part is the same call with no output tokens, and the
+    output part is the rest. The parts always add up to the total. All three
+    values are ``None``/0 when *rates* has no pricing entry.
+    """
+    total = token_cost_units(rates, input_tokens=input_tokens, output_tokens=output_tokens)
+    if total is None:
+        return None, 0, 0
+    input_part = token_cost_units(rates, input_tokens=input_tokens, output_tokens=0) or 0
+    return total, input_part, total - input_part
 
 
 def estimate_review_cost(
@@ -217,6 +243,8 @@ def estimate_review_cost(
 
     per_agent: list[AgentCostEstimate] = []
     total_units = 0
+    total_input_units = 0
+    total_output_units = 0
     any_unknown = False
 
     for agent in agents:
@@ -236,7 +264,7 @@ def estimate_review_cost(
         )
 
         rates = model_pricing(model_id, pricing_data)
-        raw_cost = token_cost_units(
+        raw_cost, input_units, output_units = _split_cost_units(
             rates, input_tokens=input_tokens, output_tokens=output_tokens
         )
         unknown = raw_cost is None
@@ -253,6 +281,8 @@ def estimate_review_cost(
             cost_units = 0
         else:
             total_units += cost_units
+            total_input_units += input_units
+            total_output_units += output_units
 
         per_agent.append(
             AgentCostEstimate(
@@ -262,6 +292,8 @@ def estimate_review_cost(
                 estimated_output_tokens=output_tokens,
                 estimated_cost_units=cost_units,
                 unknown_pricing=unknown,
+                estimated_input_cost_units=input_units,
+                estimated_output_cost_units=output_units,
             )
         )
 
@@ -269,6 +301,8 @@ def estimate_review_cost(
         per_agent=tuple(per_agent),
         total_cost_units=total_units,
         any_unknown_pricing=any_unknown,
+        total_input_cost_units=total_input_units,
+        total_output_cost_units=total_output_units,
     )
 
 
@@ -303,7 +337,7 @@ def estimate_preflight_agent_cost(
     """
     input_tokens = estimate_billed_tokens(diff_text)
     rates = model_pricing(model, pricing_data)
-    raw_cost = token_cost_units(
+    raw_cost, input_units, output_units = _split_cost_units(
         rates, input_tokens=input_tokens, output_tokens=output_tokens
     )
     unknown = raw_cost is None
@@ -323,6 +357,8 @@ def estimate_preflight_agent_cost(
         estimated_output_tokens=output_tokens,
         estimated_cost_units=cost_units,
         unknown_pricing=unknown,
+        estimated_input_cost_units=input_units,
+        estimated_output_cost_units=output_units,
     )
 
 
@@ -349,6 +385,8 @@ def merge_cost_estimates(*parts: CostEstimate | AgentCostEstimate) -> CostEstima
         per_agent=per_agent,
         total_cost_units=sum(a.estimated_cost_units for a in per_agent),
         any_unknown_pricing=any(a.unknown_pricing for a in per_agent),
+        total_input_cost_units=sum(a.estimated_input_cost_units for a in per_agent),
+        total_output_cost_units=sum(a.estimated_output_cost_units for a in per_agent),
     )
 
 
@@ -418,12 +456,15 @@ def log_cost_estimate(estimate: CostEstimate, *, ceiling_usd: float) -> None:
         for a in estimate.per_agent
     )
     logger.warning(
-        "COST_ESTIMATE total=%s ceiling=%s agents=%d any_unknown_pricing=%s %s",
+        "COST_ESTIMATE total=%s ceiling=%s agents=%d any_unknown_pricing=%s %s "
+        "input=%s output_cap=%s",
         format_cost(estimate.total_cost_units),
         format_cost(int(round(ceiling_usd * 10000))) if ceiling_usd > 0 else "none",
         len(estimate.per_agent),
         estimate.any_unknown_pricing,
         breakdown,
+        format_cost(estimate.total_input_cost_units),
+        format_cost(estimate.total_output_cost_units),
     )
 
 
