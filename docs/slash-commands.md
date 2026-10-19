@@ -183,6 +183,8 @@ Body-level findings have no backing review thread, so nothing needs resolution. 
 
 Stores free-form feedback in the learning loop. The feedback does not belong to a specific finding verdict. Use it, for example, to note that a certain category of finding is too noisy for this repository.
 
+**On Bitbucket**, the review run applies the command at the next run (see [Bitbucket setup](bitbucket-setup#dismissing-findings)). The text is required. A bare command gets a usage reply and saves nothing. An `F<n>` before the text is optional. When you give one, the entry records the source and file of that finding. The command uses the same authorization as `false-positive` and `wont-fix`: the owners file first, then the repository permission lookup. It saves the text only when `AI_FEEDBACK_LOOP=true` and `AI_BITBUCKET_VERDICTS=true`. The text passes the same sanitization as on GitHub.
+
 ### `/ai-pr-review explain [F<n>]`
 
 Requests a more detailed explanation from the originating agent. This command is currently a stub. The workflow recognizes and acknowledges the command, but it does not yet call the agent again. It posts a canned reply.

@@ -149,5 +149,5 @@ The engine injects the `<repo-feedback>` block into the agent system prompts wit
 | Provider | Learning loop |
 |----------|---------------|
 | GitHub | Full support |
-| Bitbucket | Full support (issue #906). Only `false-positive` and `wont-fix`. A separate issue (#933) tracks `feedback` command handling |
+| Bitbucket | Full support (issue #906). `false-positive`, `wont-fix` and `feedback` (issue #933). `feedback` needs text and takes an optional `F<n>`. It uses the same authorization as the verdicts |
 | GitLab | Stub (no-op) |
