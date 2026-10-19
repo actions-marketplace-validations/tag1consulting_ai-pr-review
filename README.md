@@ -246,7 +246,7 @@ Slash commands are built into the canonical [examples/workflows/pr-review.yml](e
 | `pr-number` | No | `''` | PR number (required for `pr` target; unused in standalone) |
 | `base-ref` | **Yes** | none | Base branch name |
 | `head-sha` | **Yes** | none | Head commit SHA |
-| `policy-source` | No | `base-ref` | Where `.ai-pr-review/policy.yml` (or its `.github/ai-pr-review/policy.yml` fallback) is read from (`base-ref` or `workspace`). See [Configuration: Action inputs](docs/configuration.md#action-inputs) and [Policies: Security](docs/policy.md) before setting `workspace`. |
+| `policy-source` | No | `base-ref` | Where `.ai-pr-review/policy.yml` (or its `.github/ai-pr-review/policy.yml` fallback) is read from (`base-ref` or `workspace`). On Bitbucket it also selects where the verdict owners file `.bitbucket/CODEOWNERS` is read from. See [Configuration: Action inputs](docs/configuration.md#action-inputs) and [Policies: Security](docs/policy.md) before setting `workspace`. |
 | `github-token` | **Yes** | none | GitHub token with `pull-requests: write` |
 | `parallel` | No | `true` | Run agents in parallel (tiered fan-out). Set to `false` to revert to sequential if you hit provider rate limits |
 | `temperature` | No | `0.3` | Sampling temperature for LLM calls (float in [0, 2]). Not sent to models that reject or discourage a non-default value (currently Claude Opus 4.7, 4.8, 5 and 5.5, Claude Sonnet 5 and 5.5, OpenAI `o1`/`o3`/`o4`, `gpt-5`, `gpt-5.5`, `gpt-5.6-*`, `gpt-6*`, and Gemini 3), where the provider's default applies. `gpt-5.4` and `gpt-5.4-mini` still receive it. The exact list is `resolve_temperature()` in `ai_pr_review/llm/_config.py`. |
