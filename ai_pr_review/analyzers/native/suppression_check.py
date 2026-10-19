@@ -30,18 +30,26 @@ logger = logging.getLogger(__name__)
 _CONFIDENCE = 85
 _SOURCE = "suppression-check"
 
-# A comment marker. The directive must come after one of these on the line.
-_COMMENT = r"(?:#|//|/\*|<!--)[^\n]*?"
+# A comment marker. A directive counts only in the text after the first marker
+# on the line. The marker is found once and the directive patterns run on the
+# rest of the line, so no pattern needs a lazy prefix. A lazy prefix after every
+# marker is quadratic on a line made of many markers, and a PR author controls
+# that line.
+_MARKER = re.compile(r"#|//|/\*|<!--")
+
+# The longest line the analyzer reads. A comment past this point on a very long
+# line (for example minified code) is not seen. The cap bounds the work per line.
+_MAX_LINE_CHARS = 8192
 
 # Rule names and codes are copied into the finding text. Keep only characters
 # that a rule name can hold, so a comment cannot smuggle prose into a review.
 _RULE_TOKEN = re.compile(r"[A-Za-z0-9_.\-/@:]+")
 
-_NOQA = re.compile(_COMMENT + r"\bnoqa\s*:\s*([A-Za-z0-9_, \t]+)", re.IGNORECASE)
-_NOSEC = re.compile(_COMMENT + r"\bnosec\b", re.IGNORECASE)
-_NOSEMGREP = re.compile(_COMMENT + r"\bnosemgrep\b", re.IGNORECASE)
-_PHPCS = re.compile(_COMMENT + r"\bphpcs:(?:ignore|disable)\w*[ \t]+([^\n*]+)", re.IGNORECASE)
-_ESLINT = re.compile(_COMMENT + r"\beslint-disable(?:-next-line|-line)?[ \t]+([^\n*]+)", re.IGNORECASE)
+_NOQA = re.compile(r"\bnoqa\s*:\s*([A-Za-z0-9_, \t]+)", re.IGNORECASE)
+_NOSEC = re.compile(r"\bnosec\b", re.IGNORECASE)
+_NOSEMGREP = re.compile(r"\bnosemgrep\b", re.IGNORECASE)
+_PHPCS = re.compile(r"\bphpcs:(?:ignore|disable)\w*[ \t]+([^\n*]+)", re.IGNORECASE)
+_ESLINT = re.compile(r"\beslint-disable(?:-next-line|-line)?[ \t]+([^\n*]+)", re.IGNORECASE)
 
 _RUFF_SECURITY_CODE = re.compile(r"^S\d{3}$")
 _PHPCS_SECURITY_HINTS = ("security", "forbiddenfunctions", "eval")
@@ -63,6 +71,10 @@ def _tokens(text: str) -> list[str]:
 def _describe(text: str) -> list[str]:
     """Return one short label for each security directive found in *text*."""
     labels: list[str] = []
+    marker = _MARKER.search(text[:_MAX_LINE_CHARS])
+    if marker is None:
+        return labels
+    text = text[marker.end() : _MAX_LINE_CHARS]
 
     noqa = _NOQA.search(text)
     if noqa:

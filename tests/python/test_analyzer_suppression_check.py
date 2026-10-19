@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 
 import pytest
@@ -74,6 +75,26 @@ class TestDescribe:
     )
     def test_other_lines_are_not_flagged(self, line: str) -> None:
         assert _describe(line) == []
+
+
+class TestLongLines:
+    """A PR author controls the line. The work per line must stay linear."""
+
+    @pytest.mark.parametrize("filler", ["#", "//", "/*", "<!--", "# noqa:", "nosec " * 1])
+    def test_a_long_line_of_markers_is_fast(self, filler: str) -> None:
+        line = filler * (400_000 // len(filler))
+        start = time.monotonic()
+        _describe(line)
+        assert time.monotonic() - start < 1.0
+
+    def test_directive_after_many_markers_is_still_found(self) -> None:
+        assert _describe("#" * 2000 + " nosec") == ["nosec"]
+
+    def test_a_marker_inside_a_string_before_the_comment_still_matches(self) -> None:
+        assert _describe('x = "#"; y = f()  # nosec') == ["nosec"]
+
+    def test_text_past_the_line_cap_is_not_read(self) -> None:
+        assert _describe("# " + "a" * 9000 + " nosec") == []
 
 
 class TestRun:
