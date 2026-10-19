@@ -172,3 +172,24 @@ def test_code_reviewer_checks_cross_function_consistency() -> None:
     for needle in ("transport", "prefix", "cookie", "`Authorization` header", "Bearer"):
         assert needle in section, needle
     assert "Do not guess" in section
+
+
+def test_edge_case_hunter_rates_destructive_shell_gaps_critical() -> None:
+    """#1080: the scope line excludes security implications, so the destructive
+    operation rule is written as an explicit exception there and again as a
+    Critical clause."""
+    content = (PROMPTS_DIR / "edge-case-hunter.md").read_text()
+    scope = content.split("## Scope Boundaries", 1)[1].split("## ", 1)[0]
+    assert "Exception, destructive operations" in scope
+    for needle in ("`chmod`", "`/*`", "`$DIR/*`"):
+        assert needle in scope, needle
+    severity = content.split("## Severity Classification", 1)[1].split("## ", 1)[0]
+    critical = next(line for line in severity.splitlines() if line.startswith("- **Critical**"))
+    for needle in ("`chmod`", "`/*`", "root"):
+        assert needle in critical, needle
+
+
+def test_shell_profile_flags_empty_variable_glob_on_destructive_commands() -> None:
+    content = (Path(PROMPTS_DIR).parent / "language-profiles" / "shell.md").read_text()
+    line = next(line for line in content.splitlines() if "empty value expands to `/*`" in line)
+    assert "`chmod`" in line and "`${VAR:?message}`" in line and "root" in line

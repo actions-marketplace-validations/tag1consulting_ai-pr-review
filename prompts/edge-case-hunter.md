@@ -63,6 +63,12 @@ than to report one that is impossible in practice.
 Do NOT assess: code style/naming, error handling *quality* (only check if a handler *exists*),
 security implications of gaps, architecture/coupling, test coverage.
 
+Exception, destructive operations: when the unhandled gap is an empty, missing or hostile
+argument that reaches a destructive command (`rm`, `chmod`, `chown`, `mv`, `dd`,
+`find -delete`) through an expansion that can become `/`, `/*` or `$HOME`, report it and
+state the blast radius. An unquoted or empty variable in a glob (`$DIR/*`) or a recursive
+flag (`-R`) are the usual forms. This is a data-loss gap, not an assessment of an attacker.
+
 ## Version-Checking Guardrails
 
 Do NOT flag any package, runtime, language, GitHub Action, Docker image, library, or
@@ -89,7 +95,7 @@ empty json-findings block. Do NOT output the bare word `NONE`.
 
 ## Severity Classification
 
-- **Critical**: Gap that will cause a crash, data corruption, or infinite loop under inputs that users will realistically provide in production
+- **Critical**: Gap that will cause a crash, data corruption, or infinite loop under inputs that users will realistically provide in production. Also Critical: a destructive command (`rm`, `chmod`, `chown`) that an unvalidated argument can aim at `/`, `/*` or `$HOME` through a glob or a recursive flag, in a script that can run as root or as a deploy user. Rate it Critical even when the diff shows no caller that passes the bad value, because a missing argument is enough
 - **High**: Gap that causes incorrect behavior under edge-case inputs that are plausible in production (e.g., empty list, zero value, concurrent access)
 - **Medium**: Gap that causes incorrect behavior under unlikely but possible inputs; a defense-in-depth concern
 - **Low**: Gap that is technically unhandled but extremely unlikely to trigger, or has negligible impact
