@@ -630,15 +630,30 @@ async def _run_review_async(config: ReviewConfig) -> int:
     )
     _emit_post_failure_annotation(result)
 
-    if result.ok:
+    # #1056: a run that posted only the "prompt too long" skip comment did not
+    # review the PR, so it must not satisfy the policy gate. The pre-flight
+    # skip returns before this point for the same reason.
+    if result.ok and result.context_window_rejected is not True:
         _post_policy_gate_check_run(runtime)
 
     if rc.telemetry_enabled:
+        # Same outcome names as the pre-flight context-window skip above.
+        rejected_outcome = ""
+        if result.context_window_rejected is True:
+            rejected_outcome = (
+                "skipped_context_window_failed" if rc.fail_on_context_window else "skipped"
+            )
         await _emit_telemetry(result, rc, runtime.feedback_entries_count, runtime.sarif_elapsed_s,
-                              is_incremental=runtime.is_incremental)
+                              is_incremental=runtime.is_incremental,
+                              outcome_override=rejected_outcome)
 
     if not result.ok:
         return 1
+    # #1056: the provider rejected every prompt as too long. The skip comment is
+    # posted by now. Same opt-in as the pre-flight context-window skip, so
+    # AI_FAIL_ON_CONTEXT_WINDOW gives exit 2 and the default stays exit 0.
+    if result.context_window_rejected is True and rc.fail_on_context_window:
+        return 2
     # #858: reads may_approve (the classifier's severity verdict), not
     # event (what actually got posted), so a configured approval_ceiling
     # never changes this exit code -- see ReviewOutcome.may_approve's

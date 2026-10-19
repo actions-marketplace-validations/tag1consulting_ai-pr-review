@@ -11,8 +11,12 @@ from __future__ import annotations
 import sys
 
 from ._config import resolve_prompt_caching
-from ._http import LLMContentError, LLMError, LLMTransientError
+from ._http import LLMContentError, LLMContextLengthError, LLMError, LLMTransientError
 from .base import LLMRequest, LLMResponse
+
+# Exit code for a provider "prompt is too long" rejection (#1056). agents/dispatch.py
+# and orchestrate.py read it from FailedAgent.exit_code.
+EXIT_PROMPT_TOO_LONG = 4
 
 
 async def call_llm(req: LLMRequest, provider: str) -> LLMResponse:
@@ -22,12 +26,16 @@ async def call_llm(req: LLMRequest, provider: str) -> LLMResponse:
       SystemExit(1) — permanent error
       SystemExit(2) — transient (retries exhausted)
       SystemExit(3) — content filter
+      SystemExit(4) - the provider rejected the prompt as too long (#1056)
     """
     try:
         return await _dispatch(req, provider)
     except LLMContentError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         raise SystemExit(3) from exc
+    except LLMContextLengthError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(EXIT_PROMPT_TOO_LONG) from exc
     except LLMTransientError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc

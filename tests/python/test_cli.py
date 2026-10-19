@@ -1973,6 +1973,93 @@ class TestContextWindowSkipExitCode:
         assert outcome == "skipped"
 
 
+class TestPromptTooLongRejectionExitCode:
+    """#1056: when the provider rejects every prompt as too long, run_review
+    returns a skipped result with context_window_rejected set. cli.py exits 0
+    unless AI_FAIL_ON_CONTEXT_WINDOW is set, never posts the policy gate, and
+    reports the same telemetry outcome names as the pre-flight skip.
+    """
+
+    def _run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, rejected: bool,
+        **config_overrides: object,
+    ) -> tuple[int, str, MagicMock]:
+        import anyio
+
+        from ai_pr_review.orchestrate import ReviewResult
+        from ai_pr_review.review.outcome import ReviewOutcome
+        from ai_pr_review.vcs.protocol import SummaryResult, VcsProvider
+
+        monkeypatch.setenv("AI_PR_REVIEW_DIFF_FILE", str(tmp_path / "diff.txt"))
+        sink_path = tmp_path / "telemetry.jsonl"
+        provider = MagicMock(spec=VcsProvider)
+        provider.get_last_reviewed_sha.return_value = None
+        provider.get_pr_description.return_value = None
+
+        async def _fake_run_review(**kwargs: object) -> ReviewResult:
+            return ReviewResult(
+                findings=[],
+                outcome=ReviewOutcome(
+                    risk="None", event="APPROVE", incomplete=False, may_approve=True,
+                    finding_total=0,
+                ),
+                failed_agents=[],
+                summary=SummaryResult(comment_id=1, created=True, updated=False),
+                findings_post=None,
+                stale=None,
+                skipped=True,
+                skip_reason="The provider rejected the prompt as too long.",
+                context_window_rejected=rejected,
+            )
+
+        gate = MagicMock()
+        with (
+            patch("ai_pr_review.diff.compute.compute_diff", return_value=_make_diff_result()),
+            patch("ai_pr_review.review.runtime.provider_from_env", return_value=provider),
+            patch("ai_pr_review.orchestrate.run_review", new=AsyncMock(side_effect=_fake_run_review)),
+            patch("ai_pr_review.agents.gates.evaluate_gates", return_value={}),
+            patch("ai_pr_review.agents.roster.AGENTS", []),
+            patch("ai_pr_review.cli._run_summarizer", return_value=""),
+            patch("ai_pr_review.cli._post_policy_gate_check_run", new=gate),
+        ):
+            from ai_pr_review.cli import _run_review_async
+
+            exit_code = anyio.run(
+                _run_review_async,
+                _make_config(
+                    telemetry_enabled=True,
+                    telemetry_sink=f"file://{sink_path}",
+                    **config_overrides,
+                ),
+            )
+        event = json.loads(sink_path.read_text().splitlines()[0])
+        return exit_code, event["outcome"], gate
+
+    def test_exits_0_by_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        exit_code, outcome, gate = self._run(tmp_path, monkeypatch, rejected=True)
+        assert exit_code == 0
+        assert outcome == "skipped"
+        gate.assert_not_called()
+
+    def test_exits_2_when_opted_in(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        exit_code, outcome, gate = self._run(
+            tmp_path, monkeypatch, rejected=True, fail_on_context_window=True,
+        )
+        assert exit_code == 2
+        assert outcome == "skipped_context_window_failed"
+        gate.assert_not_called()
+
+    def test_flag_has_no_effect_on_an_ordinary_result(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        exit_code, outcome, gate = self._run(
+            tmp_path, monkeypatch, rejected=False, fail_on_context_window=True,
+        )
+        assert exit_code == 0
+        assert outcome != "skipped_context_window_failed"
+        gate.assert_called_once()
+
+
 class TestEmitTelemetryThinkingTokens:
     """#592: telemetry's per-agent dict must carry thinking_tokens/stop_reason
     so a consumer can alert on truncation/thinking-exhaustion without a human
