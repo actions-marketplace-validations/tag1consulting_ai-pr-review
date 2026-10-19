@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 from ai_pr_review.diff.linemap import parse_diff_sets
 from ai_pr_review.findings.models import Finding, Severity
 from ai_pr_review.markdown_sections import strip_walkthrough_section
+from ai_pr_review.vcs._bitbucket_owners import load_verdict_owners
 from ai_pr_review.vcs._bitbucket_verdicts import apply_pending_verdicts
 from ai_pr_review.vcs._body import (
     compute_headline,
@@ -188,6 +189,13 @@ class BitbucketConfig:
     # verdict command: "read", "write", or "admin". Checked via
     # check_authority() against the commenter's account_id.
     verdict_min_role: str = "write"
+    # Where `.bitbucket/CODEOWNERS` is read from for verdict authorization:
+    # "base-ref" (the destination branch, so a pull request cannot change it)
+    # or "workspace" (the checkout, which includes the pull request's own
+    # changes). Set from AI_POLICY_SOURCE, the same switch policy.yml uses.
+    verdict_owners_source: str = "base-ref"
+    # Destination branch name (BASE_REF), needed for the "base-ref" read.
+    base_ref: str = ""
     # Bitbucket parity (#918): actually call Bitbucket's approve/
     # request-changes/unapprove reviewer-state endpoints for the decided
     # review outcome, instead of only rendering it as heading text in the
@@ -760,6 +768,11 @@ class BitbucketProvider:
                         existing_body=existing_body,
                         min_role=self.config.verdict_min_role,
                         feedback_store=self._get_feedback_store(),
+                        owners=load_verdict_owners(
+                            workspace=".",
+                            base_ref=self.config.base_ref,
+                            source=self.config.verdict_owners_source,
+                        ),
                     )
                     freshly_set_fps = frozenset(
                         fp

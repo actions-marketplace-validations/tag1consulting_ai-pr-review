@@ -664,3 +664,39 @@ def test_suppress_walkthrough_parses_the_same_in_config_and_bitbucket_provider(
 
     assert isinstance(provider, BitbucketProvider)
     assert provider.config.suppress_walkthrough is ReviewConfig.from_env().suppress_walkthrough
+
+
+def test_bitbucket_verdict_owners_source_defaults_to_base_ref(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _bitbucket_env(monkeypatch)
+    monkeypatch.delenv("AI_POLICY_SOURCE", raising=False)
+    monkeypatch.delenv("BASE_REF", raising=False)
+    prov = provider_from_env()
+    assert isinstance(prov, BitbucketProvider)
+    assert prov.config.verdict_owners_source == "base-ref"
+    assert prov.config.base_ref == ""
+
+
+def test_bitbucket_verdict_owners_source_follows_ai_policy_source_and_base_ref(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _bitbucket_env(monkeypatch)
+    monkeypatch.setenv("AI_POLICY_SOURCE", " Workspace ")
+    monkeypatch.setenv("BASE_REF", "develop")
+    prov = provider_from_env()
+    assert isinstance(prov, BitbucketProvider)
+    assert prov.config.verdict_owners_source == "workspace"
+    assert prov.config.base_ref == "develop"
+
+
+@pytest.mark.parametrize("value", ["", "garbage", "head"])
+def test_bitbucket_verdict_owners_source_unknown_value_falls_back_to_base_ref(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    # The safe choice: an unknown value must not read the file from the PR.
+    _bitbucket_env(monkeypatch)
+    monkeypatch.setenv("AI_POLICY_SOURCE", value)
+    prov = provider_from_env()
+    assert isinstance(prov, BitbucketProvider)
+    assert prov.config.verdict_owners_source == "base-ref"
