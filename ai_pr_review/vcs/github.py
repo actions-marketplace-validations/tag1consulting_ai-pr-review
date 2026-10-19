@@ -2704,7 +2704,7 @@ def _render_review_body(
         if not out_of_diff_findings_text:
             return ""
         return (
-            f"\n\n<details>\n<summary>🔵 Out-of-diff analyzer findings ({ood_count})"
+            f"\n\n<details>\n<summary>{severity_icon('low')} Out-of-diff analyzer findings ({ood_count})"
             " — pre-existing issues on unchanged lines, capped to Low</summary>\n\n"
             f"{out_of_diff_findings_text}\n</details>"
         )

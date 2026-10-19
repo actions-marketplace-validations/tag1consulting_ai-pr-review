@@ -656,7 +656,8 @@ async def _run_review_async(config: ReviewConfig) -> int:
         return 1
     # #1056: the provider rejected every prompt as too long. The skip comment is
     # posted by now. Same opt-in as the pre-flight context-window skip, so
-    # AI_FAIL_ON_CONTEXT_WINDOW gives exit 2 and the default stays exit 0.
+    # AI_FAIL_ON_CONTEXT_WINDOW gives exit 2 and the default stays exit 0
+    # unless AI_FAIL_ON_FINDINGS is set, which exits 2 on the incomplete outcome.
     if result.context_window_rejected is True and rc.fail_on_context_window:
         return 2
     # #858: reads may_approve (the classifier's severity verdict), not

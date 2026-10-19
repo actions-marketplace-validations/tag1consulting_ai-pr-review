@@ -291,6 +291,11 @@ def test_all_agents_prompt_too_long_takes_the_skip_path(tmp_path: Path) -> None:
         assert provider.stale_calls == 0
         assert "advance_sha_watermark" not in provider.last_call_order
         assert [f.name for f in result.failed_agents] == ["code-reviewer", "blind-hunter"]
+        # No LLM agent reviewed the PR, so the outcome is incomplete and not
+        # approvable. AI_FAIL_ON_FINDINGS then exits 2, as the failed run did
+        # before this skip path existed.
+        assert result.outcome.incomplete is True
+        assert result.outcome.may_approve is False
 
     anyio.run(_run)
 

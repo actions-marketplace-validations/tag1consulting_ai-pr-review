@@ -214,7 +214,7 @@ def _post_skip(
                 )
     outcome = cap_review_outcome(
         classify_review_outcome(
-            [_AsFindingLike(f) for f in kept], [], cfg.mode
+            [_AsFindingLike(f) for f in kept], [f.name for f in failed_agents], cfg.mode
         ),
         cfg.approval_ceiling,
     )
