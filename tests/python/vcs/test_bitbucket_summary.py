@@ -447,11 +447,14 @@ def test_post_summary_no_existing_comment_carries_forward_nothing() -> None:
     assert result.comment_id == 99
 
 
-def test_post_summary_carry_forward_too_large_omits_with_error_not_crash() -> None:
+def test_post_summary_carry_forward_too_large_keeps_highest_id_not_crash(caplog) -> None:
+    import logging
+
     from ai_pr_review.vcs.marker import build_id_map_marker, extract_id_map
 
     # A large enough id-map to blow the byte budget when carried forward
-    # alongside a near-max-size summary body.
+    # alongside a large summary body. The carry shrinks to the entry with the
+    # highest ID, so numbering still never restarts.
     huge_id_map = {f"code-reviewer|some/very/long/path/file_{i}.py|{i}|{'a' * 40}": i for i in range(2000)}
     existing_body = (
         f"{SUMMARY_MARKER_HIDDEN_PREFIX} sha=01d4ead4ee)\nold\n\n"
@@ -467,7 +470,37 @@ def test_post_summary_carry_forward_too_large_omits_with_error_not_crash() -> No
         return httpx.Response(404)
 
     prov, rec = _make_provider(handler)
-    result = prov.post_summary("x" * 30_000, _VALID_SHA)
+    with caplog.at_level(logging.WARNING, logger="ai_pr_review.vcs.bitbucket"):
+        result = prov.post_summary("x" * 30_000, _VALID_SHA)
+    assert result.updated is True
+    put_call = next(c for c in rec.calls if c[0] == "PUT")
+    new_body = put_call[2]["content"]["raw"]
+    assert len(new_body.encode("utf-8")) <= 32_000
+    carried = extract_id_map(new_body)
+    assert 1999 in carried.values(), "the highest ID must survive"
+    assert 0 < len(carried) < 2000, "the carried map must shrink, not vanish"
+    assert any("reduced from 2000" in m for m in caplog.messages)
+
+
+def test_post_summary_carry_forward_too_large_even_for_one_entry_omits_with_error() -> None:
+    from ai_pr_review.vcs.marker import build_id_map_marker, extract_id_map
+
+    huge_id_map = {f"code-reviewer|some/very/long/path/file_{i}.py|{i}|{'a' * 40}": i for i in range(2000)}
+    existing_body = (
+        f"{SUMMARY_MARKER_HIDDEN_PREFIX} sha=01d4ead4ee)\nold\n\n"
+        + build_id_map_marker(huge_id_map, hidden=True)
+    )
+    existing = {"id": 55, "content": {"raw": existing_body}}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "GET":
+            return httpx.Response(200, json=_values_resp([existing]))
+        if req.method == "PUT":
+            return httpx.Response(200, json={"id": 55})
+        return httpx.Response(404)
+
+    prov, rec = _make_provider(handler)
+    result = prov.post_summary("x" * 31_750, _VALID_SHA)
     assert result.updated is True
     put_call = next(c for c in rec.calls if c[0] == "PUT")
     new_body = put_call[2]["content"]["raw"]

@@ -48,9 +48,10 @@ from __future__ import annotations
 
 import hashlib
 import html as _html
+import json
 import logging
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, Final
 
 from ai_pr_review.findings.models import Finding
@@ -487,3 +488,66 @@ def assemble_id_map(
             next_id += 1
 
     return result
+
+
+# Bytes of JSON payload the persisted id-map may use for entries carried over
+# from earlier runs. The marker is base64, so 4,000 bytes of JSON is about
+# 5.4 KB of a 32 KB comment body. That body also holds the findings, so the
+# carried part needs its own small budget.
+_MAX_CARRIED_ID_MAP_BYTES: Final[int] = 4_000
+
+
+def merge_id_maps_for_persistence(
+    prior: Mapping[str, int],
+    current: Mapping[str, int],
+    *,
+    max_carried_bytes: int = _MAX_CARRIED_ID_MAP_BYTES,
+) -> dict[str, int]:
+    """Return the id-map to write into the comment for the next run.
+
+    Bitbucket keeps one summary comment and rewrites it every run, so the map
+    written now is the only record the next run has. A map with only the
+    current findings loses the ID of any finding that an incremental run did
+    not report again. After a run with no findings the map is empty and the
+    next run starts again at F1.
+
+    Entries in *current* always stay. Entries in *prior* that are not in
+    *current* stay while they fit in *max_carried_bytes* of JSON. The lowest
+    IDs are dropped first, and the entry with the highest ID is never dropped,
+    so ``max(ids) + 1`` can never fall and an ID is never used again.
+    """
+    carried = {fp: fid for fp, fid in prior.items() if fp not in current}
+    top_fp = max(prior, key=lambda fp: prior[fp], default=None)
+
+    def _size(entries: Mapping[str, int]) -> int:
+        return len(json.dumps(entries, separators=(",", ":")).encode("utf-8"))
+
+    for fp in sorted(carried, key=lambda key: carried[key]):
+        if _size(carried) <= max_carried_bytes:
+            break
+        if fp == top_fp:
+            continue
+        del carried[fp]
+
+    return {**carried, **current}
+
+
+# Budgets for the carried part, largest first. A caller that has to fit the
+# marker into a small space tries each in turn. The last one keeps only the
+# current findings and the highest earlier ID, so numbering still never
+# restarts.
+_CARRY_BUDGETS: Final[tuple[int, ...]] = (_MAX_CARRIED_ID_MAP_BYTES, 1_000, 0)
+
+
+def id_map_persistence_variants(
+    prior: Mapping[str, int], current: Mapping[str, int]
+) -> Iterator[dict[str, int]]:
+    """Yield id-maps to persist, from the one that keeps most to the one that
+    keeps least. Each step is the result of ``merge_id_maps_for_persistence``
+    at a smaller carry budget, and repeated results are skipped."""
+    previous: dict[str, int] | None = None
+    for budget in _CARRY_BUDGETS:
+        candidate = merge_id_maps_for_persistence(prior, current, max_carried_bytes=budget)
+        if candidate != previous:
+            yield candidate
+        previous = candidate
