@@ -51,6 +51,11 @@
 #   AI_SUPPRESS_WALKTHROUGH (plain, default: false. Set to true to leave the
 #                           per-file Walkthrough table out of the summary
 #                           comment. Bitbucket cannot collapse it.)
+#   AI_POLICY_SOURCE        (plain, default: base-ref. Where policy.yml and,
+#                           with AI_BITBUCKET_VERDICTS, the verdict owners
+#                           file .bitbucket/CODEOWNERS are read from:
+#                           base-ref = the target branch, workspace = the PR
+#                           checkout. See docs/bitbucket-setup.md.)
 #   AI_BITBUCKET_VERDICTS  (plain, default: false; poll PR comments for
 #                           /ai-pr-review dismiss|false-positive|wont-fix|fixed
 #                           F<n> commands at the start of the next run.
