@@ -100,10 +100,10 @@ Findings use these icons:
 
 | Icon | Severity | Review action |
 |------|----------|---------------|
-| 🚨 | Critical | REQUEST_CHANGES |
-| 🔴 | High | REQUEST_CHANGES |
-| 🟡 | Medium | APPROVE (informational) |
-| 🔵 | Low | APPROVE (informational) |
+| ⛔ | Critical | REQUEST_CHANGES |
+| 🚨 | High | REQUEST_CHANGES |
+| 🔶 | Medium | APPROVE (informational) |
+| 💬 | Low | APPROVE (informational) |
 
 The "Review action" column above is this bot's default behavior. Set the `approval-ceiling` input if you never want it to post a real APPROVE (or, at the strictest setting, never set any formal review state at all). A human then makes every merge decision. See [Configuration: Approval ceiling](docs/configuration.md#approval-ceiling).
 

@@ -440,10 +440,66 @@ def test_rollup_unions_also_reported_notes_of_all_occurrences() -> None:
     assert result[0].also_reported == [f"phpstan (line {11 + i * 20}): msg{i}" for i in range(4)]
 
 
-def test_combine_also_reported_caps_and_recounts_overflow() -> None:
+def test_rollup_with_eight_notes_renders_five_plus_overflow_line() -> None:
+    """#1047: storage keeps all notes, the display cap applies at render time."""
+    from ai_pr_review.findings.scope import rollup_repeated_findings
+    from ai_pr_review.vcs._body import also_reported_notes
+
+    findings = [
+        Finding(
+            severity="High",
+            confidence=90,
+            finding="Same sniff",
+            source="phpcs",
+            file="a.php",
+            line=10 + i * 20,
+            category="lint",
+            also_reported=[f"phpstan (line {11 + i * 20}): msg{i}", f"psalm (line {12 + i * 20}): p{i}"],
+        )
+        for i in range(4)
+    ]
+    result = rollup_repeated_findings(findings, threshold=3)
+    assert len(result) == 1
+    assert len(result[0].also_reported) == 8
+    shown = also_reported_notes(result[0])
+    assert len(shown) == 6
+    assert shown[:5] == result[0].also_reported[:5]
+    assert shown[5] == "(+3 more from other analyzers)"
+
+
+def test_combine_also_reported_drops_old_markers_and_keeps_order() -> None:
     from ai_pr_review.findings.models import combine_also_reported
 
     notes = combine_also_reported([[f"n{i}" for i in range(4)], ["n3", "(+9 more from other analyzers)", "n4", "n5", "n6"]])
-    assert notes[:5] == ["n0", "n1", "n2", "n3", "n4"]
-    assert notes[5] == "(+2 more from other analyzers)"
+    assert notes == ["n0", "n1", "n2", "n3", "n4", "n5", "n6"]
 
+
+def test_combine_also_reported_storage_bound_keeps_first_and_marks_truncation() -> None:
+    from ai_pr_review.findings.models import (
+        ALSO_REPORTED_TRUNCATED_NOTE,
+        MAX_ALSO_REPORTED_STORED,
+        combine_also_reported,
+    )
+
+    notes = combine_also_reported([[f"n{i}" for i in range(MAX_ALSO_REPORTED_STORED + 20)]])
+    assert len(notes) == MAX_ALSO_REPORTED_STORED + 1
+    assert notes[0] == "n0"
+    assert notes[MAX_ALSO_REPORTED_STORED - 1] == f"n{MAX_ALSO_REPORTED_STORED - 1}"
+    assert notes[-1] == ALSO_REPORTED_TRUNCATED_NOTE
+    # The flag survives a second combine and no second marker appears.
+    again = combine_also_reported([notes, ["extra"]])
+    assert again.count(ALSO_REPORTED_TRUNCATED_NOTE) == 1
+    assert len(again) == MAX_ALSO_REPORTED_STORED + 1
+
+
+def test_also_reported_display_says_or_more_past_storage_bound() -> None:
+    from ai_pr_review.findings.models import MAX_ALSO_REPORTED_STORED, combine_also_reported
+    from ai_pr_review.vcs._body import also_reported_notes
+
+    f = Finding(
+        severity="High", confidence=90, finding="x", source="phpcs", file="a.php", line=1, category="lint",
+        also_reported=combine_also_reported([[f"n{i}" for i in range(MAX_ALSO_REPORTED_STORED + 5)]]),
+    )
+    shown = also_reported_notes(f)
+    assert len(shown) == 6
+    assert shown[-1] == f"(+{MAX_ALSO_REPORTED_STORED - 5} or more from other analyzers)"

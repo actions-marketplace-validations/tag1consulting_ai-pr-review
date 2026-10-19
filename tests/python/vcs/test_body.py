@@ -218,14 +218,14 @@ def test_sanitize_bullet_text_collapses_every_splitlines_boundary() -> None:
 
 
 def test_severity_icon_known() -> None:
-    assert severity_icon("Critical") == "🚨"
-    assert severity_icon("high") == "🔴"
-    assert severity_icon("Medium") == "🟡"
-    assert severity_icon("low") == "🔵"
+    assert severity_icon("Critical") == "⛔"
+    assert severity_icon("high") == "🚨"
+    assert severity_icon("Medium") == "🔶"
+    assert severity_icon("low") == "💬"
 
 
 def test_severity_icon_unknown_defaults() -> None:
-    assert severity_icon("weird") == "🔵"
+    assert severity_icon("weird") == "💬"
 
 
 def test_format_source_tag_sources_preferred() -> None:
@@ -294,7 +294,7 @@ def test_format_body_finding_full() -> None:
         remediation="Use parameterized queries",
     )
     out = format_body_finding(f)
-    assert "🔴" in out
+    assert "🚨" in out
     assert "[High]" in out
     assert "[blind-hunter]" in out
     assert "SQLi" in out

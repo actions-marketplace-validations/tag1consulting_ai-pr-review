@@ -14,7 +14,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Final
 
-from ai_pr_review.findings.models import Finding
+from ai_pr_review.findings.models import MAX_ALSO_REPORTED, Finding, split_also_reported
 from ai_pr_review.vcs.marker import HIDDEN_MARKER_OPENER_RE
 
 # GitHub's body size limit (bytes). GitLab/Bitbucket have similar but slightly
@@ -30,17 +30,17 @@ GITHUB_MAX_BODY_SIZE: Final[int] = 65_536
 TRUNCATION_MARKER: Final[str] = "Review output truncated"
 
 _SEVERITY_ICONS: Final[dict[str, str]] = {
-    "critical": "🚨",
-    "high": "🔴",
-    "medium": "🟡",
-    "low": "🔵",
+    "critical": "⛔",
+    "high": "🚨",
+    "medium": "🔶",
+    "low": "💬",
     "none": "✅",
     "unknown": "❔",
 }
 
 
 def severity_icon(severity: str) -> str:
-    return _SEVERITY_ICONS.get(severity.lower(), "🔵")
+    return _SEVERITY_ICONS.get(severity.lower(), "💬")
 
 
 # Published docs site (docs/_config.yml). Lives here, not in slash/handlers.py,
@@ -282,9 +282,17 @@ def also_reported_notes(finding: Finding) -> list[str]:
 
     `also_reported` is built from analyzer output and can carry untrusted
     file text, so every note goes through `sanitize_bullet_text` here, once,
-    for all renderers.
+    for all renderers. The list is capped at `MAX_ALSO_REPORTED` notes here,
+    at render time. A last line counts the notes left out. It says "or more"
+    when the stored list hit the storage bound.
     """
-    return [sanitize_bullet_text(n) for n in finding.also_reported]
+    real, truncated = split_also_reported(finding.also_reported)
+    notes = [sanitize_bullet_text(n) for n in real[:MAX_ALSO_REPORTED]]
+    extra = len(real) - MAX_ALSO_REPORTED
+    if extra > 0:
+        more = "or more" if truncated else "more"
+        notes.append(f"(+{extra} {more} from other analyzers)")
+    return notes
 
 
 def sanitize_bullet_text(text: str) -> str:

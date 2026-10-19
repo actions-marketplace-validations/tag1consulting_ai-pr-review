@@ -456,15 +456,15 @@ def test_merge_agent_and_analyzer_still_merge_and_corroborate() -> None:
     assert result[0].also_reported == []
 
 
-def test_merge_also_reported_is_capped() -> None:
+def test_merge_also_reported_is_stored_uncapped() -> None:
     findings = [_make_finding(file="a.php", line=10, source="phpcs", severity="High", finding="top", category="lint")]
     findings += [
         _make_finding(file="a.php", line=10 + (i % 3), source="phpstan", severity="Low", finding=f"m{i}", category="lint")
         for i in range(8)
     ]
     notes = merge_findings(findings)[0].also_reported
-    assert len(notes) == 6
-    assert notes[-1] == "(+3 more from other analyzers)"
+    assert len(notes) == 8
+    assert not any(n.startswith("(+") for n in notes)
 
 
 # ---------------------------------------------------------------------------
