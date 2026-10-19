@@ -2,8 +2,9 @@
 
 The merge (#1074), the semgrep rollup (#1081) and the suppression-check analyzer
 (#1077) all change the same list of findings. Each has unit tests. This test
-runs them in the order `orchestrate.py` calls them (merge, then rollup) so that a
-change in one cannot silently break another.
+runs the merge and then the rollup, in the order `orchestrate.py` runs them, so that
+a change in one cannot silently break the other. It does not run the suppression or
+diff-scope steps that sit between them in `orchestrate.py`.
 """
 
 from __future__ import annotations
@@ -11,6 +12,9 @@ from __future__ import annotations
 from ai_pr_review.findings.merge import merge_findings
 from ai_pr_review.findings.models import Finding
 from ai_pr_review.findings.scope import rollup_repeated_findings
+from ai_pr_review.vcs._canonical import classify
+from ai_pr_review.vcs._finding_ids import fingerprint
+from tests.python.vcs.test_canonical import _thread
 
 _SQL_RULE = "python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query"
 _PICKLE_RULE = "python.lang.security.deserialization.pickle.avoid-pickle"
@@ -102,3 +106,36 @@ def test_pr70_pipeline_loses_no_source_text() -> None:
     result = _run_pipeline()
     sources = {s for f in result for s in f.sources or [f.source]}
     assert {"security-reviewer", "semgrep", "ruff", "phpcs", "suppression-check"} <= sources
+
+
+def _sql_hit(line: int) -> Finding:
+    return _f(file="api/user.py", line=line, source="semgrep", category="injection",
+              finding=f"{_SQL_RULE}: Avoiding SQL string concatenation ({line})")
+
+
+def test_a_dismissed_semgrep_finding_stays_dismissed_when_a_second_site_rolls_it_up() -> None:
+    """The rollup changes the text of the finding at the lowest line, so its fingerprint
+    changes. The dismissal must still apply through the location match, or every second
+    occurrence of a rule would bring back a finding that a human already dismissed."""
+    run1 = rollup_repeated_findings(merge_findings([_sql_hit(31)]))
+    dismissed_fp = fingerprint(run1[0])
+    thread = _thread(fp=dismissed_fp, severity="High", category="injection", is_resolved=True)
+
+    run2 = rollup_repeated_findings(merge_findings([_sql_hit(31), _sql_hit(65)]))
+    assert len(run2) == 1 and "2 occurrences" in run2[0].finding
+    assert fingerprint(run2[0]) != dismissed_fp  # the churn is real
+
+    result = classify(run2[0], verdicts={dismissed_fp: "dismissed"}, all_threads=[thread])
+    assert result.kind == "suppressed"
+
+
+def test_a_new_semgrep_site_far_above_a_dismissed_one_is_reported_again() -> None:
+    """The rolled-up finding moves to the new lowest line. That is a new place to look,
+    so it is not covered by the old dismissal. This documents the behavior."""
+    dismissed_fp = fingerprint(_sql_hit(31))
+    thread = _thread(fp=dismissed_fp, severity="High", category="injection", is_resolved=True)
+
+    (rolled,) = rollup_repeated_findings(merge_findings([_sql_hit(5), _sql_hit(31)]))
+    assert rolled.line == 5
+    result = classify(rolled, verdicts={dismissed_fp: "dismissed"}, all_threads=[thread])
+    assert result.kind == "new"

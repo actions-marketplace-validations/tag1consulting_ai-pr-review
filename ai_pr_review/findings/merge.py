@@ -224,16 +224,17 @@ def _also_reported_notes(cluster: list[Finding], best: Finding) -> list[str]:
     return combine_also_reported([notes])
 
 
-def _headline_key(f: Finding) -> tuple[int, int, int]:
+def _headline_key(f: Finding) -> tuple[int, int]:
     """Sort key for the finding that represents a cluster.
 
-    Severity decides first. On a tie, a finding that is not style-only wins,
-    then an agent finding wins over an analyzer finding, because agent text
-    carries the context. Ties after that keep the input order (`min` is stable).
+    Severity decides first. On a tie, an agent finding wins over an analyzer
+    finding, because agent text carries the context. Ties after that keep the
+    input order (`min` is stable). A style finding never shares a cluster with
+    a finding of another category (see `_STRICT_CATEGORIES`), so the category
+    plays no part here.
     """
     return (
         _SEVERITY_ORDER.get(f.severity, 99),
-        1 if f.category == "lint" else 0,
         1 if _analyzer_tools(f) is not None else 0,
     )
 

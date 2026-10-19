@@ -636,6 +636,13 @@ def test_semgrep_corroborated_finding_is_left_out_of_the_rollup() -> None:
     assert "(2 occurrences in api/user.py, lines: 65, 93)" in rolled.finding
 
 
+def test_semgrep_finding_with_only_the_corroborated_flag_is_left_out_of_the_rollup() -> None:
+    """The flag guards on its own, even when the sources list shows a single tool."""
+    flagged = _semgrep(31, corroborated=True)
+    result = rollup_repeated_findings([flagged, _semgrep(65), _semgrep(93)])
+    assert flagged in result and len(result) == 2
+
+
 def test_semgrep_multi_source_finding_is_left_out_of_the_rollup() -> None:
     merged = _semgrep(31, sources=["ruff", "semgrep"])
     result = rollup_repeated_findings([merged, _semgrep(65)])

@@ -123,6 +123,18 @@ class TestVerify:
         assert seen[0].system_prompt == "PROMPT" and seen[0].temperature == 0.0
         assert seen[0].model_id == ve.SONNET
 
+    def test_an_empty_code_window_is_recorded_on_the_verdict(self) -> None:
+        async def llm_call(req: LLMRequest) -> LLMResponse:
+            return LLMResponse(
+                text=_reply({"id": 0, "verdict": "unsupported"}, {"id": 1, "verdict": "confirmed"}),
+                input_tokens=1, output_tokens=1, stop_reason="end_turn",
+            )
+
+        out = asyncio.run(ve.verify_findings(
+            [_f(999), _f(12)], llm_call=llm_call, cond=ve.CONDITIONS[0], prompt_text="P", diff_text=DIFF
+        ))
+        assert [v.had_code for v in out if v is not None] == [False, True]
+
     def test_no_findings_makes_no_call(self) -> None:
         async def llm_call(req: LLMRequest) -> LLMResponse:
             raise AssertionError("no call expected")
@@ -156,6 +168,18 @@ class TestScore:
         # The first bug sits on line 14, outside 10-12. The verifier moves it to 11.
         assert (r.anchor_before, r.anchor_after) == (1, 2)
 
+    def test_a_finding_without_a_verdict_is_not_counted_as_kept(self) -> None:
+        fx = _fixture()
+        findings = [_f(11), _f(12)]
+        r = ve.score_condition("reread-sonnet", [(fx, findings, [None, None])])
+        assert (r.bugs, r.kept_real, r.unverified) == (2, 0, 2)
+
+    def test_a_verdict_without_a_line_and_one_without_code_are_counted(self) -> None:
+        fx = _fixture()
+        verdicts = [ve.Verdict("confirmed", None), ve.Verdict("unsupported", 11, had_code=False)]
+        r = ve.score_condition("reread-sonnet", [(fx, [_f(11), _f(12)], verdicts)])
+        assert (r.no_line, r.unsupported_without_code) == (1, 1)
+
     def test_the_none_condition_changes_nothing(self) -> None:
         fx, findings, _ = self._scored()
         r = ve.score_condition("none", [(fx, findings, [None] * len(findings))])
@@ -175,12 +199,78 @@ class TestScore:
         assert report.count("fx a.py:") == 4
 
 
+class _FakeGuard:
+    def estimate_units(self, model_id: str, *, input_tokens: int, output_tokens: int,
+                       worst_case: bool = False) -> int:
+        return input_tokens + output_tokens
+
+
+class TestEstimate:
+    def test_counts_one_call_per_condition_and_fixture_with_findings(self) -> None:
+        per_fixture = [(_fixture(), [_f(12)]), (_fixture(), [])]
+        expected, worst, calls = ve.estimate(per_fixture, ve.CONDITIONS, _FakeGuard())
+        assert calls == 2 and worst > expected > 0
+
+    def test_the_wide_window_costs_more_than_the_narrow_one(self) -> None:
+        per_fixture = [(_fixture(), [_f(12)])]
+        narrow = ve.estimate(per_fixture, ve.CONDITIONS[:1], _FakeGuard())[0]
+        wide = ve.estimate(per_fixture, ve.CONDITIONS[1:], _FakeGuard())[0]
+        assert wide > narrow
+
+    def test_no_findings_means_no_calls(self) -> None:
+        assert ve.estimate([(_fixture(), [])], ve.CONDITIONS, _FakeGuard()) == (0, 0, 0)
+
+
+class TestMain:
+    def test_dry_run_prints_the_estimate_and_makes_no_call(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setenv("AI_EVAL_STATE_DIR", str(tmp_path))
+        monkeypatch.setenv("AI_EVAL_CACHE_MODE", "auto")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        fx = _fixture(tmp_path / "a.diff")
+
+        async def collect(*_a: object, **_k: object) -> list:
+            return [(fx, [_f(12)])]
+
+        monkeypatch.setattr(ve.pe, "load_fixtures", lambda *a, **k: [fx])
+        monkeypatch.setattr(ve.je, "collect_findings", collect)
+
+        async def no_calls(*_a: object, **_k: object) -> object:
+            raise AssertionError("a dry run must not call the model")
+
+        monkeypatch.setattr(ve, "run_conditions", no_calls)
+        assert asyncio.run(ve.main(["--dry-run"])) == 0
+        out = capsys.readouterr().out
+        assert "pre-flight: up to 2 billed verifier calls" in out
+        assert "dry run: no billed calls were made" in out
+
+    def test_a_missing_key_stops_a_real_run_before_any_call(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("AI_EVAL_STATE_DIR", str(tmp_path))
+        monkeypatch.setenv("AI_EVAL_CACHE_MODE", "auto")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        fx = _fixture(tmp_path / "a.diff")
+
+        async def collect(*_a: object, **_k: object) -> list:
+            return [(fx, [_f(12)])]
+
+        monkeypatch.setattr(ve.pe, "load_fixtures", lambda *a, **k: [fx])
+        monkeypatch.setattr(ve.je, "collect_findings", collect)
+        assert asyncio.run(ve.main([])) == 1
+
+
 class TestConditions:
     def test_selection(self) -> None:
         assert [c.name for c in ve._selected("")] == ["hunk-sonnet", "reread-sonnet"]
         assert [c.name for c in ve._selected("reread-sonnet")] == ["reread-sonnet"]
         with pytest.raises(ValueError):
             ve._selected("nope")
+
+    def test_the_none_condition_alone_is_rejected_by_main(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("AI_EVAL_VERIFY_CONDITIONS", "none")
+        assert asyncio.run(ve.main([])) == 1
 
     def test_the_prompt_file_exists_and_names_both_verdicts(self) -> None:
         text = ve.PROMPT.read_text()

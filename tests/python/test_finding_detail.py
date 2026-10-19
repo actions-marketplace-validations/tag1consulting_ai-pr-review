@@ -52,6 +52,16 @@ class TestModel:
         assert fingerprint(_f()) == fingerprint(_f(impact=_IMPACT, trigger=_TRIGGER))
 
 
+def test_impact_and_trigger_never_enter_the_judge_payload() -> None:
+    """The judge prompt was measured without these fields (#837). Keep it that way until a
+    judge change is measured."""
+    from ai_pr_review.findings.judge import _build_candidate_payload
+
+    payload = _build_candidate_payload([_f(impact=_IMPACT, trigger=_TRIGGER)])
+    assert _IMPACT not in payload and _TRIGGER not in payload
+    assert '"impact"' not in payload and '"trigger"' not in payload
+
+
 class TestExtract:
     def test_agent_json_carries_the_fields(self) -> None:
         output = (

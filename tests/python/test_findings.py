@@ -791,6 +791,22 @@ def test_merge_suppression_check_finding_never_joins_a_cluster() -> None:
     assert not suppression.corroborated
 
 
+def test_merge_suppression_check_finding_first_in_input_order_still_stands_alone() -> None:
+    """The guard has two sides. When the suppression finding is placed first, a later
+    lint finding on the same line must not join its cluster either, or the ruff finding
+    would vanish into it."""
+    findings = [
+        _make_finding(file="api/user.py", line=48, source="suppression-check", severity="Medium",
+                      category="lint", finding="A comment on this line turns off a security check"),
+        _make_finding(file="api/user.py", line=48, source="ruff", severity="Low", category="lint",
+                      finding="RUF100: Unused `noqa` directive"),
+    ]
+    result = merge_findings(findings)
+    assert sorted(f.source for f in result) == ["ruff", "suppression-check"]
+    suppression = next(f for f in result if f.source == "suppression-check")
+    assert suppression.sources == ["suppression-check"]
+
+
 def test_merge_suppression_check_findings_on_neighboring_lines_stay_separate() -> None:
     findings = [
         _make_finding(file="a.py", line=10, source="suppression-check", category="lint"),

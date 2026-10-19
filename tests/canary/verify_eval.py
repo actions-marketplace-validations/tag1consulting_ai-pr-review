@@ -43,6 +43,7 @@ No billed call is part of the test suite. Every billed call goes through
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import importlib.util
 import json
 import os
@@ -117,6 +118,9 @@ class Verdict:
     verdict: str
     line: int | None
     reason: str = ""
+    # False when the code window sent with the finding was empty. A verdict on such a
+    # finding reflects missing context, not a judgment of the code.
+    had_code: bool = True
 
 
 # --- the verifier call -------------------------------------------------------
@@ -185,7 +189,11 @@ async def verify_findings(
     )
     response: LLMResponse = await llm_call(request)
     verdicts = parse_verdicts(response.text, len(findings))
-    return [verdicts.get(i) for i in range(len(findings))]
+    codes = [item["code"] for item in json.loads(request.user_message)]
+    return [
+        dataclasses.replace(verdicts[i], had_code=bool(codes[i])) if i in verdicts else None
+        for i in range(len(findings))
+    ]
 
 
 # --- scoring -----------------------------------------------------------------
@@ -201,6 +209,8 @@ class Row:
     where: str
     kind: str                 # bug, accepted, unlabeled
     verdict: str              # confirmed, unsupported, "-" (none) or "none" (no verdict)
+    no_code: bool             # the verifier saw an empty code window
+    no_line: bool             # the verifier gave a verdict but no usable line
     line_before: int | None
     line_after: int | None
     anchor_before: bool       # only meaningful for kind == "bug"
@@ -222,7 +232,9 @@ class ConditionResult:
 
     @property
     def kept_real(self) -> int:
-        return sum(1 for r in self.rows if r.kind == "bug" and r.verdict != UNSUPPORTED)
+        """Real findings that the verifier confirmed. A finding with no verdict is not counted:
+        counting it as kept would make a verifier that returned nothing look perfect."""
+        return sum(1 for r in self.rows if r.kind == "bug" and r.verdict in (CONFIRMED, "-"))
 
     @property
     def dropped_real(self) -> int:
@@ -248,6 +260,14 @@ class ConditionResult:
     def unverified(self) -> int:
         return sum(1 for r in self.rows if r.verdict == "none")
 
+    @property
+    def unsupported_without_code(self) -> int:
+        return sum(1 for r in self.rows if r.verdict == UNSUPPORTED and r.no_code)
+
+    @property
+    def no_line(self) -> int:
+        return sum(1 for r in self.rows if r.no_line)
+
 
 def score_condition(
     name: str, per_fixture: list[tuple[object, list[Finding], list[Verdict | None]]]
@@ -264,6 +284,8 @@ def score_condition(
                 fixture=fixture.name,  # type: ignore[attr-defined]
                 where=f"{f.file}:{f.line}", kind=kind,
                 verdict="-" if name == "none" else (v.verdict if v is not None else "none"),
+                no_code=v is not None and not v.had_code,
+                no_line=v is not None and v.line is None,
                 line_before=f.line, line_after=after_line,
                 anchor_before=matched is not None and _in_range(f.line, matched),
                 anchor_after=matched is not None and _in_range(after_line, matched),
@@ -276,14 +298,15 @@ def format_report(results: list[ConditionResult]) -> str:
     lines = [
         "",
         f"{'condition':14} {'findings':>8} {'kept real':>10} {'dropped real':>13} "
-        f"{'caught unlabeled':>17} {'anchor exact':>14} {'no verdict':>11}",
-        "-" * 94,
+        f"{'caught unlabeled':>17} {'anchor exact':>14} {'no verdict':>11} {'no line':>8} {'unsup, no code':>15}",
+        "-" * 118,
     ]
     for r in results:
         lines.append(
             f"{r.name:14} {len(r.rows):>8} {f'{r.kept_real}/{r.bugs}':>10} {r.dropped_real:>13} "
             f"{f'{r.caught_unlabeled}/{r.unlabeled}':>17} "
-            f"{f'{r.anchor_before}->{r.anchor_after}/{r.bugs}':>14} {r.unverified:>11}"
+            f"{f'{r.anchor_before}->{r.anchor_after}/{r.bugs}':>14} {r.unverified:>11} "
+            f"{r.no_line:>8} {r.unsupported_without_code:>15}"
         )
     base = results[0]
     lines += ["", "Verdict and line for every finding (b = matches a labeled bug, ? = no label, a = accepted):", ""]
@@ -353,6 +376,8 @@ async def main(argv: list[str] | None = None) -> int:
     json_path = argv[argv.index("--json") + 1] if "--json" in argv else ""
     try:
         conditions = _selected(os.environ.get("AI_EVAL_VERIFY_CONDITIONS", ""))
+        if not conditions:
+            raise ValueError(f"no verifier condition selected; choose from {_ALL_NAMES[1:]}")
         fixtures = pe.load_fixtures()
         cache = _llm_cache.LLMCache.from_env(namespace=pe.PROVIDER)
         reviewer_cache = _llm_cache.LLMCache(mode="replay", namespace=pe.PROVIDER)
@@ -397,6 +422,12 @@ async def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     print(format_report(results))
+    incomplete = [r for r in results if r.unverified]
+    if incomplete:
+        print("\nERROR: the verifier gave no usable verdict for some findings "
+              f"({', '.join(f'{r.name}: {r.unverified}' for r in incomplete)}). The 'kept real' "
+              "counts leave them out. Fix the prompt or the reply format before you trust this run.",
+              file=sys.stderr)
     print(f"\ncache: {cache.stats.hits} replayed, {cache.stats.misses} called, {cache.stats.saved} saved")
     if guard is not None:
         print(f"spend guard: this run counted {_spend_guard.usd(guard.run_spent_units)}, campaign "
@@ -410,7 +441,7 @@ async def main(argv: list[str] | None = None) -> int:
             for r in results
         ], indent=2) + "\n")
         print(f"wrote {json_path}")
-    return 0
+    return 1 if incomplete else 0
 
 
 if __name__ == "__main__":

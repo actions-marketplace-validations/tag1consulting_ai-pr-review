@@ -44,7 +44,7 @@ _RULE_TOKEN = re.compile(r"[A-Za-z0-9_.\-/@:]+")
 _NOQA = re.compile(r"\bnoqa\s*:\s*([A-Za-z0-9_, \t]+)", re.IGNORECASE)
 _NOSEC = re.compile(r"\bnosec\b", re.IGNORECASE)
 _NOSEMGREP = re.compile(r"\bnosemgrep\b", re.IGNORECASE)
-_PHPCS = re.compile(r"\bphpcs:(?:ignore|disable)\w*[ \t]+([^\n*]+)", re.IGNORECASE)
+_PHPCS = re.compile(r"\b(phpcs:(?:ignore|disable)\w*)[ \t]+([^\n*]+)", re.IGNORECASE)
 _ESLINT = re.compile(r"\beslint-disable(?:-next-line|-line)?[ \t]+([^\n*]+)", re.IGNORECASE)
 
 _RUFF_SECURITY_CODE = re.compile(r"^S\d{3}$")
@@ -61,7 +61,19 @@ _ESLINT_SECURITY_HINTS = (
 
 
 def _tokens(text: str) -> list[str]:
-    return _RULE_TOKEN.findall(text)
+    """Return the rule names in a ``phpcs:ignore`` or ``eslint-disable`` rule list.
+
+    Both tools separate rules with commas and put a reason after " -- ". An entry counts
+    only when the whole entry is one rule name, so a word in a reason ("retrieval of
+    data") is never read as a rule, and never copied into the finding.
+    """
+    rules = text.split(" -- ", 1)[0]
+    return [e for e in (part.strip() for part in rules.split(",")) if _RULE_TOKEN.fullmatch(e)]
+
+
+def _code(tokens: list[str]) -> str:
+    # Inline code, so that an `@scope/rule` name cannot mention a user or a team in a comment.
+    return ", ".join(f"`{t}`" for t in tokens)
 
 
 def _describe(text: str) -> list[str]:
@@ -86,15 +98,15 @@ def _describe(text: str) -> list[str]:
 
     phpcs = _PHPCS.search(text)
     if phpcs:
-        rules = [t for t in _tokens(phpcs.group(1)) if any(h in t.lower() for h in _PHPCS_SECURITY_HINTS)]
+        rules = [t for t in _tokens(phpcs.group(2)) if any(h in t.lower() for h in _PHPCS_SECURITY_HINTS)]
         if rules:
-            labels.append("phpcs:ignore " + ", ".join(rules))
+            labels.append(f"{phpcs.group(1).lower()} {_code(rules)}")
 
     eslint = _ESLINT.search(text)
     if eslint:
         rules = [t for t in _tokens(eslint.group(1)) if any(h in t.lower() for h in _ESLINT_SECURITY_HINTS)]
         if rules:
-            labels.append("eslint-disable " + ", ".join(rules))
+            labels.append("eslint-disable " + _code(rules))
 
     return labels
 
@@ -105,7 +117,10 @@ def _run_suppression_check(changed_files: ChangedFiles, diff_file: Path) -> list
     if not source_files:
         return []
     try:
-        diff_text = diff_file.read_text()
+        # The diff holds PR content, so it can hold any byte. A strict decode would
+        # raise on one bad byte and skip the whole analyzer, which a PR author could
+        # use to hide a directive. Replace what cannot be decoded and keep reading.
+        diff_text = diff_file.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         logger.warning("[ai-pr-review] WARNING: suppression-check could not read the diff: %s", exc)
         return []

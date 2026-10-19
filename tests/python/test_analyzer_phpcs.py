@@ -123,6 +123,8 @@ class TestRunPhpcsFindings:
             ("Generic.Formatting.SpaceAfterCast.NoSpace", "ERROR", "Low"),
             ("Drupal.NamingConventions.ValidFunctionName.InvalidName", "ERROR", "Low"),
             ("Generic.PHP.UpperCaseConstant.Found", "ERROR", "High"),
+            ("Drupal.Security.XSS.OutputNotEscaped", "ERROR", "High"),
+            ("Drupal.Security.XSS.OutputNotEscaped", "WARNING", "Medium"),
             ("Generic.Files.LineLength.TooLong", "WARNING", "Medium"),
             ("", "ERROR", "High"),
             ("NoDots", "WARNING", "Medium"),
