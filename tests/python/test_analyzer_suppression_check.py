@@ -52,7 +52,14 @@ class TestDescribe:
                 ["eslint-disable `security/detect-eval-with-expression`"],
             ),
             ("/* eslint-disable no-eval, no-console */", ["eslint-disable `no-eval`"]),
-            ("// phpcs:ignore @acme/security-team", ["phpcs:ignore `@acme/security-team`"]),
+            # A name that only contains the word is not a security rule, so it is not flagged
+            # and never reaches the finding text. A scoped security rule is flagged, and its
+            # name is in inline code, so the @ cannot mention anyone.
+            ("// phpcs:ignore @acme/security-team", []),
+            (
+                "// eslint-disable-line @acme/security/detect-eval",
+                ["eslint-disable `@acme/security/detect-eval`"],
+            ),
             (
                 "// eslint-disable-next-line @next/next/no-script-url",
                 ["eslint-disable `@next/next/no-script-url`"],
@@ -65,6 +72,18 @@ class TestDescribe:
                 "// phpcs:ignore Generic.Files.LineLength, Drupal.Security.XSS -- reviewed",
                 ["phpcs:ignore `Drupal.Security.XSS`"],
             ),
+            # The reason can follow in any form that the tools accept. None of these hides it.
+            ("// phpcs:ignore Drupal.Security.XSS --reason", ["phpcs:ignore `Drupal.Security.XSS`"]),
+            ("// phpcs:ignore Drupal.Security.XSS\t-- reason", ["phpcs:ignore `Drupal.Security.XSS`"]),
+            ("// phpcs:ignore Drupal.Security.XSS --- reason", ["phpcs:ignore `Drupal.Security.XSS`"]),
+            ("// phpcs:ignore Drupal.Security.XSS --", ["phpcs:ignore `Drupal.Security.XSS`"]),
+            ("// phpcs:ignore Drupal.Security.XSS some words", ["phpcs:ignore `Drupal.Security.XSS`"]),
+            ("// eslint-disable-next-line no-eval --reason", ["eslint-disable `no-eval`"]),
+            ("// eslint-disable-next-line no-eval\t---\treason", ["eslint-disable `no-eval`"]),
+            ("// eslint-disable-line security/detect-eval-with-expression --", [
+                "eslint-disable `security/detect-eval-with-expression`"
+            ]),
+            ("// eslint-disable-next-line no-unsanitized/method", ["eslint-disable `no-unsanitized/method`"]),
         ],
     )
     def test_security_directives_are_described(self, line: str, expected: list[str]) -> None:
@@ -79,7 +98,11 @@ class TestDescribe:
             "echo($x); // phpcs:ignore Generic.Files.LineLength.TooLong",
             "echo($x); // phpcs:ignore Generic.Files.LineLength.TooLong -- the security team agreed",
             "// eslint-disable-next-line no-console -- eval is not used here",
-            # A word in a reason is never read as a rule name, with or without " -- ".
+            # A word in a reason is never read as a rule name, with or without dashes.
+            "// phpcs:ignore Generic.Files.LineLength --retrieval of data from cache",
+            "// phpcs:ignore Generic.Files.LineLength, retrieval of data from cache",
+            "// eslint-disable-next-line no-console, retrieval of data",
+            "// eslint-disable-next-line no-console no-eval-ish prose",
             "// phpcs:ignore Generic.Files.LineLength -- retrieval of data from cache",
             "// phpcs:ignore Generic.Files.LineLength retrieval of data from cache",
             "// eslint-disable-next-line no-console -- see no-eval rule discussion",

@@ -48,27 +48,45 @@ _PHPCS = re.compile(r"\b(phpcs:(?:ignore|disable)\w*)[ \t]+([^\n*]+)", re.IGNORE
 _ESLINT = re.compile(r"\beslint-disable(?:-next-line|-line)?[ \t]+([^\n*]+)", re.IGNORECASE)
 
 _RUFF_SECURITY_CODE = re.compile(r"^S\d{3}$")
-_PHPCS_SECURITY_HINTS = ("security", "forbiddenfunctions", "eval")
-_ESLINT_SECURITY_HINTS = (
-    "security/",
+# A rule is a security rule when one whole segment of its name is in these sets. A
+# segment is a part between "." or "/". Matching a whole segment, and not a substring,
+# keeps a word such as "retrieval" from looking like the "eval" sniff.
+_PHPCS_SECURITY_SEGMENTS = frozenset({"security", "forbiddenfunctions", "eval"})
+_ESLINT_SECURITY_SEGMENTS = frozenset({
+    "security",
     "no-eval",
     "no-implied-eval",
     "no-new-func",
     "no-unsanitized",
     "no-danger",
     "no-script-url",
-)
+})
+
+# The reason that phpcs and eslint accept after the rule list starts with two or more
+# dashes after whitespace. The splitter is wide on purpose: " -- ", " --reason", a tab
+# before the dashes, "---" and a bare trailing "--" all count. A narrower splitter would
+# leave prose in the last entry, and the entry would then be dropped as not a rule name.
+_REASON = re.compile(r"\s-{2,}")
 
 
 def _tokens(text: str) -> list[str]:
     """Return the rule names in a ``phpcs:ignore`` or ``eslint-disable`` rule list.
 
-    Both tools separate rules with commas and put a reason after " -- ". An entry counts
-    only when the whole entry is one rule name, so a word in a reason ("retrieval of
-    data") is never read as a rule, and never copied into the finding.
+    Both tools separate rules with commas and put a reason after two dashes. The first
+    word of each entry is the rule name. Words after it are prose, and prose is never read
+    as a rule and never copied into the finding.
     """
-    rules = text.split(" -- ", 1)[0]
-    return [e for e in (part.strip() for part in rules.split(",")) if _RULE_TOKEN.fullmatch(e)]
+    rules = _REASON.split(text, maxsplit=1)[0]
+    found: list[str] = []
+    for part in rules.split(","):
+        match = _RULE_TOKEN.match(part.strip())
+        if match:
+            found.append(match.group(0))
+    return found
+
+
+def _is_security_rule(token: str, segments: frozenset[str]) -> bool:
+    return any(part in segments for part in re.split(r"[./]", token.lower()))
 
 
 def _code(tokens: list[str]) -> str:
@@ -98,13 +116,13 @@ def _describe(text: str) -> list[str]:
 
     phpcs = _PHPCS.search(text)
     if phpcs:
-        rules = [t for t in _tokens(phpcs.group(2)) if any(h in t.lower() for h in _PHPCS_SECURITY_HINTS)]
+        rules = [t for t in _tokens(phpcs.group(2)) if _is_security_rule(t, _PHPCS_SECURITY_SEGMENTS)]
         if rules:
             labels.append(f"{phpcs.group(1).lower()} {_code(rules)}")
 
     eslint = _ESLINT.search(text)
     if eslint:
-        rules = [t for t in _tokens(eslint.group(1)) if any(h in t.lower() for h in _ESLINT_SECURITY_HINTS)]
+        rules = [t for t in _tokens(eslint.group(1)) if _is_security_rule(t, _ESLINT_SECURITY_SEGMENTS)]
         if rules:
             labels.append("eslint-disable " + _code(rules))
 
