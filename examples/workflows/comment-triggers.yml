@@ -156,6 +156,9 @@ jobs:
       # job's gate is on. Set AI_REVIEW_SLASH_FAIL_ON_FINDINGS=true to gate
       # rescan/review-full too.
       fail-on-findings: ${{ vars.AI_REVIEW_SLASH_FAIL_ON_FINDINGS || 'false' }}
+      # AI_REVIEW_APPROVAL_CEILING: same variable as the review job, so a
+      # rescan or a dismiss cannot post a stronger event than the ceiling allows.
+      approval-ceiling: ${{ vars.AI_REVIEW_APPROVAL_CEILING || 'approve' }}
       feedback-loop: ${{ vars.AI_REVIEW_FEEDBACK_LOOP || 'false' }}
       token-usage-display: ${{ vars.AI_REVIEW_TOKEN_USAGE_DISPLAY || 'compact' }}
       suppress-walkthrough: ${{ vars.AI_REVIEW_SUPPRESS_WALKTHROUGH || 'false' }}
