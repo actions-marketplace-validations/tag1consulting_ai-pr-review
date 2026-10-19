@@ -65,14 +65,14 @@ An explicit action input or repo variable always wins over a `policy.yml` route 
 
 ## Severity icons
 
-Findings use color-distinct icons:
+Findings use icons with distinct shapes:
 
 | Icon | Severity | Review action |
 |------|----------|---------------|
-| 🚨 | Critical | REQUEST_CHANGES |
-| 🔴 | High | REQUEST_CHANGES |
-| 🟡 | Medium | APPROVE (informational) |
-| 🔵 | Low | APPROVE (informational) |
+| ⛔ | Critical | REQUEST_CHANGES |
+| 🚨 | High | REQUEST_CHANGES |
+| 🔶 | Medium | APPROVE (informational) |
+| 💬 | Low | APPROVE (informational) |
 
 ## Review modes
 

@@ -30,17 +30,17 @@ GITHUB_MAX_BODY_SIZE: Final[int] = 65_536
 TRUNCATION_MARKER: Final[str] = "Review output truncated"
 
 _SEVERITY_ICONS: Final[dict[str, str]] = {
-    "critical": "🚨",
-    "high": "🔴",
-    "medium": "🟡",
-    "low": "🔵",
+    "critical": "⛔",
+    "high": "🚨",
+    "medium": "🔶",
+    "low": "💬",
     "none": "✅",
     "unknown": "❔",
 }
 
 
 def severity_icon(severity: str) -> str:
-    return _SEVERITY_ICONS.get(severity.lower(), "🔵")
+    return _SEVERITY_ICONS.get(severity.lower(), "💬")
 
 
 # Published docs site (docs/_config.yml). Lives here, not in slash/handlers.py,
