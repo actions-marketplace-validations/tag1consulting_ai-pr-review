@@ -51,6 +51,12 @@ _SOURCE = "phpcs"
 _TIMEOUT_SECS = 120
 _PHP_EXTENSIONS = {".php", ".module", ".inc", ".theme", ".install", ".profile"}
 
+# Sniff categories (the second dot-separated part of a sniff code, as in
+# ``Squiz.Commenting.FunctionComment.Missing``) that only report style. phpcs
+# marks many of them ERROR, which would otherwise make a missing docblock
+# High. Precedent for an in-code map: ``golangci_lint._HIGH_SEVERITY_LINTERS``.
+_STYLE_SNIFF_CATEGORIES = frozenset({"Commenting", "WhiteSpace", "Formatting", "NamingConventions"})
+
 # phpcs's --standard flag only accepts full ruleset names (or a path to a
 # ruleset.xml). It cannot mix a named standard with a bare sniff code
 # (`--standard=PSR12,Squiz.Commenting.FunctionComment` errors: "the
@@ -380,6 +386,14 @@ def _invoke_phpcs(plan: _Plan) -> subprocess.CompletedProcess[str] | None:
         return None
 
 
+def _severity(msg_type: str, source_rule: str) -> str:
+    """Map a phpcs message to a severity, rating style-only sniffs Low."""
+    parts = source_rule.split(".")
+    if len(parts) >= 2 and parts[1] in _STYLE_SNIFF_CATEGORIES:
+        return "Low"
+    return "High" if msg_type == "ERROR" else "Medium"
+
+
 def _remediation(plan: _Plan, path: str) -> str:
     if plan.drupal:
         return f"See https://www.drupal.org/docs/develop/standards or fix with: phpcs --standard={plan.remediation_standard} {path}"
@@ -476,8 +490,8 @@ def _run_phpcs(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
             if not isinstance(msg, dict):
                 continue
             msg_type = msg.get("type", "")
-            severity = "High" if msg_type == "ERROR" else "Medium"
             source_rule = msg.get("source") or ""
+            severity = _severity(msg_type, source_rule)
             try:
                 findings.append(
                     Finding(
