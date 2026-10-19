@@ -662,12 +662,10 @@ class BitbucketProvider:
         id_map = assemble_id_map(
             [existing_body] if existing_body else [], list(findings)
         )
-        # What gets written back is wider than what this run renders: the
-        # comment is rewritten every run, so an ID dropped here is gone for
-        # the next run. Without the carry-over, an incremental run that does
-        # not report a finding again makes a waiting verdict command for it
-        # fail with "not found", and a run with no findings restarts the
-        # numbering at F1.
+        # `id_map` covers only this run's findings. The marker written back
+        # is wider (see `id_map_persistence_variants` where it is built): the
+        # comment is rewritten every run, so an ID dropped from the marker is
+        # gone for the next run.
 
         # #894 (root-cause follow-up to #874's narrower fix): `keep` is now
         # guaranteed bot-authored by `_list_summary_comments()` itself (or
@@ -1012,6 +1010,9 @@ class BitbucketProvider:
         try:
             # Largest carry first. Fall back to a smaller one before the
             # drop below, because dropping the marker restarts the numbering.
+            # Without the carry, an incremental run that does not report a
+            # finding again makes a waiting verdict command for it fail with
+            # "not found", and a run with no findings restarts at F1.
             for persisted_id_map in id_map_persistence_variants(prior_id_map, id_map):
                 id_map_marker = build_id_map_marker(persisted_id_map, hidden=True)
                 if (
@@ -1019,6 +1020,19 @@ class BitbucketProvider:
                     <= _MAX_BITBUCKET_BODY_SIZE - _MIN_BODY_BYTES
                 ):
                     break
+            carried_kept = len(persisted_id_map) - len(
+                set(persisted_id_map) & set(id_map)
+            )
+            carried_before = len(set(prior_id_map) - set(id_map))
+            if carried_kept < carried_before:
+                _log.warning(
+                    "bitbucket: kept %d of %d earlier id-map entries for %s/%s "
+                    "PR #%s; dropped entries cannot be named by a verdict "
+                    "command on the next run",
+                    carried_kept, carried_before,
+                    self.config.workspace, self.config.repo_slug,
+                    self.config.pr_id,
+                )
         except Exception as exc:  # noqa: BLE001
             # Logged (not just appended to self._errors): orchestrate.py never
             # reads this provider's _errors list for a normal review run
@@ -1031,6 +1045,7 @@ class BitbucketProvider:
             # unnecessary full re-diff next cycle, a worse outcome than the
             # degraded F-IDs this is actually about. Mirrors github.py's
             # identical failure-class handling.
+            id_map_marker = ""
             _log.warning("bitbucket: failed to build id-map marker: %s", exc)
             self._errors.append(f"post_findings: failed to build id-map marker: {exc}")
         marker_bytes = len(id_map_marker.encode("utf-8")) if id_map_marker else 0
@@ -1951,14 +1966,17 @@ def _post_summary_impl(
         # check below drops all three markers. Dropping the id-map restarts
         # the numbering and loses every waiting F<n>.
         carry_forward = ""
+        carry_fits = False
         for id_map_variant in id_map_persistence_variants(prior_id_map, {}):
             carry_forward = _carry(id_map_variant)
             if len((body + carry_forward).encode("utf-8")) <= _MAX_BITBUCKET_BODY_SIZE:
+                carry_fits = True
                 break
-        if prior_id_map and id_map_variant != prior_id_map:
+        if carry_fits and prior_id_map and id_map_variant != prior_id_map:
             _log.warning(
                 "bitbucket: carried-forward id-map reduced from %d to %d entries "
-                "to fit the summary comment for %s/%s PR #%s",
+                "for %s/%s PR #%s (size budget for earlier entries or comment "
+                "size limit)",
                 len(prior_id_map), len(id_map_variant),
                 provider.config.workspace, provider.config.repo_slug,
                 provider.config.pr_id,

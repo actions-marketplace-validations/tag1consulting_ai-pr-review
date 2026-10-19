@@ -644,3 +644,60 @@ class TestMergeIdMapsForPersistence:
         from ai_pr_review.vcs._finding_ids import merge_id_maps_for_persistence
 
         assert merge_id_maps_for_persistence({}, {"a": 1}) == {"a": 1}
+
+    def test_zero_budget_keeps_only_current_and_the_highest_prior_id(self) -> None:
+        from ai_pr_review.vcs._finding_ids import merge_id_maps_for_persistence
+
+        prior = {"a": 1, "b": 2, "c": 9}
+        merged = merge_id_maps_for_persistence(prior, {}, max_carried_bytes=0)
+        assert merged == {"c": 9}
+
+    def test_zero_budget_with_top_id_already_current_drops_all_carried(self) -> None:
+        from ai_pr_review.vcs._finding_ids import merge_id_maps_for_persistence
+
+        prior = {"a": 1, "b": 2, "c": 9}
+        merged = merge_id_maps_for_persistence(prior, {"c": 9}, max_carried_bytes=0)
+        assert merged == {"c": 9}
+
+    def test_current_wins_when_the_same_fingerprint_has_a_different_id(self) -> None:
+        from ai_pr_review.vcs._finding_ids import merge_id_maps_for_persistence
+
+        merged = merge_id_maps_for_persistence({"a": 1}, {"a": 4})
+        assert merged == {"a": 4}
+
+    def test_tied_prior_ids_do_not_crash_and_keep_the_top_id(self) -> None:
+        from ai_pr_review.vcs._finding_ids import merge_id_maps_for_persistence
+
+        merged = merge_id_maps_for_persistence(
+            {"a": 5, "b": 5, "c": 1}, {}, max_carried_bytes=0
+        )
+        assert max(merged.values()) == 5
+
+
+class TestIdMapPersistenceVariants:
+    def test_empty_prior_and_current_yields_one_empty_map(self) -> None:
+        from ai_pr_review.vcs._finding_ids import id_map_persistence_variants
+
+        assert list(id_map_persistence_variants({}, {})) == [{}]
+
+    def test_small_prior_first_variant_is_the_full_merge(self) -> None:
+        from ai_pr_review.vcs._finding_ids import id_map_persistence_variants
+
+        variants = list(id_map_persistence_variants({"a": 1, "b": 2}, {"c": 3}))
+        assert variants[0] == {"a": 1, "b": 2, "c": 3}
+        # The last variant is always the smallest one: current plus the top ID.
+        assert variants[-1] == {"b": 2, "c": 3}
+
+    def test_large_prior_yields_shrinking_maps_ending_at_current_plus_top(self) -> None:
+        from ai_pr_review.vcs._finding_ids import id_map_persistence_variants
+
+        prior = {f"fp-{i}-{'x' * 60}": i for i in range(1, 201)}
+        current = {"now": 201}
+        variants = list(id_map_persistence_variants(prior, current))
+
+        sizes = [len(v) for v in variants]
+        assert sizes == sorted(sizes, reverse=True)
+        assert len(set(sizes)) == len(sizes), "repeated results are skipped"
+        assert variants[0] != variants[-1]
+        top_fp = max(prior, key=lambda k: prior[k])
+        assert variants[-1] == {top_fp: 200, "now": 201}

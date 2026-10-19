@@ -1032,3 +1032,5 @@ def test_carried_id_entries_shrink_before_the_marker_is_dropped() -> None:
         assert fingerprint(finding) in written
     assert max(written.values()) >= 60, "numbering must continue past the earlier IDs"
     assert len(written) < len(prior) + len(findings), "the carried part must shrink"
+    assert 59 in written.values(), "the highest earlier ID must survive"
+    assert 1 not in written.values(), "the lowest earlier IDs go first"

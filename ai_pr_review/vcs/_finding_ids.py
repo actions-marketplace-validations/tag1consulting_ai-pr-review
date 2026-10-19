@@ -491,9 +491,10 @@ def assemble_id_map(
 
 
 # Bytes of JSON payload the persisted id-map may use for entries carried over
-# from earlier runs. A Bitbucket summary comment has one 32 KB body that also
-# holds the findings, so the carried part needs its own small budget.
-_MAX_CARRIED_ID_MAP_BYTES: Final[int] = 8_000
+# from earlier runs. The marker is base64, so 4,000 bytes of JSON is about
+# 5.4 KB of a 32 KB comment body. That body also holds the findings, so the
+# carried part needs its own small budget.
+_MAX_CARRIED_ID_MAP_BYTES: Final[int] = 4_000
 
 
 def merge_id_maps_for_persistence(
@@ -522,7 +523,7 @@ def merge_id_maps_for_persistence(
         return len(json.dumps(entries, separators=(",", ":")).encode("utf-8"))
 
     for fp in sorted(carried, key=lambda key: carried[key]):
-        if _size(carried) <= max_carried_bytes or len(carried) <= 1:
+        if _size(carried) <= max_carried_bytes:
             break
         if fp == top_fp:
             continue
@@ -535,7 +536,7 @@ def merge_id_maps_for_persistence(
 # marker into a small space tries each in turn. The last one keeps only the
 # current findings and the highest earlier ID, so numbering still never
 # restarts.
-_CARRY_BUDGETS: Final[tuple[int, ...]] = (_MAX_CARRIED_ID_MAP_BYTES, 2_000, 0)
+_CARRY_BUDGETS: Final[tuple[int, ...]] = (_MAX_CARRIED_ID_MAP_BYTES, 1_000, 0)
 
 
 def id_map_persistence_variants(
