@@ -93,6 +93,26 @@ def test_parse_empty_text() -> None:
     assert parse_owners("") == VerdictOwners()
 
 
+@pytest.mark.parametrize("sep", ["\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"])
+def test_parse_does_not_split_a_line_on_a_hidden_line_separator(sep: str) -> None:
+    """str.splitlines() splits on these, Bitbucket and a diff viewer do not.
+    A path-scoped line must not turn into a global one that nobody sees."""
+    owners = parse_owners(f"docs/ @alice{sep}* @mallory\n* @carol\n")
+    assert owners.nicknames == frozenset({"carol"})
+    assert owners.ignored_lines == 1
+
+
+def test_parse_accepts_crlf_tabs_and_a_leading_bom() -> None:
+    owners = parse_owners("\ufeff# header\r\n*\t@alice\t@bob\r\n")
+    assert owners.nicknames == frozenset({"alice", "bob"})
+
+
+def test_parse_ignores_non_ascii_nicknames() -> None:
+    owners = parse_owners("* @J\u00f6rg @alice\n")
+    assert owners.nicknames == frozenset({"alice"})
+    assert owners.ignored_owners == ("@J\u00f6rg",)
+
+
 # ---------------------------------------------------------------------------
 # Matching
 # ---------------------------------------------------------------------------
@@ -123,6 +143,16 @@ def test_no_match() -> None:
     owners = parse_owners("* @alice\n")
     assert owners.matches(account_id="x", uuid="{nope}", nickname="mallory") is None
     assert owners.matches(account_id=None, uuid=None, nickname=None) is None
+
+
+@pytest.mark.parametrize(
+    ("owner", "commenter"),
+    [("kate", "\u212aate"), ("fiona", "\ufb01ona"), ("strasse", "Stra\u00dfe")],
+)
+def test_a_look_alike_unicode_nickname_does_not_match(owner: str, commenter: str) -> None:
+    """casefold() would make these compare equal. ASCII-only matching must not."""
+    owners = parse_owners(f"* @{owner}\n")
+    assert owners.matches(account_id="x", uuid=None, nickname=commenter) is None
 
 
 def test_a_nickname_does_not_match_as_a_substring() -> None:
@@ -280,10 +310,16 @@ def _provider(
     *,
     owners: OwnersLoad | None,
     verdict_min_role: str = "write",
+    loader_kwargs: list[dict] | None = None,
+    owners_source: str = "base-ref",
+    base_ref: str = "",
 ) -> BitbucketProvider:
-    monkeypatch.setattr(
-        "ai_pr_review.vcs.bitbucket.load_verdict_owners", lambda **_kw: owners
-    )
+    def loader(**kw: object) -> OwnersLoad | None:
+        if loader_kwargs is not None:
+            loader_kwargs.append(kw)
+        return owners
+
+    monkeypatch.setattr("ai_pr_review.vcs.bitbucket.load_verdict_owners", loader)
     http = httpx.Client(
         transport=httpx.MockTransport(handler), base_url="https://api.bitbucket.org/2.0"
     )
@@ -296,6 +332,7 @@ def _provider(
         config=BitbucketConfig(
             workspace="ws", repo_slug="repo", pr_id=7, email="x@y", api_token="t",
             code_insights=True, verdicts=True, verdict_min_role=verdict_min_role,
+            verdict_owners_source=owners_source, base_ref=base_ref,
         ),
         client=client,
     )
@@ -451,7 +488,10 @@ def test_the_owners_file_is_ignored_when_the_minimum_role_is_admin(
     )
     assert _post(prov).suppressed == 0  # type: ignore[attr-defined]
     assert len(calls) == 1
-    assert "A retry does not help" in replies[0]["content"]["raw"]
+    text = replies[0]["content"]["raw"]
+    # The owners file is off, so the reply must not send the user to it.
+    assert "AI_BITBUCKET_VERDICT_MIN_ROLE" in text and "Make the bot account an admin" in text
+    assert OWNERS_PATH not in text
 
 
 def test_without_an_owners_file_the_permission_lookup_still_decides(
@@ -521,3 +561,51 @@ def test_an_owner_may_use_the_fixed_command_too(monkeypatch: pytest.MonkeyPatch)
     )
     _post(prov)
     assert extract_verdicts(put_bodies[-1])[_FP] == "fixed"
+
+
+def test_a_forbidden_command_with_no_owners_file_says_the_file_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    replies: list[dict] = []
+    inner = _build_handler(
+        comments=[_summary_comment(100, _summary_body()), _cmd(nickname="alice")],
+        permissions={}, replies=replies, put_bodies=[],
+    )
+    prov = _provider(
+        _with_permission_calls(inner, forbidden=True, calls=[]), monkeypatch, owners=None
+    )
+    assert _post(prov).suppressed == 0  # type: ignore[attr-defined]
+    text = replies[0]["content"]["raw"]
+    assert "was not found or could not be read" in text
+    assert "its token lacks the permission" in text
+
+
+def test_the_three_forbidden_replies_use_three_distinct_dedup_keys() -> None:
+    """The reply key hashes the context, so a changed situation (a file was
+    added, but the commenter is not on it) gets a fresh reply."""
+    from ai_pr_review.vcs._bitbucket_verdicts import _forbidden_context, _reply_for_authority
+
+    listed = _owners("* @alice\n")
+    assert _forbidden_context(listed, "write") == "not-listed"
+    assert _forbidden_context(None, "write") == "no-file"
+    assert _forbidden_context(OwnersLoad(None, None, "base-ref"), "write") == "no-file"
+    assert _forbidden_context(listed, "admin") == "admin-only"
+    texts = {_reply_for_authority("a", "forbidden", c) for c in ("not-listed", "no-file", "admin-only")}  # type: ignore[arg-type]
+    assert len(texts) == 3
+
+
+def test_the_provider_passes_its_config_to_the_owners_loader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[dict] = []
+    inner = _build_handler(
+        comments=[_summary_comment(100, _summary_body()), _cmd(nickname="alice")],
+        permissions={}, replies=[], put_bodies=[],
+    )
+    prov = _provider(
+        _with_permission_calls(inner, forbidden=True, calls=[]),
+        monkeypatch, owners=None, loader_kwargs=seen,
+        owners_source="workspace", base_ref="develop",
+    )
+    _post(prov)
+    assert seen == [{"workspace": ".", "base_ref": "develop", "source": "workspace"}]

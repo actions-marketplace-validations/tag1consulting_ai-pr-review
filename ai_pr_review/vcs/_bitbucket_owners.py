@@ -17,8 +17,11 @@ owner of `docs/` silence a security finding in code.
 Owner tokens that this module can resolve from a pull request comment:
 
 - `@nickname`, matched case-insensitively against the commenter's nickname.
-  A nickname is weaker than an ID. Unverified: whether Bitbucket lets a user
-  change a nickname or reuse a free one.
+  Only ASCII nicknames match, because Unicode case folding makes look-alike
+  names compare as equal (for example the Kelvin sign and `k`). A nickname
+  with a space cannot be written on a line. A nickname is weaker than an ID.
+  Unverified: whether Bitbucket lets a user change a nickname or reuse a
+  free one.
 - An Atlassian `account_id` (`557058:9aa59bdf-...` or 24 hex digits) or a
   `{uuid}`. These do not change.
 
@@ -31,6 +34,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Final, Literal
 
@@ -74,7 +78,7 @@ class VerdictOwners:
             normalized = _normalize_uuid(uuid)
             if normalized and normalized in self.ids:
                 return "id"
-        if nickname and nickname.casefold() in self.nicknames:
+        if nickname and nickname.isascii() and nickname.lower() in self.nicknames:
             return "nickname"
         return None
 
@@ -121,7 +125,17 @@ def parse_owners(text: str) -> VerdictOwners:
     nicknames: set[str] = set()
     ignored: list[str] = []
     ignored_lines = 0
-    for raw_line in text.splitlines():
+    # Split on "\n" only. str.splitlines() also splits on \x0b, \x0c, \x1c to
+    # \x1e, \x85 and U+2028/2029, which Bitbucket and a diff viewer do not show
+    # as a line break. A hidden break could turn a path-scoped line into a
+    # global one that a reviewer never sees.
+    for raw_line in text.lstrip("\ufeff").split("\n"):
+        raw_line = raw_line.removesuffix("\r")
+        if any(
+            c != "\t" and unicodedata.category(c) in ("Cc", "Zl", "Zp") for c in raw_line
+        ):
+            ignored_lines += 1
+            continue
         line = raw_line.split("#", 1)[0].strip()
         if not line:
             continue
@@ -137,8 +151,13 @@ def parse_owners(text: str) -> VerdictOwners:
                 ids.add(uuid)
             elif _ACCOUNT_ID_RE.match(token):
                 ids.add(token.lower())
-            elif token.startswith("@") and len(token) > 1 and "/" not in token:
-                nicknames.add(token[1:].casefold())
+            elif (
+                token.startswith("@")
+                and len(token) > 1
+                and "/" not in token
+                and token.isascii()
+            ):
+                nicknames.add(token[1:].lower())
             else:
                 ignored.append(token)
     return VerdictOwners(

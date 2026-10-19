@@ -70,7 +70,7 @@ Write the list like this:
 * @alice 557058:9aa59bdf-2b71-431a-af18-286802c44d56 {9f49742f-b2a6-491a-84aa-6bbf3a935756}
 ```
 
-- `@nickname` matches the nickname of the commenter, without regard to case.
+- `@nickname` matches the nickname of the commenter, without regard to case. Only ASCII nicknames match. A nickname with a space (for example a display name such as `Ada Lovelace`) cannot be written on a line, so use the `account_id` for those people.
 - An Atlassian `account_id` or a `{uuid}` matches the account. These never change. Prefer them. Unverified: whether Bitbucket lets a user change a nickname or take a free one, so a nickname is the weaker match.
 - Email addresses, `workspace/group` names, and `@teams/...` entries are ignored and logged at INFO level. A comment carries no email address, and a group lookup also needs admin.
 - Lines with another pattern (for example `*.py` or `docs/`) are ignored by this feature. Bitbucket still uses them for its own reviewer suggestions. The review does not scope owners by path, because the owner of `docs/` must not be able to dismiss a security finding in code.
@@ -79,13 +79,15 @@ Write the list like this:
 
 **Where the owners file is read from.** The review reads it from the same source as `policy.yml`, which `AI_POLICY_SOURCE` selects:
 
-- `base-ref` (the default of the engine): the file on the target branch, with `git show origin/<BASE_REF>:.bitbucket/CODEOWNERS`. A pull request cannot change who may dismiss findings on it. A change to the file takes effect after it is merged. Use this if the authors of pull requests are not all trusted to dismiss findings.
+- `base-ref` (the default of the engine): the file on the target branch, with `git show origin/<BASE_REF>:.bitbucket/CODEOWNERS`. The changes in a pull request cannot change who may dismiss findings on it. A change to the file takes effect after it is merged. Use this if the authors of pull requests are not all trusted to dismiss findings. Push access to the repository is still the trust boundary: a person who can push can retarget a pull request to a branch with a different owners file, and can edit `bitbucket-pipelines.yml`.
 - `workspace`: the file in the checkout, which includes the changes of the pull request. A change to the file takes effect at once. **A pull request can then add its own author to the list.** If a commenter is listed in the file of the pull request but not on the target branch, the review still applies the command. The reply then carries a note, and the job log shows which source granted it. Reviewers must check any change to `.bitbucket/CODEOWNERS` in a pull request.
 
 The bot replies to every command it processes. The reply says if the command was applied, rejected, or could not be checked. Two replies need your action:
 
 - "could not verify your repository permissions right now" means that the permission lookup failed for a temporary reason. The review tries again on the next run.
-- "you are not listed as an owner" means that the commenter is not on the list, and the bot account is not an admin, so the lookup returned HTTP 403. A retry does not help. Add the commenter to the owners file on the target branch, or make the bot account an admin. The command stays pending, and the next review run applies it after you fix this.
+- "you are not listed on a `*` line", "was not found or could not be read", and "`AI_BITBUCKET_VERDICT_MIN_ROLE` is `admin`" all mean that the permission lookup returned HTTP 403. The bot account is not an admin, or its token lacks the permission. A retry does not help. The reply names the fix for your case: add the commenter to the owners file on the target branch, add the file, or make the bot account an admin. The command stays pending, and the next review run applies it after you fix this.
+
+Earlier versions answered that HTTP 403 with "could not verify your repository permissions right now. Try again". That reply was wrong, because the error does not go away on its own. A command that already has that reply gets one new reply with the new text.
 
 The review never ignores a command silently.
 

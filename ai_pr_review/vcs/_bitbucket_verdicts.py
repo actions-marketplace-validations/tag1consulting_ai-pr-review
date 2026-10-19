@@ -333,8 +333,9 @@ def check_authority(
         # of the bot's role or an owners file can.
         _log.warning(
             "ai-pr-review: permission lookup for account %s was refused (HTTP "
-            "403): the bot account is not an admin of %s/%s. Add the commenter "
-            "to %s or grant the bot admin access. Response: %s",
+            "403): the bot account is not an admin of %s/%s, or its token lacks "
+            "the permission. A commenter listed on a '*' line of %s does not need "
+            "this lookup. Response: %s",
             account_id, workspace, repo_slug, OWNERS_PATH,
             format_http_error_body(resp.text),
         )
@@ -442,20 +443,53 @@ def _reply_for_unknown_finding_id(actor: str, finding_id: int) -> str:
     )
 
 
-def _reply_for_authority(actor: str, check: AuthorityCheck) -> str:
+ForbiddenContext = Literal["not-listed", "no-file", "admin-only"]
+
+
+def _forbidden_context(owners: OwnersLoad | None, min_role: str) -> ForbiddenContext:
+    """Why the owners file could not authorize a commenter, for the reply."""
+    if min_role == "admin":
+        return "admin-only"
+    if owners is None or owners.owners is None:
+        return "no-file"
+    return "not-listed"
+
+
+def _reply_for_authority(
+    actor: str, check: AuthorityCheck, forbidden: ForbiddenContext = "not-listed"
+) -> str:
     if check == "unauthorized":
         return (
             f"@{actor} you need write access to this repository to use "
             "`/ai-pr-review` commands, so this one was not applied."
         )
     if check == "forbidden":
+        cannot_check = (
+            "the review bot cannot check repository roles (Bitbucket answered "
+            "HTTP 403: the bot account is not an admin, or its token lacks the "
+            "permission)"
+        )
+        if forbidden == "admin-only":
+            return (
+                f"@{actor} `AI_BITBUCKET_VERDICT_MIN_ROLE` is `admin`, so only a "
+                f"role check can authorize this command, and {cannot_check}. "
+                "This command was not applied. A retry does not help. Make the "
+                "bot account an admin of this repository. The next review run "
+                "then applies this command."
+            )
+        if forbidden == "no-file":
+            return (
+                f"@{actor} `{OWNERS_PATH}` was not found or could not be read, "
+                f"and {cannot_check}. This command was not applied. A retry does "
+                f"not help. Add the file with a `*` line that lists your account, "
+                "or make the bot account an admin. The next review run then "
+                "applies this command."
+            )
         return (
-            f"@{actor} you are not listed as an owner in `{OWNERS_PATH}`, and the "
-            "review bot cannot check repository roles because its account is not "
-            "an admin. This command was not applied. A retry does not help. "
-            f"Add your account to a `*` line of `{OWNERS_PATH}` on the target "
-            "branch, or ask a repository admin to do it. The next review run then "
-            "applies this command."
+            f"@{actor} you are not listed on a `*` line of `{OWNERS_PATH}`, and "
+            f"{cannot_check}. This command was not applied. A retry does not "
+            f"help. Add your account to that line, or ask a repository admin to "
+            "do it. The next review run then applies this command."
         )
     return (
         f"@{actor} could not verify your repository permissions right now, "
@@ -705,8 +739,10 @@ def apply_pending_verdicts(
                 # reply-key dedup keeps the repeated reply to one.
                 if check in ("degraded", "forbidden"):
                     comment_had_retryable_failure = True
+                context = _forbidden_context(owners, min_role)
+                key = f"authority:{check}" + (f":{context}" if check == "forbidden" else "")
                 replies.append(
-                    (comment_id, f"authority:{check}", _reply_for_authority(actor, check))
+                    (comment_id, key, _reply_for_authority(actor, check, context))
                 )
                 continue
 
