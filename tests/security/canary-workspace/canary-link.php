@@ -1,0 +1,1 @@
+../canary-symlink-target.txt

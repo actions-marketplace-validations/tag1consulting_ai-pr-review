@@ -1,0 +1,1 @@
+CANARY-OUTSIDE-CONTENT: this file is outside the canary workspace. An analyzer must never read it through canary-workspace/canary-link.php.
