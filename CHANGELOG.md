@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.24.0] - 2026-10-19
+
+### Added
+
+- **A provider "prompt too long" rejection now skips the review (#1056).** The pre-flight estimate can be too low. Before, the provider rejected the prompt with an HTTP 400, every agent failed, and the comment said "0 findings, 2 failed agents". Now the engine recognizes the rejection, stops, and posts a skip comment that names the agent, the model, and `AI_EXCLUDE_PATTERNS`. The comment also carries the analyzer and SARIF findings. The run does not advance the watermark. `AI_FAIL_ON_CONTEXT_WINDOW=true` makes this skip exit with code 2. Only the Anthropic message text is matched. The OpenAI, Google and Bedrock texts are not confirmed, so those providers keep the old behavior. If only some agents are rejected, the review continues and the failed-agent note says "prompt too long for the model".
+- **Bitbucket: the `/ai-pr-review feedback [F<n>] <text>` command (#933).** The poll saves the text to the learning-loop store, as GitHub does. The text is required. An `F<n>` is optional. The command uses the same authorization as `false-positive` and `wont-fix` (the owners file first, then the permission lookup). It writes only when `AI_FEEDBACK_LOOP=true` and `AI_BITBUCKET_VERDICTS=true`. Two bare feedback lines in one comment are saved as two entries.
+- **The `COST_ESTIMATE` log line ends with `input=` and `output_cap=` (#1055).** The two fields split the total into the cost of the estimated input tokens and the cost of the output cap. The existing fields keep their order. The configuration page has a worked example that turns a dollar ceiling into an input token budget. A new setting for an expected-value output estimate is not part of this release.
+
+### Changed
+
+- **Behavior change: the severity icons are different shapes (#1037).** Critical is ⛔, High is 🚨, Medium is 🔶, and Low is 💬. Before, three of the four icons differed only by color. 🚨 meant Critical before and means High now. A review comment that was posted before the upgrade keeps its old icon until the next review rewrites it, so an old 🚨 means Critical. No parser reads the icon.
+- **The `also_reported` notes are capped only when they are shown (#1047).** A finding that two or more analyzers reported keeps every note, up to 100, and the review shows the first 5 with a "(+N more from other analyzers)" line. Before, the count in a merged finding was too low when a cluster had more than 5 notes.
+- **The example workflows pass `approval-ceiling` (#1064).** `examples/workflows/pr-review.yml` and `comment-triggers.yml` read `vars.AI_REVIEW_APPROVAL_CEILING`, with `approve` as the fallback. An organization-level variable now covers every repository that copies the example.
+- **The phpcs analyzer code is split (#1047).** The ruleset and pattern code moved to `_phpcs_ruleset.py` and `_phpcs_patterns.py`, and the retry rebuilds the plan from stored inputs. Behavior is unchanged. The security canary has a new symlink case and a test that runs the real phpcs with a hostile ruleset.
+
 ## [2.23.2] - 2026-10-19
 
 ### Security
