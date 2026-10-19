@@ -77,10 +77,11 @@ Write the list like this:
 - If `AI_BITBUCKET_VERDICT_MIN_ROLE` is `admin`, the owners file is not used. An operator who asked for admins only did not ask for a list of names.
 - Bitbucket reads `.bitbucket/CODEOWNERS` to suggest reviewers when a pull request opens. Names on a `*` line are suggested on every pull request where that Bitbucket feature is on. Unverified: which Bitbucket plan has that feature, and how Bitbucket treats an `account_id` or `{uuid}` entry it does not know.
 
-**Where the owners file is read from.** The review reads it from the same source as `policy.yml`, which `AI_POLICY_SOURCE` selects:
+**Where the owners file is read from.** The review reads the file from the target branch only, with `git show origin/<BASE_REF>:.bitbucket/CODEOWNERS`. It never reads the file in the checkout, and `AI_POLICY_SOURCE` has no effect on it. A pull request therefore cannot add its own author to the list. A change to the file takes effect after it is merged into the target branch.
 
-- `base-ref` (the default of the engine): the file on the target branch, with `git show origin/<BASE_REF>:.bitbucket/CODEOWNERS`. The changes in a pull request cannot change who may dismiss findings on it. A change to the file takes effect after it is merged. Use this if the authors of pull requests are not all trusted to dismiss findings. Push access to the repository is still the trust boundary: a person who can push can retarget a pull request to a branch with a different owners file, and can edit `bitbucket-pipelines.yml`.
-- `workspace`: the file in the checkout, which includes the changes of the pull request. A change to the file takes effect at once. **A pull request can then add its own author to the list.** If a commenter is listed in the file of the pull request but not on the target branch, the review still applies the command. The reply then carries a note, and the job log shows which source granted it. Reviewers must check any change to `.bitbucket/CODEOWNERS` in a pull request.
+- Version 2.23.1 followed `AI_POLICY_SOURCE`. With `workspace`, a pull request could add its own author to the list. Version 2.23.2 removed that option for this file.
+- The pipeline must set `BASE_REF` to the destination branch, and the clone must contain `origin/<BASE_REF>`. If `BASE_REF` is empty, the review logs a warning and uses no owners file. If `origin/<BASE_REF>` is missing, `git show` fails, the review logs a warning, and it uses no owners file. In both cases the permission lookup decides.
+- Push access to the repository is still the trust boundary. A person who can push can retarget a pull request to a branch with a different owners file, and can edit `bitbucket-pipelines.yml`.
 
 The bot replies to every command it processes. The reply says if the command was applied, rejected, or could not be checked. Two replies need your action:
 
