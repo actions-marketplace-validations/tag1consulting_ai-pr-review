@@ -52,6 +52,7 @@ _ANALYZER_PREFIXES: tuple[str, ...] = (
     "sarif:",
     "semgrep",
     "shellcheck",
+    "suppression-check",
     "tflint",
     "trufflehog",
 )

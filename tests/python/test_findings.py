@@ -771,6 +771,34 @@ def test_merge_different_real_categories_do_not_corroborate() -> None:
     assert all(not f.corroborated for f in result)
 
 
+def test_merge_suppression_check_finding_never_joins_a_cluster() -> None:
+    """#1077: the agent finding on the same line is Critical. If the
+    suppression finding clustered with it, the agent text would win the headline
+    and the comment that turns off the security rule would vanish. The real
+    neighbors are the agent finding, semgrep and ruff RUF100 at api/user.py:48."""
+    findings = [
+        _make_finding(file="api/user.py", line=48, source="security-reviewer", severity="Critical",
+                      category="injection", finding="pickle.loads on a caller-supplied blob"),
+        _make_finding(file="api/user.py", line=48, source="ruff", severity="Low", category="lint",
+                      finding="RUF100: Unused `noqa` directive (non-enabled: `S301`)"),
+        _make_finding(file="api/user.py", line=48, source="suppression-check", severity="Medium",
+                      category="lint", finding="A comment on this line turns off a security check"),
+    ]
+    result = merge_findings(findings)
+    assert sorted(f.source for f in result) == ["ruff", "security-reviewer", "suppression-check"]
+    suppression = next(f for f in result if f.source == "suppression-check")
+    assert suppression.sources == ["suppression-check"]
+    assert not suppression.corroborated
+
+
+def test_merge_suppression_check_findings_on_neighboring_lines_stay_separate() -> None:
+    findings = [
+        _make_finding(file="a.py", line=10, source="suppression-check", category="lint"),
+        _make_finding(file="a.py", line=11, source="suppression-check", category="lint"),
+    ]
+    assert len(merge_findings(findings)) == 2
+
+
 # ---------------------------------------------------------------------------
 # Finding model validation
 # ---------------------------------------------------------------------------

@@ -38,6 +38,17 @@ PROXIMITY_LINES = 3
 # "Missing doc comment" finding absorb a nearby security finding (#1074).
 _STRICT_CATEGORIES = frozenset({"lint", "docs"})
 
+# A finding from one of these sources never joins a cluster. The
+# suppression-check finding names a comment that turns off a security rule on
+# a line. If it clustered with the agent finding for that line, the agent
+# finding (higher severity) would win the headline and the suppression would
+# vanish from the review (#1077).
+_STANDALONE_SOURCES = frozenset({"suppression-check"})
+
+
+def _is_standalone(f: Finding) -> bool:
+    return any(s in _STANDALONE_SOURCES for s in (f.sources or ([f.source] if f.source else [])))
+
 
 def merge_findings(
     findings: list[Finding],
@@ -142,8 +153,11 @@ def _dedup_file(findings: list[Finding]) -> list[Finding]:
             tail = cluster[-1]
             tail_line = tail.line or 0
             f_line = f.line or 0
-            if abs(tail_line - f_line) <= PROXIMITY_LINES and _cluster_category_compatible(
-                cluster, f
+            if (
+                abs(tail_line - f_line) <= PROXIMITY_LINES
+                and not _is_standalone(f)
+                and not any(_is_standalone(m) for m in cluster)
+                and _cluster_category_compatible(cluster, f)
             ):
                 cluster.append(f)
                 placed = True

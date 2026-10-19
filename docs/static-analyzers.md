@@ -54,6 +54,7 @@ Each analyzer maps its findings to a severity and to one of the 12 categories th
 | **docs-api-check** | Python + `@param`-family languages (JS/TS, Java, Kotlin, C#, Ruby, C++, Scala) | A documented parameter not in the signature, or vice versa, always→Medium | 90 (Python, via ruff) / 80 (tree-sitter engine) | `docs-api-check` |
 | **docs-ref-check** | Changed `.md` files | A broken relative link or heading anchor, always→Medium | 80 | `docs-ref-check` |
 | **docs-drift-check** | Any file (runs unconditionally, like semgrep/trufflehog) | A doc reference to a file this PR deletes, always→Low | 80 | `docs-drift-check` |
+| **suppression-check** | Source files (not tests, docs or config). Reads added lines only | A comment on an added line turns off a security rule: `noqa` with an `S` code, `nosec`, `nosemgrep`, `phpcs:ignore` or `phpcs:disable` on a security sniff, `eslint-disable` on a security rule, always→Medium | 85 | `suppression-check` |
 | **cve-check** | Dependency manifests and lockfiles (see [Dependency vulnerability check](#dependency-vulnerability-check)) | CVSS >= 9.0→Critical, 7.0–8.9→High, 4.0–6.9→Medium, below 4.0→Low, unscored→High | 90 (70 when unscored) | `osv` |
 
 ## Dependency existence check
@@ -154,5 +155,5 @@ See `examples/workflows/sarif-codeql.yml` for a complete CodeQL + AI review pipe
 
 ## Implementation reference
 
-All 17 analyzers are native Python functions in `ai_pr_review/analyzers/native/`. The `analyzers/bridge.py` dispatcher maps each tool name to its Python callable. Each analyzer runs the tool binary with `subprocess.run` and parses the JSON output in Python. Test coverage is in `tests/python/test_analyzer_<tool>.py`. The three docs analyzers use the files `test_analyzer_docs_comments.py` (docs-api-check), `test_analyzer_docs_ref_check.py`, and `test_analyzer_docs_drift_check.py`.
+All 18 analyzers are native Python functions in `ai_pr_review/analyzers/native/`. The `analyzers/bridge.py` dispatcher maps each tool name to its Python callable. Each analyzer runs the tool binary with `subprocess.run` and parses the JSON output in Python. Test coverage is in `tests/python/test_analyzer_<tool>.py`. The three docs analyzers use the files `test_analyzer_docs_comments.py` (docs-api-check), `test_analyzer_docs_ref_check.py`, and `test_analyzer_docs_drift_check.py`.
 

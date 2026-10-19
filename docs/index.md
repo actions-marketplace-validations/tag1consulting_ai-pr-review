@@ -14,8 +14,8 @@ hero_tagline: "AI-powered pull request review using multiple LLM agents. Posts a
     <p>Up to 9 specialized AI agents analyze your code from different perspectives: architecture, security, edge cases, and more.</p>
   </div>
   <div class="feature">
-    <h3><span class="feature-icon">&#9670;</span> 17 Static Analyzers</h3>
-    <p>Shellcheck, semgrep, trufflehog, ruff, golangci-lint, hadolint, checkov, phpcs, phpstan, kube-linter, and tflint ship as binaries in the container image. ESLint runs only when you install it. cve-check, dep-exists, and three documentation analyzers (docs-api-check, docs-ref-check, and docs-drift-check) also run. All 17 run as native Python.</p>
+    <h3><span class="feature-icon">&#9670;</span> 18 Static Analyzers</h3>
+    <p>Shellcheck, semgrep, trufflehog, ruff, golangci-lint, hadolint, checkov, phpcs, phpstan, kube-linter, and tflint ship as binaries in the container image. ESLint runs only when you install it. cve-check, dep-exists, suppression-check (comments that turn off a security rule), and three documentation analyzers (docs-api-check, docs-ref-check, and docs-drift-check) also run. All 18 run as native Python.</p>
   </div>
   <div class="feature">
     <h3><span class="feature-icon">&#9670;</span> Works Everywhere</h3>
