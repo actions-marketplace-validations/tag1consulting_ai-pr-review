@@ -162,3 +162,13 @@ def test_trailer_asks_for_one_kind_of_defect_per_finding() -> None:
     content = (PROMPTS_DIR / "_trailer-findings.md").read_text()
     assert "Put one kind of defect in each finding" in content
     assert "Do not move text from `finding` into `impact`" in content
+
+
+def test_code_reviewer_checks_cross_function_consistency() -> None:
+    """#1079: a value that one function writes and another reads must agree on
+    transport, name, prefix and format. The prompt names the cookie and header case."""
+    content = (PROMPTS_DIR / "code-reviewer.md").read_text()
+    section = content.split("**Cross-Function Consistency**", 1)[1].split("**Code Quality**", 1)[0]
+    for needle in ("transport", "prefix", "cookie", "`Authorization` header", "Bearer"):
+        assert needle in section, needle
+    assert "Do not guess" in section
