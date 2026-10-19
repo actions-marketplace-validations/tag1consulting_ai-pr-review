@@ -576,7 +576,7 @@ def test_a_forbidden_command_with_no_owners_file_says_the_file_is_missing(
     )
     assert _post(prov).suppressed == 0  # type: ignore[attr-defined]
     text = replies[0]["content"]["raw"]
-    assert "was not found or could not be read" in text
+    assert "was not found, could not be read, or is larger than 64 KiB" in text
     assert "its token lacks the permission" in text
 
 

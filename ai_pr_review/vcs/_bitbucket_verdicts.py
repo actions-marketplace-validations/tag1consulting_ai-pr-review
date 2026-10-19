@@ -479,7 +479,7 @@ def _reply_for_authority(
             )
         if forbidden == "no-file":
             return (
-                f"@{actor} `{OWNERS_PATH}` was not found or could not be read, "
+                f"@{actor} `{OWNERS_PATH}` was not found, could not be read, or is larger than 64 KiB, "
                 f"and {cannot_check}. This command was not applied. A retry does "
                 f"not help. Add the file with a `*` line that lists your account, "
                 "or make the bot account an admin. The next review run then "

@@ -85,7 +85,7 @@ Write the list like this:
 The bot replies to every command it processes. The reply says if the command was applied, rejected, or could not be checked. Two replies need your action:
 
 - "could not verify your repository permissions right now" means that the permission lookup failed for a temporary reason. The review tries again on the next run.
-- "you are not listed on a `*` line", "was not found or could not be read", and "`AI_BITBUCKET_VERDICT_MIN_ROLE` is `admin`" all mean that the permission lookup returned HTTP 403. The bot account is not an admin, or its token lacks the permission. A retry does not help. The reply names the fix for your case: add the commenter to the owners file on the target branch, add the file, or make the bot account an admin. The command stays pending, and the next review run applies it after you fix this.
+- "you are not listed on a `*` line", "was not found, could not be read, or is larger than 64 KiB", and "`AI_BITBUCKET_VERDICT_MIN_ROLE` is `admin`" all mean that the permission lookup returned HTTP 403. The bot account is not an admin, or its token lacks the permission. A retry does not help. The reply names the fix for your case: add the commenter to the owners file on the target branch, add the file, or make the bot account an admin. The command stays pending, and the next review run applies it after you fix this.
 
 Earlier versions answered that HTTP 403 with "could not verify your repository permissions right now. Try again". That reply was wrong, because the error does not go away on its own. A command that already has that reply gets one new reply with the new text.
 
