@@ -28,6 +28,7 @@ SENTINEL_NAMES = [
     "conftest-imported",
     "semgrep-rule-executed",
     "phpcs-ruleset-executed",
+    "phpcs-hostile-ref-executed",
 ]
 
 
@@ -262,3 +263,131 @@ class TestPhpcsRulesetIsData:
         assert "Generic.canary" not in plan.ruleset_xml
         _assert_no_canary_fired(canary_dir)
 
+
+    def test_symlinked_changed_file_is_never_handed_to_phpcs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A changed file that is a symlink to a file outside the workspace must be skipped (#1047)."""
+        import subprocess
+        from unittest.mock import MagicMock, patch
+
+        from ai_pr_review.analyzers.native.phpcs import _run_phpcs
+        from ai_pr_review.manifest import ChangedFiles
+
+        link = CANARY_WORKSPACE / "canary-link.php"
+        assert link.is_symlink(), "the canary symlink is missing from the workspace"
+        assert not (CANARY_WORKSPACE / link.resolve().name).exists()
+
+        monkeypatch.setenv("CANARY_DIR", str(tmp_path / "canary"))
+        monkeypatch.chdir(CANARY_WORKSPACE)
+        calls: list[list[str]] = []
+
+        def _fake(args: list[str], **kwargs: object) -> MagicMock:
+            calls.append(args)
+            return MagicMock(returncode=0, stdout='{"totals":{},"files":{}}', stderr="")
+
+        files = ["canary-link.php"]
+        with (
+            patch("ai_pr_review.analyzers.native.phpcs.shutil.which", return_value="/usr/bin/phpcs"),
+            patch.object(subprocess, "run", side_effect=_fake),
+        ):
+            findings = _run_phpcs(ChangedFiles(all_files=files, php=files), tmp_path / "x.diff")
+
+        assert findings == []
+        assert calls == [], "phpcs must not run when the only changed file escapes the workspace"
+
+    def test_real_phpcs_with_hostile_ruleset_does_not_read_outside_the_workspace(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Run the real phpcs against a hostile ruleset and check that nothing outside the workspace loads (#1047).
+
+        The ruleset uses path-like refs, a ref that exists relative to the
+        working directory, an absolute ref, and an out-of-tree `<file>`. A
+        control run hands the same ruleset to phpcs directly. The control must
+        fire the sentinel, or the hostile input proves nothing.
+        """
+        import shutil
+        import subprocess
+
+        if not (shutil.which("phpcs") and shutil.which("php")):
+            pytest.skip("the real phpcs and php binaries are not installed")
+        from ai_pr_review.analyzers.native.phpcs import _run_phpcs
+        from ai_pr_review.manifest import ChangedFiles
+
+        outside = tmp_path / "outside"
+        workspace = tmp_path / "ws"
+        outside.mkdir()
+        workspace.mkdir()
+        sentinel_dir = tmp_path / "sentinels"
+
+        def _bootstrap(directory: Path) -> Path:
+            php = directory / "boot.php"
+            php.write_text(
+                "<?php\n$d = getenv('CANARY_DIR');\n@mkdir($d, 0777, true);\n"
+                "@touch($d . '/phpcs-hostile-ref-executed');\n",
+                encoding="utf-8",
+            )
+            return php
+
+        def _ruleset(path: Path, boot: Path) -> None:
+            path.write_text(
+                f'<?xml version="1.0"?>\n<ruleset name="hostile"><arg name="bootstrap" value="{boot}"/>'
+                '<rule ref="Generic.PHP.Syntax"/></ruleset>\n',
+                encoding="utf-8",
+            )
+
+        outside_boot = _bootstrap(outside)
+        _ruleset(outside / "outside-ruleset.xml", outside_boot)
+        (outside / "secret.php").write_text("<?php\n// OUTSIDE-SECRET-MARKER\n$x = 1 ;\n", encoding="utf-8")
+
+        workspace_boot = _bootstrap(workspace)
+        _ruleset(workspace / "Generic.hostile.xml", workspace_boot)
+        (workspace / "hostile").mkdir()
+        _ruleset(workspace / "hostile" / "ruleset.xml", workspace_boot)
+        (workspace / "linked.php").symlink_to(outside / "secret.php")
+        (workspace / "changed.php").write_text("<?php\n$x = 1 ;\n", encoding="utf-8")
+        hostile = workspace / "phpcs.xml"
+        hostile.write_text(
+            f"""<?xml version="1.0"?>
+<ruleset name="hostile">
+  <config name="installed_paths" value="{outside}"/>
+  <arg name="bootstrap" value="{workspace_boot}"/>
+  <autoload>{workspace_boot}</autoload>
+  <file>{outside}</file>
+  <file>../outside</file>
+  <rule ref="{outside}/outside-ruleset.xml"/>
+  <rule ref="../outside/outside-ruleset.xml"/>
+  <rule ref="./Generic.hostile.xml"/>
+  <rule ref="Generic.hostile.xml"/>
+  <rule ref="hostile"/>
+  <rule ref="Generic.PHP.Syntax">
+    <exclude name="hostile"/>
+    <exclude name="Generic.hostile.xml"/>
+  </rule>
+  <rule ref="PSR12"/>
+</ruleset>
+""",
+            encoding="utf-8",
+        )
+
+        monkeypatch.chdir(workspace)
+
+        control_dir = tmp_path / "control"
+        monkeypatch.setenv("CANARY_DIR", str(control_dir))
+        subprocess.run(
+            ["phpcs", "--report=json", f"--standard={outside}/outside-ruleset.xml", "-q", "changed.php"],
+            capture_output=True, text=True, timeout=60, check=False,
+        )
+        assert (control_dir / "phpcs-hostile-ref-executed").exists(), (
+            "control failed: the real phpcs did not run the hostile bootstrap, so this test proves nothing"
+        )
+
+        monkeypatch.setenv("CANARY_DIR", str(sentinel_dir))
+        files = ["changed.php", "linked.php"]
+        findings = _run_phpcs(ChangedFiles(all_files=files, php=files), tmp_path / "x.diff")
+
+        _assert_no_canary_fired(sentinel_dir)
+        assert findings, "phpcs should still lint changed.php, or the run proves nothing"
+        assert not sentinel_dir.exists() or not list(sentinel_dir.iterdir())
+        assert all(f.file == "changed.php" for f in findings), [f.file for f in findings]
+        assert not any("OUTSIDE-SECRET-MARKER" in f.finding for f in findings)
