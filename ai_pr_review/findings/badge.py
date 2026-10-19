@@ -7,7 +7,7 @@ holds. It is display text and never enters an approval decision.
 Labels, in order:
 
 - ``corroborated by analyzer``: a static analyzer and an agent reported the same
-  place.
+  kind of defect at the same place (the merge decides, see ``provenance.py``).
 - ``analyzer finding``: a static analyzer reported it alone.
 - ``judge kept``: the judge pass ran and kept it.
 - ``single agent, unverified``: one agent reported it and the judge did not keep

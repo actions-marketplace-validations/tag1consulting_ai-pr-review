@@ -76,6 +76,10 @@ Reviews start on the next PR.
 
 **Bitbucket: the `feedback` command.** `/ai-pr-review feedback <text>` saves a note to the learning loop, with the same authorization as the verdict commands.
 
+**Behavior change: a style finding no longer merges into a nearby security finding.** A missing docblock used to absorb a security finding on a nearby line and show it as "corroborated". Now style and documentation findings stay separate, phpcs style sniffs are Low, and fewer findings show as corroborated.
+
+**A new analyzer, `suppression-check`.** It flags a comment that turns off a security rule, such as `# noqa: S301` or `# nosec`. Add it to an `analyzers` allowlist if you use one.
+
 See [Version History → v2.24.0](version-history/v2.24.0) for details.
 
 ## What's new in v2.23.2
