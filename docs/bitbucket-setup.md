@@ -122,10 +122,10 @@ In your Bitbucket repo, go to **Repository settings → Pipelines → Repository
 | `AI_REVIEW_MODE` | No | Empty (default): defer to `.github/ai-pr-review/policy.yml` route matching if present, else `quick`. Set to `full` to override. |
 | `AI_FAIL_ON_FINDINGS` | No | `true` (default, see the starter pipeline). Exit code 2 when Critical/High findings block approval, failing the pipeline step. Set to `false` to always exit 0. |
 | `AI_REVIEW_IMAGE_TAG` | No | Container tag to pull, for example `latest`. Required, no default. The `image.name` field of the starter pipeline uses this variable through the Bitbucket `${{VAR}}` syntax. That syntax cannot resolve a secured variable at all, so this variable must stay non-secured. |
-| `AI_BITBUCKET_VERDICTS` | No | `false` (default). Set to `true` to enable dismiss/false-positive/wont-fix/fixed comment commands. See [Dismissing findings](#dismissing-findings). |
+| `AI_BITBUCKET_VERDICTS` | No | `false` (default). Set to `true` to enable the `dismiss`, `false-positive`, `wont-fix`, `fixed`, and `feedback` comment commands. See [Dismissing findings](#dismissing-findings). |
 | `AI_BITBUCKET_VERDICT_MIN_ROLE` | No | `write` (default). Minimum Bitbucket repository permission (`read`, `write`, or `admin`) required to apply a verdict command through the permission lookup. With `admin`, the owners file `.bitbucket/CODEOWNERS` is not used. It has an effect only when `AI_BITBUCKET_VERDICTS=true`. |
 | `AI_BITBUCKET_REVIEW_STATE` | No | `true` (default). Set to `false` to stop the bot from calling the approve and request-changes endpoints of Bitbucket. The decided outcome still renders as heading text in the summary comment in both cases. |
-| `AI_FEEDBACK_LOOP` | No | `false` (default). Set to `true` to save `false-positive` and `wont-fix` verdicts to the cross-repo learning-loop store. See [Dismissing findings → Learning loop](#dismissing-findings). It also needs `AI_BITBUCKET_VERDICTS=true` and the **Repository:Write** scope below. |
+| `AI_FEEDBACK_LOOP` | No | `false` (default). Set to `true` to save `false-positive`, `wont-fix`, and `feedback` entries to the cross-repo learning-loop store. See [Dismissing findings → Learning loop](#dismissing-findings). It also needs `AI_BITBUCKET_VERDICTS=true` and the **Repository:Write** scope below. |
 | `AI_FEEDBACK_BRANCH` | No | `ai-pr-review-bot` (default). Branch that holds the JSONL file of the learning-loop store. GitHub reads the same variable. |
 
 ### 3. Grant PR scopes

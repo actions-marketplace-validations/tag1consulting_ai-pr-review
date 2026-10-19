@@ -147,6 +147,6 @@ The root composite action installs `shellcheck` automatically if the runner does
 | phpstan | PHP | `composer global require phpstan/phpstan` |
 | kube-linter | Kubernetes manifests | Download from [GitHub releases](https://github.com/stackrox/kube-linter/releases) |
 | tflint | Terraform | Download from [GitHub releases](https://github.com/terraform-linters/tflint/releases) |
-| eslint | JS/TS | Uses the project's own `node_modules/.bin/eslint` or `npx`. It does nothing if no config is present |
+| eslint | JS/TS | Needs an `eslint` binary on `PATH`. It does nothing if no config is present |
 
 > For pinned, SHA-verified installs, use the container action. It ships the analyzer binaries (except eslint) at fixed versions, and you do not need to set up the workflow.

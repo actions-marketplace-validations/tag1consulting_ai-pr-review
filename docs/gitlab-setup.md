@@ -29,7 +29,7 @@ render_with_liquid: false
 
 ## Slash command alternatives
 
-GitLab CI has no `issue_comment` event trigger. The `/ai-pr-review` slash commands (rescan, review-full, skip, dismiss) work on GitHub PRs. They are not available on GitLab MRs.
+GitLab CI has no `issue_comment` event trigger. The `/ai-pr-review` slash commands (rescan, review-full, skip, dismiss, false-positive, wont-fix, fixed, feedback) work on GitHub PRs. They are not available on GitLab MRs.
 
 **Workarounds for common operations:**
 

@@ -10,7 +10,7 @@ render_with_liquid: false
 
 The action runs deterministic analyzers alongside the LLM agents. Their findings flow through the same dedup, suppress, and render pipeline as LLM findings. All analyzers run concurrently in the parallel path. They run one at a time when `parallel: false`. If a binary is missing, the native analyzer writes a WARNING to stderr and returns an empty findings array. A missing binary never blocks the review.
 
-The container action includes all analyzer binaries. For the direct-action or submodule paths, install the binaries you need. See [runtime dependencies](installation-direct-action#runtime-dependencies).
+The container action includes all analyzer binaries except `eslint`. For the direct-action or submodule paths, install the binaries you need. See [runtime dependencies](installation-direct-action#runtime-dependencies).
 
 ## Controlling which analyzers run
 
@@ -28,13 +28,13 @@ You can set these in three places. The list shows them in precedence order (high
        # exclude-analyzers: 'checkov,tflint'  # or: run everything except checkov and tflint
    ```
 
-3. **`.github/ai-pr-review/policy.yml`**: the `analyzers` and `exclude-analyzers` fields of a named policy. The action routes by changed-file path, base branch, or head branch. Different PRs can get different analyzer sets without a change to the workflow file. See [Policies](policy) for the full schema.
+3. **`.ai-pr-review/policy.yml`** (the action also reads `.github/ai-pr-review/policy.yml` as a fallback): the `analyzers` and `exclude-analyzers` fields of a named policy. The action routes by changed-file path, base branch, or head branch. Different PRs can get different analyzer sets without a change to the workflow file. See [Policies](policy) for the full schema.
 
 An explicit action input or repo variable always wins over a `policy.yml` route match. A route match wins over the engine default (all eligible analyzers run). The same three-place precedence applies to the `agents` and `exclude-agents` allowlist and denylist for review agents.
 
 ## Category mapping
 
-Each analyzer maps its findings to a severity and to one of the 11 categories that the LLM agents also use (`authz`, `injection`, `dependency-cve`, `secret`, `architecture-coupling`, `test-gap`, `edge-case`, `observability`, `docs`, `lint`, `other`). An analyzer finding can then corroborate an LLM-agent finding on the same issue. When two different analyzer tools report nearby lines, the review shows one finding and lists the other tool's message under `Also reported by`. The LLM judge pass does not down-rank corroborated findings, and they get a confidence boost. If the analyzer cannot classify a finding with confidence, it maps the finding to `"other"`. That category never blocks corroboration with a real category, and it never matches one by mistake.
+Each analyzer maps its findings to a severity and to one of the 11 categories that the LLM agents also use (`authz`, `injection`, `dependency-cve`, `secret`, `architecture-coupling`, `test-gap`, `edge-case`, `observability`, `docs`, `lint`, `other`). An analyzer finding can then corroborate an LLM-agent finding on the same issue. When two different analyzer tools report nearby lines, the review shows one finding and lists the other tool's message under `Also reported by`. A finding shows at most 5 `Also reported by` lines. A last line, `(+N more from other analyzers)`, counts the rest. The LLM judge pass does not down-rank corroborated findings, and they get a confidence boost. If the analyzer cannot classify a finding with confidence, it maps the finding to `"other"`. That category never blocks corroboration with a real category, and it never matches one by mistake.
 
 | Analyzer | Language gate | Severity mapping | Confidence | Source tag |
 |----------|--------------|-----------------|------------|------------|

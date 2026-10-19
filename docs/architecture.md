@@ -25,7 +25,7 @@ ai-pr-review/
 │   ├── llm/                # Multi-provider LLM clients (Anthropic, OpenAI, Google, Bedrock)
 │   ├── vcs/                # VCS provider clients (GitHub, GitLab, Bitbucket)
 │   ├── findings/           # Findings pipeline: merge, suppress, deduplicate
-│   ├── analyzers/          # Native static analyzer wrappers (16 Python implementations + bridge dispatcher)
+│   ├── analyzers/          # Native static analyzer wrappers (17 Python implementations + bridge dispatcher)
 │   ├── context/            # Context enrichment (tree-sitter symbol injection, opt-in)
 │   ├── feedback/           # Learning loop: feedback store, injection (opt-in)
 │   └── slash/              # Slash command handling (/ai-pr-review false-positive, etc.)
@@ -62,7 +62,7 @@ For the full directory listing with per-file annotations, see the [internal arch
 
 The action requires `jq`, `git`, `gh`, and `python3`. Standard GitHub-hosted runners have all four pre-installed.
 
-The **container action** (recommended) includes all static analyzer binaries at pinned versions, so it needs no runner setup. The **direct action reference** and **git submodule** paths do not install analyzer binaries. See [runtime dependencies](installation-direct-action#runtime-dependencies) for the optional install-in-workflow snippet.
+The **container action** (recommended) includes all static analyzer binaries except `eslint`, at pinned versions, so it needs no runner setup. The **direct action reference** and **git submodule** paths do not install analyzer binaries. See [runtime dependencies](installation-direct-action#runtime-dependencies) for the optional install-in-workflow snippet.
 
 ## Deep reference
 

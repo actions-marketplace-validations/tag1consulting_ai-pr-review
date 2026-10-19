@@ -25,7 +25,7 @@ The `source` field is optional in agent output. If the field is absent, the find
 
 The fields `suggested_code` and `start_line` are optional. Agents emit them when the `enable-suggestions` action input is `true` (the default). See [Code suggestions](#code-suggestions).
 
-The pipeline removes findings with confidence below 75. It removes duplicates with proximity-based matching. Findings in the same file within 3 lines of each other join one cluster. The pipeline keeps the highest-severity finding of the cluster. The surviving finding carries a `sources` array that holds all sources from the cluster. When a finding has more than one source, the VCS provider renders `[first-source] *(also flagged by: other)*`. The provider sorts the sources alphabetically.
+The pipeline removes findings with confidence below 75. It removes duplicates with proximity-based matching. Findings in the same file within 3 lines of each other join one cluster. The pipeline keeps the highest-severity finding of the cluster. The surviving finding carries a `sources` array that holds all sources from the cluster. When a finding has more than one source, the VCS provider renders the sorted sources as `[source1, source2]`.
 
 ## Runtime flow
 
@@ -132,7 +132,7 @@ The current code has no "context variant" or cache-cohort concept. Every eligibl
 
 ## Parallel agent execution
 
-By default, the engine runs all eligible agents at the same time, with a limit on the number in flight. In `full` mode, this reduces the wall-clock time from about 5-7 minutes to about 2 minutes.
+By default, the engine runs all eligible agents at the same time, with a limit on the number in flight. The wall-clock time depends on the model and on the size of the diff.
 
 To turn this off, set the `parallel: false` action input or `AI_PARALLEL=false`. The default is `true`.
 
@@ -207,14 +207,7 @@ The trusted global config can hold a catch-all rule (a rule with no `match` cons
 
 An optional `verify` field starts a check before the engine suppresses a finding:
 
-| Value | Extracts | Checks |
-|-------|----------|--------|
-| `github-release` | `owner/repo@vN` | `gh api repos/{owner}/{repo}/git/ref/tags/{tag}` |
-| `npm` | `pkg@version` or `"pkg": "version"` | `registry.npmjs.org/{pkg}/{version}` |
-| `pypi` | `pkg==version` | `pypi.org/pypi/{pkg}/{version}/json` |
-| `go-module` | `module@vX.Y.Z` | `proxy.golang.org/{module}/@v/{version}.info` |
-| `cargo` | `pkg = "version"` or `pkg@version` | `crates.io/api/v1/crates/{pkg}/{version}` |
-| `docker-hub` | `image:tag` or `ns/image:tag` | `hub.docker.com/v2/namespaces/{ns}/repositories/{name}/tags/{tag}` |
+See the table in [Suppression rules](suppression.md) for the `verify` values, what each one extracts, and the registry endpoint that it checks.
 
 If the check confirms that the version exists, the suppression stands. If the check cannot confirm it, the engine keeps the finding. This covers a lookup error and a version that is not found. The engine does not support private registries (GHCR, GCR, ECR).
 
@@ -370,7 +363,7 @@ The LLM client retries transient API failures with exponential backoff and jitte
 | `LLM_RETRY_COUNT` | `3` | Number of retry attempts (set to 0 to disable) |
 | `LLM_RETRY_BASE_DELAY` | `2` | Base delay in seconds (doubles each retry) |
 
-The VCS provider HTTP layer wraps critical API calls with retry logic (3 retries, exponential backoff and jitter) for all three providers.
+The VCS provider HTTP layer wraps critical API calls with retry logic (up to 3 attempts in total, exponential backoff and jitter) for all three providers.
 
 ## Graceful failure handling
 
@@ -395,11 +388,11 @@ The engine accepts `review-target: standalone` (`REVIEW_TARGET=standalone`). Its
 
 ## Multi-arch container image
 
-The `Dockerfile` builds for linux/amd64 and linux/arm64. Each binary download uses a `case "${TARGETARCH}"` block with SHA256 checksums for each architecture. The pip-installed tools (ruff, semgrep, checkov) and the composer-installed tools (phpcs, phpstan) are arch-neutral.
+The `Dockerfile` builds for linux/amd64 and linux/arm64. Seven tools (shellcheck, trufflehog, golangci-lint, hadolint, kube-linter, tflint, and ruff) are copied from digest-pinned official images. Only `gh` is downloaded, and its download is checked with SHA256. The pip-installed tools (semgrep, checkov) and the composer-installed tools (phpcs, phpstan) are arch-neutral.
 
 ### Multi-stage layout
 
-- **`builder`**: installs build-time tooling, downloads analyzer binaries, pip-installs ruff, semgrep, and checkov, and composer-installs phpcs and phpstan. The image does **not** include the Semgrep registry rulesets, because the Semgrep Rules License v1.0 restricts their use. The semgrep analyzer uses `--config=auto` to fetch rules at runtime. See [`THIRD-PARTY-LICENSES/`](https://github.com/tag1consulting/ai-pr-review/tree/main/THIRD-PARTY-LICENSES).
+- **`builder`**: installs build-time tooling, copies analyzer binaries from digest-pinned images, downloads `gh`, pip-installs semgrep and checkov, and composer-installs phpcs and phpstan. The image does **not** include the Semgrep registry rulesets, because the Semgrep Rules License v1.0 restricts their use. The semgrep analyzer uses `--config=auto` to fetch rules at runtime. See [`THIRD-PARTY-LICENSES/`](https://github.com/tag1consulting/ai-pr-review/tree/main/THIRD-PARTY-LICENSES).
 - **final stage**: a slim runtime with `bash`, `ca-certificates`, `curl`, `git`, `jq`, `php-cli` and extensions, and `python3`. It copies `/usr/local/bin` and `/usr/local/lib/python${PYTHON_VERSION}/dist-packages` from the builder as a whole. `ARG PYTHON_VERSION` sets the version (default `3.14`, to match Ubuntu 26.04). The Python package and action assets are copied last. A change to source only then does not invalidate the heavy builder layers.
 
 ## Test architecture

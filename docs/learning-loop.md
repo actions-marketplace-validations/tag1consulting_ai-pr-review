@@ -87,7 +87,7 @@ When `AI_FEEDBACK_LOOP=true`, the engine injects the `<repo-feedback>` block at 
 Before ranking, the engine applies a relevance floor. It excludes an entry that has a non-empty `file` that matches no changed path in the PR. An entry with an empty `file` always passes the floor.
 
 The engine then ranks the remaining entries by relevance before injection:
-- **+2 points** if `entry.file` appears in the changed files of the PR
+- **+2 points** if `entry.file` and a changed path of the PR contain each other
 - **+1 point** if `entry.rule_id` is non-empty
 
 The block has a token budget (`AI_FEEDBACK_MAX_TOKENS`, default 2048 tokens).
