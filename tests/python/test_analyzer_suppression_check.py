@@ -52,14 +52,27 @@ class TestDescribe:
                 ["eslint-disable `security/detect-eval-with-expression`"],
             ),
             ("/* eslint-disable no-eval, no-console */", ["eslint-disable `no-eval`"]),
-            # A name that only contains the word is not a security rule, so it is not flagged
-            # and never reaches the finding text. A scoped security rule is flagged, and its
-            # name is in inline code, so the @ cannot mention anyone.
-            ("// phpcs:ignore @acme/security-team", []),
+            # A rule name is in inline code, so an @ in a scoped name cannot mention anyone.
+            ("// phpcs:ignore @acme/security-team", ["phpcs:ignore `@acme/security-team`"]),
             (
                 "// eslint-disable-line @acme/security/detect-eval",
                 ["eslint-disable `@acme/security/detect-eval`"],
             ),
+            # A standard or plugin that names itself with the word is a security rule.
+            (
+                "// phpcs:ignore PHPCS_SecurityAudit.BadFunctions.EasyXSS",
+                ["phpcs:ignore `PHPCS_SecurityAudit.BadFunctions.EasyXSS`"],
+            ),
+            ("// phpcs:ignore Security.BadFunctions.Backticks", ["phpcs:ignore `Security.BadFunctions.Backticks`"]),
+            (
+                "// eslint-disable-next-line security-node/detect-unhandled-event-errors",
+                ["eslint-disable `security-node/detect-unhandled-event-errors`"],
+            ),
+            # " --x" is not a separator, so the entry after the comma is a rule. The tools
+            # still apply it, and so does this analyzer.
+            ("// eslint-disable-next-line no-console --x, no-eval", ["eslint-disable `no-eval`"]),
+            ("// phpcs:ignore Generic.Foo --x,Drupal.Security.XSS", ["phpcs:ignore `Drupal.Security.XSS`"]),
+            ("// eslint-disable-next-line no-console --x,no-eval -- reviewed", ["eslint-disable `no-eval`"]),
             (
                 "// eslint-disable-next-line @next/next/no-script-url",
                 ["eslint-disable `@next/next/no-script-url`"],
@@ -106,6 +119,9 @@ class TestDescribe:
             "// phpcs:ignore Generic.Files.LineLength -- retrieval of data from cache",
             "// phpcs:ignore Generic.Files.LineLength retrieval of data from cache",
             "// eslint-disable-next-line no-console -- see no-eval rule discussion",
+            # Once a real " -- " starts the reason, a comma in the reason is prose, not a list.
+            "// eslint-disable-next-line no-console -- reviewed, no-eval is not used here",
+            "// phpcs:ignore Generic.Files.LineLength -- reviewed,Drupal.Security.XSS is fine",
             "// eslint-disable-next-line no-console",
             "/* eslint-disable */",
             'msg = "noqa: S301"',

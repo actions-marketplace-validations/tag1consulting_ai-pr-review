@@ -48,12 +48,14 @@ _PHPCS = re.compile(r"\b(phpcs:(?:ignore|disable)\w*)[ \t]+([^\n*]+)", re.IGNORE
 _ESLINT = re.compile(r"\beslint-disable(?:-next-line|-line)?[ \t]+([^\n*]+)", re.IGNORECASE)
 
 _RUFF_SECURITY_CODE = re.compile(r"^S\d{3}$")
-# A rule is a security rule when one whole segment of its name is in these sets. A
-# segment is a part between "." or "/". Matching a whole segment, and not a substring,
-# keeps a word such as "retrieval" from looking like the "eval" sniff.
-_PHPCS_SECURITY_SEGMENTS = frozenset({"security", "forbiddenfunctions", "eval"})
+# A rule is a security rule when one segment of its name is in these sets, or when a
+# segment contains the word "security" (the PHPCS_SecurityAudit standard and the
+# eslint-plugin-security-node plugin name themselves that way). A segment is a part
+# between "." or "/". The other names must match a whole segment, so a word such as
+# "retrieval" is not read as the "eval" sniff.
+_SECURITY_WORD = "security"
+_PHPCS_SECURITY_SEGMENTS = frozenset({"forbiddenfunctions", "eval"})
 _ESLINT_SECURITY_SEGMENTS = frozenset({
-    "security",
     "no-eval",
     "no-implied-eval",
     "no-new-func",
@@ -63,10 +65,11 @@ _ESLINT_SECURITY_SEGMENTS = frozenset({
 })
 
 # The reason that phpcs and eslint accept after the rule list starts with two or more
-# dashes after whitespace. The splitter is wide on purpose: " -- ", " --reason", a tab
-# before the dashes, "---" and a bare trailing "--" all count. A narrower splitter would
-# leave prose in the last entry, and the entry would then be dropped as not a rule name.
-_REASON = re.compile(r"\s-{2,}")
+# dashes, after whitespace and before whitespace or the end of the line. That is the
+# separator the tools use. " --reason" is not one, so ESLint reads "no-console --x, no-eval"
+# as two rules and disables no-eval. A wider splitter would hide the second rule from this
+# analyzer. A tab, "---" and a bare trailing "--" all count as a separator.
+_REASON = re.compile(r"\s-{2,}(?:\s|$)")
 
 
 def _tokens(text: str) -> list[str]:
@@ -86,7 +89,9 @@ def _tokens(text: str) -> list[str]:
 
 
 def _is_security_rule(token: str, segments: frozenset[str]) -> bool:
-    return any(part in segments for part in re.split(r"[./]", token.lower()))
+    return any(
+        part in segments or _SECURITY_WORD in part for part in re.split(r"[./]", token.lower())
+    )
 
 
 def _code(tokens: list[str]) -> str:
