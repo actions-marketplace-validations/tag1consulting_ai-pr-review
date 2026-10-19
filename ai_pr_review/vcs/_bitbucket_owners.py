@@ -6,7 +6,12 @@ Bitbucket allows only repository admins to read another user's role
 other account). A review bot that runs with write access can never pass that
 check, so `_bitbucket_verdicts.check_authority` could never authorize anyone.
 This module reads the owners from `.bitbucket/CODEOWNERS` instead, the file
-that Bitbucket itself uses for code owners.
+that Bitbucket itself uses for code owners. It reads the file from the
+destination branch only (`git show origin/<BASE_REF>:...`). It never reads the
+checkout, because the checkout holds the pull request's own changes, and a pull
+request must not be able to name its own author as an owner. Rejected
+alternative: follow `AI_POLICY_SOURCE=workspace` as v2.23.1 did. That let a pull
+request add its author to the list, and a warning in the reply did not stop it.
 
 Only a line whose pattern is exactly `*` counts. That is a global list: it
 names people who may dismiss findings anywhere in the pull request. Path
@@ -16,18 +21,18 @@ owner of `docs/` silence a security finding in code.
 
 Owner tokens that this module can resolve from a pull request comment:
 
-- `@nickname`, matched case-insensitively against the commenter's nickname.
-  Only ASCII nicknames match, because Unicode case folding makes look-alike
-  names compare as equal (for example the Kelvin sign and `k`). A nickname
-  with a space cannot be written on a line. A nickname is weaker than an ID.
-  Unverified: whether Bitbucket lets a user change a nickname or reuse a
-  free one.
 - An Atlassian `account_id` (`557058:9aa59bdf-...` or 24 hex digits) or a
   `{uuid}`. These do not change.
 
-Every other token (an email address, `workspace/group`, `@teams/name`) is
-ignored and logged, because a comment carries no email and a group lookup
-needs admin as well.
+Every other token is ignored and logged. That covers an email address,
+`workspace/group` and `@teams/name`, because a comment carries no email and a
+group lookup needs admin as well. It also covers `@nickname`. A nickname is not
+a unique identifier: Atlassian names the `account_id` as the stable key for a
+user, and a nickname is not guaranteed to be unique. Unverified: whether a user
+can change a nickname. Authorization on a nickname could let a commenter pass as
+an owner who has the same nickname. Version 2.23.1 matched on `@nickname`, and
+v2.23.2 removed that. The loader logs a warning that names each ignored
+`@nickname`, so an operator can replace it with an `account_id` or a `{uuid}`.
 """
 
 from __future__ import annotations
@@ -56,7 +61,7 @@ _ACCOUNT_ID_RE: Final[re.Pattern[str]] = re.compile(
     r"^(?:\d+:[0-9a-fA-F-]{36}|[0-9a-fA-F]{24})$"
 )
 
-MatchKind = Literal["id", "nickname"]
+MatchKind = Literal["id"]
 
 
 @dataclass(frozen=True)
@@ -64,54 +69,31 @@ class VerdictOwners:
     """Owners parsed from one CODEOWNERS file."""
 
     ids: frozenset[str] = frozenset()
-    nicknames: frozenset[str] = frozenset()
+    ignored_nicknames: tuple[str, ...] = ()
     ignored_owners: tuple[str, ...] = ()
     ignored_lines: int = 0
 
-    def matches(
-        self, *, account_id: str | None, uuid: str | None, nickname: str | None
-    ) -> MatchKind | None:
-        """Return how the commenter matches, or None. An ID match wins."""
+    def matches(self, *, account_id: str | None, uuid: str | None) -> MatchKind | None:
+        """Return how the commenter matches, or None. Only an ID matches."""
         if account_id and account_id.lower() in self.ids:
             return "id"
         if uuid:
             normalized = _normalize_uuid(uuid)
             if normalized and normalized in self.ids:
                 return "id"
-        if nickname and nickname.isascii() and nickname.lower() in self.nicknames:
-            return "nickname"
         return None
 
 
 @dataclass(frozen=True)
 class OwnersLoad:
-    """The owners to apply, plus what the destination branch says.
+    """The owners to apply. ``None`` means no usable file was found.
 
-    ``owners`` is what the review honors, read from the source that
-    ``AI_POLICY_SOURCE`` selects. ``base_owners`` is the destination branch's
-    version. They differ only when the source is ``workspace`` and the pull
-    request changes the file. ``None`` means no file was found.
+    The file is always read from the destination branch (``origin/<BASE_REF>``),
+    never from the pull request's own checkout. A pull request therefore cannot
+    add its author to the list.
     """
 
     owners: VerdictOwners | None
-    base_owners: VerdictOwners | None
-    source: str
-
-    def granted_only_by_this_pr(
-        self, *, account_id: str | None, uuid: str | None, nickname: str | None
-    ) -> bool:
-        """True when the pull request's own file lists the commenter and the
-        destination branch's file does not."""
-        if self.source != "workspace" or self.owners is None:
-            return False
-        if self.owners.matches(account_id=account_id, uuid=uuid, nickname=nickname) is None:
-            return False
-        if self.base_owners is None:
-            return True
-        return (
-            self.base_owners.matches(account_id=account_id, uuid=uuid, nickname=nickname)
-            is None
-        )
 
 
 def _normalize_uuid(value: str) -> str | None:
@@ -122,7 +104,7 @@ def _normalize_uuid(value: str) -> str | None:
 def parse_owners(text: str) -> VerdictOwners:
     """Parse the owners of every `*` line. Never raises."""
     ids: set[str] = set()
-    nicknames: set[str] = set()
+    nicknames: list[str] = []
     ignored: list[str] = []
     ignored_lines = 0
     # Split on "\n" only. str.splitlines() also splits on \x0b, \x0c, \x1c to
@@ -157,12 +139,12 @@ def parse_owners(text: str) -> VerdictOwners:
                 and "/" not in token
                 and token.isascii()
             ):
-                nicknames.add(token[1:].lower())
+                nicknames.append(token)
             else:
                 ignored.append(token)
     return VerdictOwners(
         ids=frozenset(ids),
-        nicknames=frozenset(nicknames),
+        ignored_nicknames=tuple(nicknames),
         ignored_owners=tuple(ignored),
         ignored_lines=ignored_lines,
     )
@@ -178,6 +160,16 @@ def _parse_file(text: str | None, *, label: str) -> VerdictOwners | None:
         )
         return None
     owners = parse_owners(text)
+    if owners.ignored_nicknames:
+        _log.warning(
+            "ai-pr-review: %s (%s): %d @nickname entr%s on '*' lines no longer "
+            "authorize verdict commands, because a nickname is not a unique "
+            "identifier. List the account_id or the {uuid} instead. Ignored: %s",
+            OWNERS_PATH, label, len(owners.ignored_nicknames),
+            "y" if len(owners.ignored_nicknames) == 1 else "ies",
+            ", ".join(owners.ignored_nicknames[:10])
+            + (" ..." if len(owners.ignored_nicknames) > 10 else ""),
+        )
     if owners.ignored_owners:
         _log.info(
             "ai-pr-review: %s (%s): %d owner entr%s on '*' lines cannot be "
@@ -189,27 +181,31 @@ def _parse_file(text: str | None, *, label: str) -> VerdictOwners | None:
     return owners
 
 
-def load_verdict_owners(*, workspace: str, base_ref: str, source: str) -> OwnersLoad:
-    """Read the owners file. Fail-soft: any problem yields no owners, so the
-    caller falls back to the permission lookup and never authorizes on a guess.
+def load_verdict_owners(*, workspace: str, base_ref: str) -> OwnersLoad:
+    """Read the owners file from the destination branch. Fail-soft: any problem
+    yields no owners, so the caller falls back to the permission lookup and
+    never authorizes on a guess.
+
+    The read is ``git show origin/<base_ref>:.bitbucket/CODEOWNERS``. The
+    checkout is never read, because it holds the pull request's own changes.
+    An empty ``base_ref`` means there is no destination branch to read, so the
+    file is not used.
     """
-    if source not in ("base-ref", "workspace"):
-        source = "base-ref"
-    try:
-        head_text = read_repo_file(
-            OWNERS_PATH, workspace=workspace, base_ref=base_ref, source=source
+    if not base_ref:
+        _log.warning(
+            "ai-pr-review: BASE_REF is not set, so %s cannot be read from the "
+            "destination branch. The permission lookup decides who may use "
+            "verdict commands.", OWNERS_PATH,
         )
-        owners = _parse_file(head_text, label=source)
-        if source == "workspace":
-            base_text = read_repo_file(
-                OWNERS_PATH, workspace=workspace, base_ref=base_ref, source="base-ref"
-            )
-            base_owners = _parse_file(base_text, label="base-ref")
-        else:
-            base_owners = owners
+        return OwnersLoad(owners=None)
+    try:
+        text = read_repo_file(
+            OWNERS_PATH, workspace=workspace, base_ref=base_ref, source="base-ref"
+        )
+        owners = _parse_file(text, label="base-ref")
     except Exception as exc:  # noqa: BLE001 -- fail-soft by design, logged below
         _log.warning(
             "ai-pr-review: could not read %s for verdict owners: %s", OWNERS_PATH, exc
         )
-        return OwnersLoad(owners=None, base_owners=None, source=source)
-    return OwnersLoad(owners=owners, base_owners=base_owners, source=source)
+        return OwnersLoad(owners=None)
+    return OwnersLoad(owners=owners)

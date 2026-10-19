@@ -38,7 +38,7 @@ _LEARNINGS = ".ai-pr-review/learnings.jsonl"
 
 def _owners(*account_ids: str) -> OwnersLoad:
     parsed = parse_owners("* " + " ".join(account_ids) + "\n")
-    return OwnersLoad(owners=parsed, base_owners=parsed, source="base-ref")
+    return OwnersLoad(owners=parsed)
 
 
 def _run(provider: BitbucketProvider) -> tuple[bool, str | None]:

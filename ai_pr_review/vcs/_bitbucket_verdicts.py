@@ -460,7 +460,7 @@ def _reply_for_feedback_usage(actor: str) -> str:
 
 
 def _reply_for_feedback(
-    actor: str, finding_id: int | None, *, persisted: bool | None, self_granted: bool = False
+    actor: str, finding_id: int | None, *, persisted: bool | None
 ) -> str:
     """*persisted* has the same three states as in `_reply_for_verdict`."""
     target = f" on **F{finding_id}**" if finding_id is not None else ""
@@ -481,7 +481,7 @@ def _reply_for_feedback(
             f"@{actor} saved your feedback{target}. Later reviews on this "
             "repo will use it."
         )
-    return reply + (_SELF_GRANT_NOTICE if self_granted else "")
+    return reply
 
 
 def _reply_for_unknown_finding_id(actor: str, finding_id: int) -> str:
@@ -546,21 +546,12 @@ def _reply_for_authority(
     )
 
 
-_SELF_GRANT_NOTICE: Final[str] = (
-    f" Note: this pull request changes `{OWNERS_PATH}` and lists you there, but the "
-    "target branch does not list you. A pull request can add its own author as an "
-    "owner. Reviewers should check that change. Set `AI_POLICY_SOURCE=base-ref` to "
-    "read the file from the target branch only."
-)
-
-
 def _reply_for_verdict(
     actor: str,
     command: SlashCommand,
     verdict: Verdict,
     *,
     persisted: bool | None,
-    self_granted: bool = False,
 ) -> str:
     """*persisted* (issue #906):
     - ``None`` -- the learning loop is off (``AI_FEEDBACK_LOOP`` unset), or
@@ -572,12 +563,11 @@ def _reply_for_verdict(
       is missing, and the reply says so plainly rather than the ambiguous
       "applied, not persisted."
     """
-    notice = _SELF_GRANT_NOTICE if self_granted else ""
     if verdict == "fixed":
         sha_note = f" (commit `{command.commit_sha}`)" if command.commit_sha else ""
         return (
             f"@{actor} marked **F{command.finding_id}** as `fixed`{sha_note}. "
-            "It will be re-evaluated on the next review run." + notice
+            "It will be re-evaluated on the next review run."
         )
     reply = (
         f"@{actor} marked **F{command.finding_id}** as `{command.name}`. "
@@ -594,7 +584,7 @@ def _reply_for_verdict(
             "reviews will not learn from this -- check that the Bitbucket "
             "API token has Repository:Write (see docs/bitbucket-setup.md)."
         )
-    return reply + notice
+    return reply
 
 
 def _authorize(
@@ -606,10 +596,10 @@ def _authorize(
     min_role: str,
     item: dict[str, Any],
     owners: OwnersLoad | None,
-) -> tuple[AuthorityCheck, bool]:
+) -> AuthorityCheck:
     """Decide whether the commenter may apply a verdict.
 
-    Returns ``(check, self_granted)``. The owners file comes first, because it
+    The owners file comes first, because it
     needs no API call and works for a bot account that has only write access.
     A listed commenter is authorized. Anyone else falls through to the
     permission lookup, which only an admin bot account can pass. A missing or
@@ -619,33 +609,28 @@ def _authorize(
     ``verdict_min_role=admin`` turns the owners file off: an operator who
     asked for admins only did not ask for a list of names to widen that.
 
-    ``self_granted`` is True when the commenter is listed only in this pull
-    request's version of the file (see ``OwnersLoad.granted_only_by_this_pr``).
+    The owners file comes from the destination branch only (see
+    ``load_verdict_owners``), so a pull request cannot add its own author.
     """
     if owners is not None and owners.owners is not None and min_role != "admin":
         user = item.get("user") or {}
         uuid = user.get("uuid")
-        nickname = user.get("nickname")
         who = {
             "account_id": account_id,
             "uuid": str(uuid) if uuid else None,
-            "nickname": str(nickname) if nickname else None,
         }
         kind = owners.owners.matches(**who)
         if kind is not None:
-            self_granted = owners.granted_only_by_this_pr(**who)
             _log.info(
                 "ai-pr-review: verdict authorized for account %s through %s "
-                "(%s match, source %s)%s",
-                account_id, OWNERS_PATH, kind, owners.source,
-                "; listed only in this pull request's file" if self_granted else "",
+                "(%s match, destination branch)",
+                account_id, OWNERS_PATH, kind,
             )
-            return "authorized", self_granted
-    check = check_authority(
+            return "authorized"
+    return check_authority(
         client, workspace=workspace, repo_slug=repo_slug,
         account_id=account_id, min_role=min_role,
     )
-    return check, False
 
 
 def apply_pending_verdicts(
@@ -689,7 +674,7 @@ def apply_pending_verdicts(
     # module never need to see it.
     replies: list[tuple[int, str, str]] = []
     errors: list[str] = []
-    authority_cache: dict[str, tuple[AuthorityCheck, bool]] = {}
+    authority_cache: dict[str, AuthorityCheck] = {}
     already_replied = _existing_reply_keys(comments)
 
     for item in comments[:_MAX_COMMENTS_SCANNED]:
@@ -794,7 +779,7 @@ def apply_pending_verdicts(
                     owners=owners,
                 )
                 authority_cache[account_id] = cached
-            check, self_granted = cached
+            check = cached
             if check != "authorized":
                 # "forbidden" is retryable too: it heals once the owners file
                 # lists the commenter, or the bot account gets admin. The
@@ -850,10 +835,7 @@ def apply_pending_verdicts(
                     (
                         comment_id,
                         f"feedback:{finding_id}:{fb_state}:{_reply_key_hash(feedback_reason)}",
-                        _reply_for_feedback(
-                            actor, finding_id, persisted=persisted_fb,
-                            self_granted=self_granted,
-                        ),
+                        _reply_for_feedback(actor, finding_id, persisted=persisted_fb),
                     )
                 )
                 continue
@@ -901,10 +883,7 @@ def apply_pending_verdicts(
                 (
                     comment_id,
                     f"verdict:{command.finding_id}:{command.canonical_name}:{persisted_key}",
-                    _reply_for_verdict(
-                        actor, command, verdict, persisted=persisted,
-                        self_granted=self_granted,
-                    ),
+                    _reply_for_verdict(actor, command, verdict, persisted=persisted),
                 )
             )
 

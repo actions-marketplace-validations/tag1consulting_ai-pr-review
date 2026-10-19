@@ -305,19 +305,6 @@ def _build_bitbucket_from_env() -> BitbucketProvider:
             "rather than silently falling back to a weaker role"
         )
 
-    # Verdict owners file (`.bitbucket/CODEOWNERS`): read from the same source
-    # as policy.yml, so one switch controls both. An unknown value falls back to
-    # the safe one (the destination branch).
-    verdict_owners_source = (
-        os.environ.get("AI_POLICY_SOURCE", "base-ref").strip().lower() or "base-ref"
-    )
-    if verdict_owners_source not in ("base-ref", "workspace"):
-        logger.warning(
-            "AI_POLICY_SOURCE=%r is not 'base-ref' or 'workspace'; reading the "
-            "verdict owners file from the destination branch",
-            verdict_owners_source,
-        )
-        verdict_owners_source = "base-ref"
     base_ref = os.environ.get("BASE_REF", "").strip()
 
     # Bitbucket parity (#918): actually set PR reviewer state, gated by its
@@ -357,7 +344,6 @@ def _build_bitbucket_from_env() -> BitbucketProvider:
         suppress_walkthrough=suppress_walkthrough,
         verdicts=verdicts,
         verdict_min_role=verdict_min_role,
-        verdict_owners_source=verdict_owners_source,
         base_ref=base_ref,
         review_state=review_state,
         enable_feedback_loop=enable_feedback_loop,

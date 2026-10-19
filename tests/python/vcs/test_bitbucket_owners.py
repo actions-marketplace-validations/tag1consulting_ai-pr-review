@@ -38,6 +38,7 @@ from tests.python.vcs.test_bitbucket_verdicts import (
 
 _ACCOUNT_ID = "712020:589217f7-409e-4b3c-b1ba-d323ee2022ed"
 _UUID = "{9f49742f-b2a6-491a-84aa-6bbf3a935756}"
+_OTHER_ID = "712020:00000000-0000-4000-8000-000000000001"
 
 
 # ---------------------------------------------------------------------------
@@ -45,12 +46,11 @@ _UUID = "{9f49742f-b2a6-491a-84aa-6bbf3a935756}"
 # ---------------------------------------------------------------------------
 
 
-def test_parse_reads_nicknames_account_ids_and_uuids_from_star_lines() -> None:
+def test_parse_reads_account_ids_and_uuids_and_sets_nicknames_aside() -> None:
     owners = parse_owners(
         "# who may dismiss findings\n"
         f"* @Alice {_ACCOUNT_ID} {_UUID} 61b8f771ef5b4600710cf39f\n"
     )
-    assert owners.nicknames == frozenset({"alice"})
     assert owners.ids == frozenset(
         {
             _ACCOUNT_ID.lower(),
@@ -58,25 +58,26 @@ def test_parse_reads_nicknames_account_ids_and_uuids_from_star_lines() -> None:
             "61b8f771ef5b4600710cf39f",
         }
     )
+    assert owners.ignored_nicknames == ("@Alice",)
     assert owners.ignored_owners == ()
 
 
 def test_parse_ignores_path_scoped_lines_and_counts_them() -> None:
-    owners = parse_owners("*.py @alice\ndocs/ @bob\n* @carol\n")
-    assert owners.nicknames == frozenset({"carol"})
+    owners = parse_owners(f"*.py {_ACCOUNT_ID}\ndocs/ {_UUID}\n* {_OTHER_ID}\n")
+    assert owners.ids == frozenset({_OTHER_ID.lower()})
     assert owners.ignored_lines == 2
 
 
 def test_parse_ignores_emails_groups_and_teams_but_records_them() -> None:
-    owners = parse_owners("* a@example.com ws/group @teams/core @dave\n")
-    assert owners.nicknames == frozenset({"dave"})
-    assert owners.ids == frozenset()
+    owners = parse_owners(f"* a@example.com ws/group @teams/core @dave {_ACCOUNT_ID}\n")
+    assert owners.ids == frozenset({_ACCOUNT_ID.lower()})
+    assert owners.ignored_nicknames == ("@dave",)
     assert set(owners.ignored_owners) == {"a@example.com", "ws/group", "@teams/core"}
 
 
 def test_parse_strips_inline_comments_and_blank_lines() -> None:
-    owners = parse_owners("\n   \n* @alice  # the lead\n\n#* @mallory\n")
-    assert owners.nicknames == frozenset({"alice"})
+    owners = parse_owners(f"\n   \n* {_ACCOUNT_ID}  # the lead\n\n#* {_OTHER_ID}\n")
+    assert owners.ids == frozenset({_ACCOUNT_ID.lower()})
 
 
 def test_parse_line_with_a_pattern_and_no_owner_is_skipped() -> None:
@@ -85,7 +86,7 @@ def test_parse_line_with_a_pattern_and_no_owner_is_skipped() -> None:
 
 def test_parse_bare_at_sign_is_ignored() -> None:
     owners = parse_owners("* @ @alice\n")
-    assert owners.nicknames == frozenset({"alice"})
+    assert owners.ignored_nicknames == ("@alice",)
     assert owners.ignored_owners == ("@",)
 
 
@@ -97,19 +98,19 @@ def test_parse_empty_text() -> None:
 def test_parse_does_not_split_a_line_on_a_hidden_line_separator(sep: str) -> None:
     """str.splitlines() splits on these, Bitbucket and a diff viewer do not.
     A path-scoped line must not turn into a global one that nobody sees."""
-    owners = parse_owners(f"docs/ @alice{sep}* @mallory\n* @carol\n")
-    assert owners.nicknames == frozenset({"carol"})
+    owners = parse_owners(f"docs/ {_ACCOUNT_ID}{sep}* {_OTHER_ID}\n* {_UUID}\n")
+    assert owners.ids == frozenset({"9f49742f-b2a6-491a-84aa-6bbf3a935756"})
     assert owners.ignored_lines == 1
 
 
 def test_parse_accepts_crlf_tabs_and_a_leading_bom() -> None:
-    owners = parse_owners("\ufeff# header\r\n*\t@alice\t@bob\r\n")
-    assert owners.nicknames == frozenset({"alice", "bob"})
+    owners = parse_owners(f"\ufeff# header\r\n*\t{_ACCOUNT_ID}\t{_OTHER_ID}\r\n")
+    assert owners.ids == frozenset({_ACCOUNT_ID.lower(), _OTHER_ID.lower()})
 
 
-def test_parse_ignores_non_ascii_nicknames() -> None:
+def test_parse_puts_a_non_ascii_nickname_in_ignored_owners_not_ignored_nicknames() -> None:
     owners = parse_owners("* @J\u00f6rg @alice\n")
-    assert owners.nicknames == frozenset({"alice"})
+    assert owners.ignored_nicknames == ("@alice",)
     assert owners.ignored_owners == ("@J\u00f6rg",)
 
 
@@ -120,45 +121,28 @@ def test_parse_ignores_non_ascii_nicknames() -> None:
 
 def test_matches_account_id_case_insensitively() -> None:
     owners = parse_owners(f"* {_ACCOUNT_ID}\n")
-    assert owners.matches(account_id=_ACCOUNT_ID.upper(), uuid=None, nickname=None) == "id"
+    assert owners.matches(account_id=_ACCOUNT_ID.upper(), uuid=None) == "id"
 
 
 def test_matches_uuid_with_or_without_braces() -> None:
     owners = parse_owners(f"* {_UUID}\n")
-    assert owners.matches(account_id="x", uuid=_UUID, nickname=None) == "id"
-    assert owners.matches(account_id="x", uuid=_UUID.strip("{}").upper(), nickname=None) == "id"
-
-
-def test_matches_nickname_case_insensitively() -> None:
-    owners = parse_owners("* @Alice\n")
-    assert owners.matches(account_id="x", uuid=None, nickname="ALICE") == "nickname"
-
-
-def test_an_id_match_wins_over_a_nickname_match() -> None:
-    owners = parse_owners(f"* @alice {_ACCOUNT_ID}\n")
-    assert owners.matches(account_id=_ACCOUNT_ID, uuid=None, nickname="alice") == "id"
+    assert owners.matches(account_id="x", uuid=_UUID) == "id"
+    assert owners.matches(account_id="x", uuid=_UUID.strip("{}").upper()) == "id"
 
 
 def test_no_match() -> None:
+    owners = parse_owners(f"* {_ACCOUNT_ID}\n")
+    assert owners.matches(account_id="x", uuid="{nope}") is None
+    assert owners.matches(account_id=None, uuid=None) is None
+
+
+def test_a_nickname_owner_line_grants_nobody() -> None:
+    """A nickname is not a unique identifier, so an `@nickname` line must not
+    authorize any commenter, whatever their account id is."""
     owners = parse_owners("* @alice\n")
-    assert owners.matches(account_id="x", uuid="{nope}", nickname="mallory") is None
-    assert owners.matches(account_id=None, uuid=None, nickname=None) is None
-
-
-@pytest.mark.parametrize(
-    ("owner", "commenter"),
-    [("kate", "\u212aate"), ("fiona", "\ufb01ona"), ("strasse", "Stra\u00dfe")],
-)
-def test_a_look_alike_unicode_nickname_does_not_match(owner: str, commenter: str) -> None:
-    """casefold() would make these compare equal. ASCII-only matching must not."""
-    owners = parse_owners(f"* @{owner}\n")
-    assert owners.matches(account_id="x", uuid=None, nickname=commenter) is None
-
-
-def test_a_nickname_does_not_match_as_a_substring() -> None:
-    owners = parse_owners("* @alice\n")
-    assert owners.matches(account_id="x", uuid=None, nickname="alice2") is None
-    assert owners.matches(account_id="x", uuid=None, nickname="malice") is None
+    assert owners.ids == frozenset()
+    assert owners.matches(account_id="x", uuid=None) is None
+    assert owners.matches(account_id="alice", uuid=None) is None
 
 
 # ---------------------------------------------------------------------------
@@ -173,74 +157,74 @@ def _fake_reader(files: dict[str, str | None]) -> Callable[..., str | None]:
     return reader
 
 
-def test_load_base_ref_source_reads_once_and_has_no_pr_only_grants(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_load_reads_only_the_destination_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 
     def reader(path: str, *, workspace: str, base_ref: str, source: str = "base-ref") -> str | None:
         calls.append(source)
-        return "* @alice\n"
+        return f"* {_ACCOUNT_ID}\n"
 
     monkeypatch.setattr(owners_mod, "read_repo_file", reader)
-    load = load_verdict_owners(workspace=".", base_ref="develop", source="base-ref")
+    load = load_verdict_owners(workspace=".", base_ref="develop")
     assert calls == ["base-ref"]
-    assert load.owners is not None and load.owners.nicknames == frozenset({"alice"})
-    assert not load.granted_only_by_this_pr(account_id="x", uuid=None, nickname="alice")
+    assert load.owners is not None and load.owners.ids == frozenset({_ACCOUNT_ID.lower()})
 
 
-def test_load_workspace_source_flags_a_grant_that_only_this_pr_makes(
+def test_load_never_reads_the_pull_request_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pull request must not add its author to the owners. The checkout holds
+    the pull request's own file, so the loader must not ask for it."""
+    monkeypatch.setattr(
+        owners_mod, "read_repo_file",
+        _fake_reader({
+            "workspace": f"* {_ACCOUNT_ID} {_OTHER_ID}\n",
+            "base-ref": f"* {_ACCOUNT_ID}\n",
+        }),
+    )
+    load = load_verdict_owners(workspace=".", base_ref="develop")
+    assert load.owners is not None
+    assert load.owners.matches(account_id=_ACCOUNT_ID, uuid=None) == "id"
+    assert load.owners.matches(account_id=_OTHER_ID, uuid=None) is None
+
+
+def test_a_file_that_exists_only_in_the_checkout_grants_nobody(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
         owners_mod, "read_repo_file",
-        _fake_reader({"workspace": "* @alice @mallory\n", "base-ref": "* @alice\n"}),
+        _fake_reader({"workspace": f"* {_OTHER_ID}\n", "base-ref": None}),
     )
-    load = load_verdict_owners(workspace=".", base_ref="develop", source="workspace")
-    assert load.granted_only_by_this_pr(account_id="x", uuid=None, nickname="mallory")
-    assert not load.granted_only_by_this_pr(account_id="x", uuid=None, nickname="alice")
-    # Someone the file does not list is not "granted" at all.
-    assert not load.granted_only_by_this_pr(account_id="x", uuid=None, nickname="eve")
+    load = load_verdict_owners(workspace=".", base_ref="develop")
+    assert load.owners is None
 
 
-def test_load_workspace_source_with_no_file_on_the_target_branch_is_a_pr_only_grant(
-    monkeypatch: pytest.MonkeyPatch,
+def test_load_without_a_base_ref_uses_no_file_and_says_why(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    monkeypatch.setattr(
-        owners_mod, "read_repo_file", _fake_reader({"workspace": "* @mallory\n", "base-ref": None})
-    )
-    load = load_verdict_owners(workspace=".", base_ref="develop", source="workspace")
-    assert load.base_owners is None
-    assert load.granted_only_by_this_pr(account_id="x", uuid=None, nickname="mallory")
+    def reader(path: str, *, workspace: str, base_ref: str, source: str = "base-ref") -> str | None:
+        raise AssertionError("must not read any file without a destination branch")
+
+    monkeypatch.setattr(owners_mod, "read_repo_file", reader)
+    with caplog.at_level(logging.WARNING, logger=owners_mod.__name__):
+        load = load_verdict_owners(workspace=".", base_ref="")
+    assert load.owners is None
+    assert any("BASE_REF is not set" in m for m in caplog.messages)
 
 
 def test_load_missing_file_yields_no_owners(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(owners_mod, "read_repo_file", _fake_reader({}))
-    load = load_verdict_owners(workspace=".", base_ref="develop", source="base-ref")
+    load = load_verdict_owners(workspace=".", base_ref="develop")
     assert load.owners is None
-
-
-def test_load_unknown_source_falls_back_to_base_ref(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: list[str] = []
-
-    def reader(path: str, *, workspace: str, base_ref: str, source: str = "base-ref") -> str | None:
-        seen.append(source)
-        return None
-
-    monkeypatch.setattr(owners_mod, "read_repo_file", reader)
-    load = load_verdict_owners(workspace=".", base_ref="develop", source="bogus")
-    assert seen == ["base-ref"]
-    assert load.source == "base-ref"
 
 
 def test_load_oversized_file_is_ignored_and_logged(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     monkeypatch.setattr(
-        owners_mod, "read_repo_file", _fake_reader({"base-ref": "* @alice\n" + "# x\n" * 40_000})
+        owners_mod, "read_repo_file",
+        _fake_reader({"base-ref": f"* {_ACCOUNT_ID}\n" + "# x\n" * 40_000}),
     )
     with caplog.at_level(logging.WARNING, logger=owners_mod.__name__):
-        load = load_verdict_owners(workspace=".", base_ref="develop", source="base-ref")
+        load = load_verdict_owners(workspace=".", base_ref="develop")
     assert load.owners is None
     assert any("larger than" in m for m in caplog.messages)
 
@@ -253,9 +237,46 @@ def test_load_is_fail_soft_when_the_reader_raises(
 
     monkeypatch.setattr(owners_mod, "read_repo_file", boom)
     with caplog.at_level(logging.WARNING, logger=owners_mod.__name__):
-        load = load_verdict_owners(workspace=".", base_ref="develop", source="base-ref")
-    assert load.owners is None and load.base_owners is None
+        load = load_verdict_owners(workspace=".", base_ref="develop")
+    assert load.owners is None
     assert any("disk on fire" in m for m in caplog.messages)
+
+
+def test_load_warns_about_a_nickname_owner_and_names_it(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(
+        owners_mod, "read_repo_file",
+        _fake_reader({"base-ref": f"* @alice {_ACCOUNT_ID}\n"}),
+    )
+    with caplog.at_level(logging.WARNING, logger=owners_mod.__name__):
+        load = load_verdict_owners(workspace=".", base_ref="develop")
+    assert load.owners is not None and load.owners.ids == frozenset({_ACCOUNT_ID.lower()})
+    warnings = [m for m in caplog.messages if "@nickname" in m]
+    assert len(warnings) == 1
+    assert "@alice" in warnings[0] and "account_id" in warnings[0]
+
+
+def test_load_does_not_warn_when_no_nickname_is_listed(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(
+        owners_mod, "read_repo_file", _fake_reader({"base-ref": f"* {_ACCOUNT_ID}\n"})
+    )
+    with caplog.at_level(logging.WARNING, logger=owners_mod.__name__):
+        load_verdict_owners(workspace=".", base_ref="develop")
+    assert not any("@nickname" in m for m in caplog.messages)
+
+
+def test_load_caps_the_nicknames_it_names_in_the_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    text = "* " + " ".join(f"@n{i}" for i in range(25)) + "\n"
+    monkeypatch.setattr(owners_mod, "read_repo_file", _fake_reader({"base-ref": text}))
+    with caplog.at_level(logging.WARNING, logger=owners_mod.__name__):
+        load_verdict_owners(workspace=".", base_ref="develop")
+    msg = next(m for m in caplog.messages if "@nickname" in m)
+    assert "@n9" in msg and "@n10" not in msg and msg.endswith("...")
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -265,25 +286,38 @@ def _git(repo: Path, *args: str) -> None:
     )
 
 
-def test_load_reads_the_real_file_from_the_target_branch_and_from_the_checkout(
-    tmp_path: Path,
+@pytest.mark.parametrize("policy_source", ["", "base-ref", "workspace"])
+def test_load_ignores_edits_in_the_checkout_and_reads_the_target_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, policy_source: str
 ) -> None:
     """End to end through git: the destination branch is `origin/develop`, the
-    checkout carries a changed file."""
+    checkout carries a changed file that adds a second owner. Only the file on
+    the destination branch counts."""
     _git(tmp_path, "init", "-q", "-b", "develop")
     (tmp_path / ".bitbucket").mkdir()
-    (tmp_path / OWNERS_PATH).write_text("* @alice\n", encoding="utf-8")
+    (tmp_path / OWNERS_PATH).write_text(f"* {_ACCOUNT_ID}\n", encoding="utf-8")
     _git(tmp_path, "add", ".")
     _git(tmp_path, "commit", "-q", "-m", "owners")
     _git(tmp_path, "update-ref", "refs/remotes/origin/develop", "HEAD")
-    (tmp_path / OWNERS_PATH).write_text("* @alice @mallory\n", encoding="utf-8")
+    (tmp_path / OWNERS_PATH).write_text(f"* {_ACCOUNT_ID} {_OTHER_ID}\n", encoding="utf-8")
+    # No value of AI_POLICY_SOURCE may switch the owners file to the checkout.
+    monkeypatch.setenv("AI_POLICY_SOURCE", policy_source)
 
-    base = load_verdict_owners(workspace=str(tmp_path), base_ref="develop", source="base-ref")
-    assert base.owners is not None and base.owners.nicknames == frozenset({"alice"})
+    load = load_verdict_owners(workspace=str(tmp_path), base_ref="develop")
+    assert load.owners is not None and load.owners.ids == frozenset({_ACCOUNT_ID.lower()})
 
-    head = load_verdict_owners(workspace=str(tmp_path), base_ref="develop", source="workspace")
-    assert head.owners is not None and head.owners.nicknames == frozenset({"alice", "mallory"})
-    assert head.granted_only_by_this_pr(account_id="x", uuid=None, nickname="mallory")
+
+def test_load_ignores_a_checkout_file_when_the_target_branch_has_none(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "-q", "-b", "develop")
+    (tmp_path / "README").write_text("x", encoding="utf-8")
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-q", "-m", "x")
+    _git(tmp_path, "update-ref", "refs/remotes/origin/develop", "HEAD")
+    (tmp_path / ".bitbucket").mkdir()
+    (tmp_path / OWNERS_PATH).write_text(f"* {_OTHER_ID}\n", encoding="utf-8")
+
+    load = load_verdict_owners(workspace=str(tmp_path), base_ref="develop")
+    assert load.owners is None
 
 
 def test_load_missing_file_in_a_real_repo_is_silent(
@@ -294,9 +328,41 @@ def test_load_missing_file_in_a_real_repo_is_silent(
     _git(tmp_path, "add", ".")
     _git(tmp_path, "commit", "-q", "-m", "x")
     _git(tmp_path, "update-ref", "refs/remotes/origin/develop", "HEAD")
-    load = load_verdict_owners(workspace=str(tmp_path), base_ref="develop", source="base-ref")
+    load = load_verdict_owners(workspace=str(tmp_path), base_ref="develop")
     assert load.owners is None
     assert "WARNING" not in capsys.readouterr().err
+
+
+def test_load_with_a_missing_target_ref_warns_and_never_falls_back_to_the_checkout(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A shallow clone may lack `origin/<BASE_REF>`. The file in the checkout must
+    not be used then. The permission lookup decides."""
+    _git(tmp_path, "init", "-q", "-b", "develop")
+    (tmp_path / ".bitbucket").mkdir()
+    (tmp_path / OWNERS_PATH).write_text(f"* {_OTHER_ID}\n", encoding="utf-8")
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-q", "-m", "owners")
+    # No refs/remotes/origin/develop on purpose.
+    load = load_verdict_owners(workspace=str(tmp_path), base_ref="develop")
+    assert load.owners is None
+    assert "WARNING" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("count", "truncated"), [(1, False), (10, False), (11, True)])
+def test_load_warning_names_at_most_ten_nicknames(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    count: int,
+    truncated: bool,
+) -> None:
+    text = "* " + " ".join(f"@n{i}" for i in range(count)) + "\n"
+    monkeypatch.setattr(owners_mod, "read_repo_file", _fake_reader({"base-ref": text}))
+    with caplog.at_level(logging.WARNING, logger=owners_mod.__name__):
+        load_verdict_owners(workspace=".", base_ref="develop")
+    msg = next(m for m in caplog.messages if "@nickname" in m)
+    assert msg.endswith("...") is truncated
+    assert ("entry" in msg and "entries" not in msg) is (count == 1)
 
 
 # ---------------------------------------------------------------------------
@@ -311,7 +377,6 @@ def _provider(
     owners: OwnersLoad | None,
     verdict_min_role: str = "write",
     loader_kwargs: list[dict] | None = None,
-    owners_source: str = "base-ref",
     base_ref: str = "",
 ) -> BitbucketProvider:
     def loader(**kw: object) -> OwnersLoad | None:
@@ -332,18 +397,14 @@ def _provider(
         config=BitbucketConfig(
             workspace="ws", repo_slug="repo", pr_id=7, email="x@y", api_token="t",
             code_insights=True, verdicts=True, verdict_min_role=verdict_min_role,
-            verdict_owners_source=owners_source, base_ref=base_ref,
+            base_ref=base_ref,
         ),
         client=client,
     )
 
 
-def _owners(text: str, *, base: str | None = None, source: str = "base-ref") -> OwnersLoad:
-    return OwnersLoad(
-        owners=parse_owners(text),
-        base_owners=parse_owners(base if base is not None else text),
-        source=source,
-    )
+def _owners(text: str) -> OwnersLoad:
+    return OwnersLoad(owners=parse_owners(text))
 
 
 def _with_permission_calls(
@@ -394,22 +455,25 @@ def test_an_owner_listed_by_account_id_is_authorized_without_any_permission_call
     assert calls == [], "an owner must not trigger the admin-only lookup"
     assert extract_verdicts(put_bodies[-1])[_FP] == "dismissed"
     assert "marked **F1**" in replies[0]["content"]["raw"]
-    assert "Note: this pull request changes" not in replies[0]["content"]["raw"]
 
 
-def test_an_owner_listed_by_nickname_is_authorized(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_owner_listed_by_nickname_is_not_authorized(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A nickname is not a unique identifier. The commenter's nickname equals
+    the owner line, and the permission lookup still decides."""
     calls: list[str] = []
+    replies: list[dict] = []
     put_bodies: list[str] = []
     inner = _build_handler(
         comments=[_summary_comment(100, _summary_body()), _cmd(nickname="Alice")],
-        permissions={}, replies=[], put_bodies=put_bodies,
+        permissions={}, replies=replies, put_bodies=put_bodies,
     )
     prov = _provider(
         _with_permission_calls(inner, forbidden=True, calls=calls),
         monkeypatch, owners=_owners("* @alice\n"),
     )
-    assert _post(prov).suppressed == 1  # type: ignore[attr-defined]
-    assert calls == []
+    assert _post(prov).suppressed == 0  # type: ignore[attr-defined]
+    assert len(calls) == 1, "a nickname match must fall through to the permission lookup"
+    assert _FP not in extract_verdicts(put_bodies[-1])
 
 
 def test_a_commenter_who_is_not_listed_gets_the_forbidden_reply_and_no_verdict(
@@ -419,12 +483,12 @@ def test_a_commenter_who_is_not_listed_gets_the_forbidden_reply_and_no_verdict(
     replies: list[dict] = []
     put_bodies: list[str] = []
     inner = _build_handler(
-        comments=[_summary_comment(100, _summary_body()), _cmd(nickname="mallory")],
+        comments=[_summary_comment(100, _summary_body()), _cmd(account_id=_OTHER_ID)],
         permissions={}, replies=replies, put_bodies=put_bodies,
     )
     prov = _provider(
         _with_permission_calls(inner, forbidden=True, calls=calls),
-        monkeypatch, owners=_owners("* @alice\n"),
+        monkeypatch, owners=_owners(f"* {_ACCOUNT_ID}\n"),
     )
     with caplog.at_level(logging.WARNING):
         result = _post(prov)
@@ -446,7 +510,7 @@ def test_a_forbidden_command_stays_unacked_and_applies_once_the_owner_file_lists
     # Run 1: not listed, lookup refused.
     put1: list[str] = []
     inner1 = _build_handler(
-        comments=[_summary_comment(100, _summary_body()), _cmd(nickname="alice")],
+        comments=[_summary_comment(100, _summary_body()), _cmd()],
         permissions={}, replies=[], put_bodies=put1,
     )
     prov1 = _provider(
@@ -460,12 +524,12 @@ def test_a_forbidden_command_stays_unacked_and_applies_once_the_owner_file_lists
     put2: list[str] = []
     replies2: list[dict] = []
     inner2 = _build_handler(
-        comments=[_summary_comment(100, put1[-1]), _cmd(nickname="alice")],
+        comments=[_summary_comment(100, put1[-1]), _cmd()],
         permissions={}, replies=replies2, put_bodies=put2,
     )
     prov2 = _provider(
         _with_permission_calls(inner2, forbidden=True, calls=[]),
-        monkeypatch, owners=_owners("* @alice\n"),
+        monkeypatch, owners=_owners(f"* {_ACCOUNT_ID}\n"),
     )
     result = _post(prov2)
     assert result.suppressed == 1  # type: ignore[attr-defined]
@@ -479,12 +543,12 @@ def test_the_owners_file_is_ignored_when_the_minimum_role_is_admin(
     calls: list[str] = []
     replies: list[dict] = []
     inner = _build_handler(
-        comments=[_summary_comment(100, _summary_body()), _cmd(nickname="alice")],
+        comments=[_summary_comment(100, _summary_body()), _cmd()],
         permissions={}, replies=replies, put_bodies=[],
     )
     prov = _provider(
         _with_permission_calls(inner, forbidden=True, calls=calls),
-        monkeypatch, owners=_owners("* @alice\n"), verdict_min_role="admin",
+        monkeypatch, owners=_owners(f"* {_ACCOUNT_ID}\n"), verdict_min_role="admin",
     )
     assert _post(prov).suppressed == 0  # type: ignore[attr-defined]
     assert len(calls) == 1
@@ -509,45 +573,6 @@ def test_without_an_owners_file_the_permission_lookup_still_decides(
     assert len(calls) == 1
 
 
-def test_a_commenter_listed_only_in_this_pr_is_authorized_with_a_notice(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    replies: list[dict] = []
-    inner = _build_handler(
-        comments=[_summary_comment(100, _summary_body()), _cmd(nickname="mallory")],
-        permissions={}, replies=replies, put_bodies=[],
-    )
-    prov = _provider(
-        _with_permission_calls(inner, forbidden=True, calls=[]),
-        monkeypatch,
-        owners=_owners("* @alice @mallory\n", base="* @alice\n", source="workspace"),
-    )
-    with caplog.at_level(logging.INFO):
-        result = _post(prov)
-    assert result.suppressed == 1  # type: ignore[attr-defined]
-    text = replies[0]["content"]["raw"]
-    assert "marked **F1**" in text
-    assert f"changes `{OWNERS_PATH}`" in text and "AI_POLICY_SOURCE=base-ref" in text
-    assert any("listed only in this pull request's file" in m for m in caplog.messages)
-
-
-def test_a_commenter_listed_on_the_target_branch_gets_no_notice(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    replies: list[dict] = []
-    inner = _build_handler(
-        comments=[_summary_comment(100, _summary_body()), _cmd(nickname="alice")],
-        permissions={}, replies=replies, put_bodies=[],
-    )
-    prov = _provider(
-        _with_permission_calls(inner, forbidden=True, calls=[]),
-        monkeypatch,
-        owners=_owners("* @alice @mallory\n", base="* @alice\n", source="workspace"),
-    )
-    assert _post(prov).suppressed == 1  # type: ignore[attr-defined]
-    assert "Note: this pull request changes" not in replies[0]["content"]["raw"]
-
-
 def test_an_owner_may_use_the_fixed_command_too(monkeypatch: pytest.MonkeyPatch) -> None:
     cmd = _command_comment(200, "/ai-pr-review fixed F1 abc1234", account_id=_ACCOUNT_ID)
     put_bodies: list[str] = []
@@ -568,7 +593,7 @@ def test_a_forbidden_command_with_no_owners_file_says_the_file_is_missing(
 ) -> None:
     replies: list[dict] = []
     inner = _build_handler(
-        comments=[_summary_comment(100, _summary_body()), _cmd(nickname="alice")],
+        comments=[_summary_comment(100, _summary_body()), _cmd()],
         permissions={}, replies=replies, put_bodies=[],
     )
     prov = _provider(
@@ -585,10 +610,10 @@ def test_the_three_forbidden_replies_use_three_distinct_dedup_keys() -> None:
     added, but the commenter is not on it) gets a fresh reply."""
     from ai_pr_review.vcs._bitbucket_verdicts import _forbidden_context, _reply_for_authority
 
-    listed = _owners("* @alice\n")
+    listed = _owners(f"* {_ACCOUNT_ID}\n")
     assert _forbidden_context(listed, "write") == "not-listed"
     assert _forbidden_context(None, "write") == "no-file"
-    assert _forbidden_context(OwnersLoad(None, None, "base-ref"), "write") == "no-file"
+    assert _forbidden_context(OwnersLoad(None), "write") == "no-file"
     assert _forbidden_context(listed, "admin") == "admin-only"
     texts = {_reply_for_authority("a", "forbidden", c) for c in ("not-listed", "no-file", "admin-only")}  # type: ignore[arg-type]
     assert len(texts) == 3
@@ -599,13 +624,31 @@ def test_the_provider_passes_its_config_to_the_owners_loader(
 ) -> None:
     seen: list[dict] = []
     inner = _build_handler(
-        comments=[_summary_comment(100, _summary_body()), _cmd(nickname="alice")],
+        comments=[_summary_comment(100, _summary_body()), _cmd()],
         permissions={}, replies=[], put_bodies=[],
     )
     prov = _provider(
         _with_permission_calls(inner, forbidden=True, calls=[]),
         monkeypatch, owners=None, loader_kwargs=seen,
-        owners_source="workspace", base_ref="develop",
+        base_ref="develop",
     )
     _post(prov)
-    assert seen == [{"workspace": ".", "base_ref": "develop", "source": "workspace"}]
+    assert seen == [{"workspace": ".", "base_ref": "develop"}]
+
+
+@pytest.mark.parametrize("policy_source", ["", "base-ref", "workspace"])
+def test_the_loader_gets_no_source_whatever_ai_policy_source_says(
+    monkeypatch: pytest.MonkeyPatch, policy_source: str
+) -> None:
+    monkeypatch.setenv("AI_POLICY_SOURCE", policy_source)
+    seen: list[dict] = []
+    inner = _build_handler(
+        comments=[_summary_comment(100, _summary_body()), _cmd()],
+        permissions={}, replies=[], put_bodies=[],
+    )
+    prov = _provider(
+        _with_permission_calls(inner, forbidden=True, calls=[]),
+        monkeypatch, owners=None, loader_kwargs=seen, base_ref="develop",
+    )
+    _post(prov)
+    assert seen == [{"workspace": ".", "base_ref": "develop"}]
