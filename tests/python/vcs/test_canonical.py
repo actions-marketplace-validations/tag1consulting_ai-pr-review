@@ -1401,3 +1401,33 @@ def test_classify_message_rollup_needs_a_dismissal_from_its_own_source() -> None
     same_thread = _thread(fp=same_fp, severity="Low", category="lint", is_resolved=True)
     got = classify(rollup, verdicts={same_fp: "dismissed"}, all_threads=[same_thread])
     assert got.kind == "suppressed"
+
+
+def test_classify_a_dismissed_agent_finding_does_not_hide_a_suppression_check_finding() -> None:
+    agent = _finding("agent issue", source="code-reviewer", line=40, severity="Medium", category="other")
+    agent_fp = fingerprint(agent)
+    agent_thread = _thread(line=40, fp=agent_fp, severity="Medium", category="other", is_resolved=True)
+    sup = _finding(
+        "comment turns off a rule", source="suppression-check", line=41, severity="Medium",
+        category="lint",
+    )
+    got = classify(sup, verdicts={agent_fp: "dismissed"}, all_threads=[agent_thread])
+    assert got.kind == "new"
+
+
+def test_classify_a_dismissed_suppression_check_finding_does_not_hide_an_agent_finding() -> None:
+    sup = _finding(
+        "comment turns off a rule", source="suppression-check", line=40, severity="Medium",
+        category="lint",
+    )
+    sup_fp = fingerprint(sup)
+    sup_thread = _thread(line=40, fp=sup_fp, severity="Medium", category="lint", is_resolved=True)
+    agent = _finding("agent issue", source="code-reviewer", line=41, severity="Medium", category="other")
+    got = classify(agent, verdicts={sup_fp: "dismissed"}, all_threads=[sup_thread])
+    assert got.kind == "new"
+    # A dismissal still covers a finding of its own kind nearby.
+    same = _finding(
+        "comment turns off another rule", source="suppression-check", line=41, severity="Medium",
+        category="lint",
+    )
+    assert classify(same, verdicts={sup_fp: "dismissed"}, all_threads=[sup_thread]).kind == "suppressed"
