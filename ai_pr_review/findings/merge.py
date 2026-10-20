@@ -164,6 +164,41 @@ def _cluster_category_compatible(cluster: list[Finding], f: Finding) -> bool:
     return categories_compatible(established, f.category)
 
 
+def _merge_linked_clusters(clusters: list[list[Finding]]) -> None:
+    """Join clusters that a member of each links within PROXIMITY_LINES.
+
+    The analyzer pass and the agent pass place findings separately, so a chain
+    that runs through a finding of the other pass can end up in two clusters
+    (analyzers at lines 10 and 16, an agent finding at 13). A single pass in
+    line order chained them. Join them here when every finding of one cluster
+    is compatible with the other.
+    """
+    merged = True
+    while merged:
+        merged = False
+        for i, a in enumerate(clusters):
+            for j in range(i + 1, len(clusters)):
+                b = clusters[j]
+                if any(_is_standalone(m) for m in a + b):
+                    continue
+                if min(abs((x.line or 0) - (y.line or 0)) for x in a for y in b) > PROXIMITY_LINES:
+                    continue
+                grown = list(a)
+                ok = True
+                for m in b:
+                    if not _cluster_category_compatible(grown, m):
+                        ok = False
+                        break
+                    grown.append(m)
+                if ok:
+                    a.extend(b)
+                    del clusters[j]
+                    merged = True
+                    break
+            if merged:
+                break
+
+
 def _dedup_file(findings: list[Finding]) -> list[Finding]:
     """Deduplicate findings within a single file using proximity clustering."""
     # Sort by line number (None → 0)
@@ -173,16 +208,17 @@ def _dedup_file(findings: list[Finding]) -> list[Finding]:
 
     def place(f: Finding) -> None:
         f_line = f.line or 0
-        # Compare proximity against the last (nearest) finding in the cluster
-        # so that a chain of findings within PROXIMITY_LINES all merge
-        # together, even if the first finding is outside the window. Of the
-        # clusters that accept `f`, join the one whose tail is nearest, and the
+        # Compare proximity against the nearest member of the cluster, so that
+        # a chain of findings within PROXIMITY_LINES all merge together, even
+        # if the first finding is outside the window. Clusters are not filled
+        # in line order, so the last member is not the tail. Of the clusters
+        # that accept `f`, join the one with the nearest member, and the
         # earlier one on a tie.
         best_cluster: list[Finding] | None = None
         best_rank = (True, PROXIMITY_LINES + 1)
         if not _is_standalone(f):
             for cluster in clusters:
-                distance = abs((cluster[-1].line or 0) - f_line)
+                distance = min(abs((m.line or 0) - f_line) for m in cluster)
                 # An agent finding cannot say whether it is style. When a style
                 # cluster and a defect cluster both accept it, it joins the
                 # defect cluster, so a style hit cannot corroborate it.
@@ -210,6 +246,7 @@ def _dedup_file(findings: list[Finding]) -> list[Finding]:
     for f in sorted_fs:
         if _analyzer_tools(f) is None:
             place(f)
+    _merge_linked_clusters(clusters)
     # Collapse sees members in line order, as it did before the two passes.
     order = {id(f): i for i, f in enumerate(sorted_fs)}
     for cluster in clusters:

@@ -1107,3 +1107,34 @@ def test_merge_an_agent_lint_finding_one_line_above_an_analyzer_defect_merges_wi
     defect = next(f for f in result if not f.style_only)
     assert defect.corroborated and sorted(defect.sources) == ["code-reviewer", "ruff"]
 
+
+def test_merge_two_agent_findings_on_either_side_of_an_analyzer_hit_form_one_finding() -> None:
+    """semgrep on line 13, agents on lines 11 and 15, one category. Each agent finding is
+    within 3 lines of the analyzer hit, so all three are one finding. A cluster is not
+    filled in line order, so the last member is not its tail."""
+    findings = [
+        _make_finding(file="a.py", line=13, source="semgrep", category="injection", severity="High",
+                      finding="rule: unsafe call"),
+        _make_finding(file="a.py", line=11, source="security-reviewer", category="injection",
+                      severity="High", finding="unsafe call"),
+        _make_finding(file="a.py", line=15, source="code-reviewer", category="injection",
+                      severity="High", finding="unsafe call again"),
+    ]
+    (merged,) = merge_findings(findings)
+    assert sorted(merged.sources) == ["code-reviewer", "security-reviewer", "semgrep"]
+
+
+def test_merge_a_chain_through_an_agent_finding_joins_two_analyzer_clusters() -> None:
+    """Analyzers on lines 10 and 16 are 6 lines apart. An agent finding on line 13 is 3 lines
+    from both, so the chain 10, 13, 16 is one finding, as in a single pass in line order."""
+    findings = [
+        _make_finding(file="a.py", line=10, source="semgrep", category="injection", severity="High",
+                      finding="rule one: unsafe call"),
+        _make_finding(file="a.py", line=16, source="sarif:bandit", category="injection",
+                      severity="High", finding="rule two: unsafe call"),
+        _make_finding(file="a.py", line=13, source="security-reviewer", category="injection",
+                      severity="High", finding="unsafe call"),
+    ]
+    (merged,) = merge_findings(findings)
+    assert "security-reviewer" in merged.sources and "semgrep" in merged.sources
+
