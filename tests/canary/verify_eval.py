@@ -373,7 +373,11 @@ def _selected(names: str) -> tuple[Condition, ...]:
 async def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     dry_run = "--dry-run" in argv
-    json_path = argv[argv.index("--json") + 1] if "--json" in argv else ""
+    json_idx = argv.index("--json") if "--json" in argv else -1
+    if json_idx >= 0 and json_idx + 1 >= len(argv):
+        print("ERROR: --json needs a file path", file=sys.stderr)
+        return 1
+    json_path = argv[json_idx + 1] if json_idx >= 0 else ""
     try:
         conditions = _selected(os.environ.get("AI_EVAL_VERIFY_CONDITIONS", ""))
         if not conditions:
