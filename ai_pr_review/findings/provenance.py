@@ -12,7 +12,10 @@ been built.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from ai_pr_review.agents.roster import AGENT_NAMES
+from ai_pr_review.findings.models import Finding
 from ai_pr_review.findings.scope import is_analyzer_source
 
 #: Additive confidence delta applied to corroborated findings (capped at 100).
@@ -35,6 +38,41 @@ def is_corroborated(sources: list[str]) -> bool:
     has_analyzer = any(is_analyzer_source(s) for s in sources)
     has_agent = any(s in AGENT_NAMES for s in sources)
     return has_analyzer and has_agent
+
+
+def _categories_corroborate(a: str, b: str) -> bool:
+    """Do two categories describe the same kind of defect?
+
+    Two equal real categories do. A real category and ``other`` do, because an
+    agent that did not set a category is the common case. Two ``other``
+    categories do not: ``other`` means "no signal", so two of them say nothing
+    about whether the findings describe the same defect (#1074).
+    """
+    if a == "other" and b == "other":
+        return False
+    return a == b or a == "other" or b == "other"
+
+
+def is_corroborated_cluster(cluster: Sequence[Finding]) -> bool:
+    """Return True when an analyzer member and an agent member of *cluster* agree.
+
+    Unlike :func:`is_corroborated`, this looks at the members, not only at the
+    union of their sources. A style finding that only sits near a security
+    finding no longer counts as agreement. The caller (``merge._collapse_cluster``)
+    also relies on the clustering rule that keeps ``lint`` and ``docs`` findings
+    in clusters of their own category.
+    """
+    analyzers: list[Finding] = []
+    agents: list[Finding] = []
+    for member in cluster:
+        names = member.sources or ([member.source] if member.source else [])
+        if any(is_analyzer_source(n) for n in names):
+            analyzers.append(member)
+        if any(n in AGENT_NAMES for n in names):
+            agents.append(member)
+    return any(
+        _categories_corroborate(a.category, g.category) for a in analyzers for g in agents
+    )
 
 
 def boosted_confidence(confidence: int) -> int:

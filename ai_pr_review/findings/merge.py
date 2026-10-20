@@ -2,8 +2,11 @@
 
 Proximity-based dedup: findings in the same file within PROXIMITY_LINES of
 each other are clustered; the highest-severity finding survives with a union
-of sources. When the cluster mixes two different analyzer tools, the other
-tool's message is kept in `Finding.also_reported` so it is not lost (#1044).
+of sources. Style findings (`docs`, and findings that an analyzer marks
+`style_only`) cluster only with style findings of their own category, and a cluster counts as corroborated only when an analyzer
+member and an agent member describe the same kind of defect (#1074). When the
+cluster mixes two different analyzer tools, the other tool's message is kept in
+`Finding.also_reported` so it is not lost (#1044).
 
 Closes #185 (dedup preserves distinct nearby findings; merges exact
 cross-source duplicates).
@@ -14,7 +17,7 @@ from __future__ import annotations
 import logging
 
 from ai_pr_review.findings.models import Finding, Severity, combine_also_reported
-from ai_pr_review.findings.provenance import boosted_confidence, is_corroborated
+from ai_pr_review.findings.provenance import boosted_confidence, is_corroborated_cluster
 from ai_pr_review.findings.scope import is_analyzer_source
 
 logger = logging.getLogger(__name__)
@@ -29,6 +32,33 @@ _SEVERITY_ORDER: dict[Severity, int] = {
 # Findings within this many lines of each other in the same file are
 # candidates for dedup.
 PROXIMITY_LINES = 3
+
+def _is_style(f: Finding) -> bool:
+    """Does `f` report style or documentation only, and not a defect in how the code behaves?
+
+    A `docs` finding does. So does a finding that an analyzer marked `style_only`
+    (a phpcs style sniff, a ruff formatting or naming code, an eslint formatting
+    rule). ruff, eslint and phpcs use the category `lint` for both style and real
+    defects, so the analyzers decide per rule and the category cannot.
+
+    A style finding clusters only with style findings of its own category, and a
+    finding that is not style-only never joins a cluster that has one. Without
+    this rule, the "other" wildcard below let a phpcs "Missing doc comment"
+    finding absorb a nearby security finding (#1074).
+    """
+    return f.category == "docs" or f.style_only
+
+
+# A finding from one of these sources never joins a cluster. The
+# suppression-check finding names a comment that turns off a security rule on
+# a line. If it clustered with the agent finding for that line, the agent
+# finding (higher severity) would win the headline and the suppression would
+# vanish from the review (#1077).
+_STANDALONE_SOURCES = frozenset({"suppression-check"})
+
+
+def _is_standalone(f: Finding) -> bool:
+    return any(s in _STANDALONE_SOURCES for s in (f.sources or ([f.source] if f.source else [])))
 
 
 def merge_findings(
@@ -99,6 +129,21 @@ def categories_compatible(a: str | None, b: str) -> bool:
     return a == b
 
 
+def _style_flags_agree(m: Finding, f: Finding) -> bool:
+    """Do two findings agree on style, where both can carry the flag?
+
+    Only analyzers set `style_only`, and extract resets it on agent output. An
+    agent finding therefore reads as not style whatever it reports. Comparing
+    the flag against an agent finding would keep an agent `lint` finding away
+    from a style hit on the same line that it describes. The category match in
+    the caller still keeps such a finding out of a style cluster of another
+    category.
+    """
+    if _analyzer_tools(m) is None or _analyzer_tools(f) is None:
+        return True
+    return _is_style(m) == _is_style(f)
+
+
 def _cluster_category_compatible(cluster: list[Finding], f: Finding) -> bool:
     """Can `f` join `cluster` without introducing a second, conflicting real category?
 
@@ -109,8 +154,49 @@ def _cluster_category_compatible(cluster: list[Finding], f: Finding) -> bool:
     within PROXIMITY_LINES of their neighbor), silently dropping one of them
     when the cluster collapses.
     """
+    if _is_style(f) or any(_is_style(m) for m in cluster):
+        # `categories_compatible` is not used here on purpose: it also drives
+        # the cross-run thread match in `vcs/_canonical.py`, and a change to it
+        # would change which old threads a new finding updates. Only the
+        # within-run clustering is strict.
+        return all(m.category == f.category and _style_flags_agree(m, f) for m in cluster)
     established = next((m.category for m in cluster if m.category != "other"), None)
     return categories_compatible(established, f.category)
+
+
+def _merge_linked_clusters(clusters: list[list[Finding]]) -> None:
+    """Join clusters that a member of each links within PROXIMITY_LINES.
+
+    The analyzer pass and the agent pass place findings separately, so a chain
+    that runs through a finding of the other pass can end up in two clusters
+    (analyzers at lines 10 and 16, an agent finding at 13). A single pass in
+    line order chained them. Join them here when every finding of one cluster
+    is compatible with the other.
+    """
+    merged = True
+    while merged:
+        merged = False
+        for i, a in enumerate(clusters):
+            for j in range(i + 1, len(clusters)):
+                b = clusters[j]
+                if any(_is_standalone(m) for m in a + b):
+                    continue
+                if min(abs((x.line or 0) - (y.line or 0)) for x in a for y in b) > PROXIMITY_LINES:
+                    continue
+                grown = list(a)
+                ok = True
+                for m in b:
+                    if not _cluster_category_compatible(grown, m):
+                        ok = False
+                        break
+                    grown.append(m)
+                if ok:
+                    a.extend(b)
+                    del clusters[j]
+                    merged = True
+                    break
+            if merged:
+                break
 
 
 def _dedup_file(findings: list[Finding]) -> list[Finding]:
@@ -119,23 +205,53 @@ def _dedup_file(findings: list[Finding]) -> list[Finding]:
     sorted_fs = sorted(findings, key=lambda f: f.line or 0)
 
     clusters: list[list[Finding]] = []
-    for f in sorted_fs:
-        placed = False
-        for cluster in clusters:
-            # Compare proximity against the last (nearest) finding in the
-            # cluster so that a chain of findings within PROXIMITY_LINES all
-            # merge together, even if the first finding is outside the window.
-            tail = cluster[-1]
-            tail_line = tail.line or 0
-            f_line = f.line or 0
-            if abs(tail_line - f_line) <= PROXIMITY_LINES and _cluster_category_compatible(
-                cluster, f
-            ):
-                cluster.append(f)
-                placed = True
-                break
-        if not placed:
+
+    def place(f: Finding) -> None:
+        f_line = f.line or 0
+        # Compare proximity against the nearest member of the cluster, so that
+        # a chain of findings within PROXIMITY_LINES all merge together, even
+        # if the first finding is outside the window. Clusters are not filled
+        # in line order, so the last member is not the tail. Of the clusters
+        # that accept `f`, join the one with the nearest member, and the
+        # earlier one on a tie.
+        best_cluster: list[Finding] | None = None
+        best_rank = (True, PROXIMITY_LINES + 1)
+        if not _is_standalone(f):
+            for cluster in clusters:
+                distance = min(abs((m.line or 0) - f_line) for m in cluster)
+                # An agent finding cannot say whether it is style. When a style
+                # cluster and a defect cluster both accept it, it joins the
+                # defect cluster, so a style hit cannot corroborate it.
+                rank = (_analyzer_tools(f) is None and any(_is_style(m) for m in cluster), distance)
+                if (
+                    distance <= PROXIMITY_LINES
+                    and rank < best_rank
+                    and not any(_is_standalone(m) for m in cluster)
+                    and _cluster_category_compatible(cluster, f)
+                ):
+                    best_cluster, best_rank = cluster, rank
+        if best_cluster is not None:
+            best_cluster.append(f)
+        else:
             clusters.append([f])
+
+    # Analyzer findings cluster first, then every other finding joins its
+    # nearest compatible cluster. An agent finding cannot carry `style_only`, so
+    # it needs the analyzer clusters to exist before it picks one. Placing in
+    # line order alone let an agent finding one line above an analyzer defect
+    # join an earlier style cluster.
+    for f in sorted_fs:
+        if _analyzer_tools(f) is not None:
+            place(f)
+    for f in sorted_fs:
+        if _analyzer_tools(f) is None:
+            place(f)
+    _merge_linked_clusters(clusters)
+    # Collapse sees members in line order, as it did before the two passes.
+    order = {id(f): i for i, f in enumerate(sorted_fs)}
+    for cluster in clusters:
+        cluster.sort(key=lambda m: order[id(m)])
+    clusters.sort(key=lambda c: order[id(c[0])])
 
     return [_collapse_cluster(c) for c in clusters]
 
@@ -154,10 +270,18 @@ def _analyzer_tools(f: Finding) -> frozenset[str] | None:
 def _also_reported_notes(cluster: list[Finding], best: Finding) -> list[str]:
     """Compose one note per distinct message that the collapse would otherwise drop.
 
-    Only analyzer-vs-analyzer members from a different tool set than `best`
-    qualify. Two different tools report different rules, so their messages are
-    not duplicates. Agent members and same-tool members are the "same issue
-    found twice" case and stay collapsed silently.
+    This applies only when `best` is an analyzer finding:
+
+    - An analyzer member from a different tool set than `best` qualifies. Two
+      different tools report different rules, so their messages are not
+      duplicates.
+    - An agent member qualifies too (#1074). The agent text usually names the
+      impact in the context of the code, and the analyzer text is a generic
+      rule message. The analyzer won the headline only because its severity
+      was higher.
+
+    Same-tool members stay collapsed silently. When `best` is an agent
+    finding, nothing is added: the badge already says an analyzer agreed.
     """
     best_tools = _analyzer_tools(best)
     if best_tools is None:
@@ -168,13 +292,20 @@ def _also_reported_notes(cluster: list[Finding], best: Finding) -> list[str]:
         if f is best:
             continue
         tools = _analyzer_tools(f)
-        if tools is None or tools == best_tools:
+        if tools == best_tools:
             continue
+        if tools is None:
+            names = sorted({s for s in (f.sources or ([f.source] if f.source else [])) if s})
+            if not names:
+                continue
+            label = ", ".join(names)
+        else:
+            label = ", ".join(sorted(tools))
         text = " ".join(f.finding.split())
         if len(text) > _MAX_NOTE_CHARS:
             text = text[: _MAX_NOTE_CHARS - 1] + "…"
         where = f" (line {f.line})" if f.line else ""
-        note = f"{', '.join(sorted(tools))}{where}: {text}"
+        note = f"{label}{where}: {text}"
         if note not in seen:
             seen.add(note)
             notes.append(note)
@@ -193,6 +324,14 @@ def _collapse_cluster(cluster: list[Finding]) -> Finding:
                 all_sources.append(s)
 
     update: dict[str, object] = {"sources": sorted(all_sources)}
+    # impact and trigger come from agents only. When an analyzer finding wins the
+    # headline, keep the text of the first member that has one (#1078). When an agent
+    # wins, its own fields stand: another agent's text may describe another defect.
+    if _analyzer_tools(best) is not None:
+        for detail in ("impact", "trigger"):
+            value = next((getattr(m, detail) for m in cluster if getattr(m, detail)), "")
+            if value:
+                update[detail] = value
     also_reported = _also_reported_notes(cluster, best)
     if also_reported:
         update["also_reported"] = also_reported
@@ -214,7 +353,7 @@ def _collapse_cluster(cluster: list[Finding]) -> Finding:
             sorted(non_other_categories),
             best.category,
         )
-    if is_corroborated(all_sources):
+    if is_corroborated_cluster(cluster):
         update["corroborated"] = True
         update["confidence"] = boosted_confidence(best.confidence)
     return best.model_copy(update=update)

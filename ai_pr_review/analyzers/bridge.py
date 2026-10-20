@@ -34,6 +34,7 @@ from ai_pr_review.analyzers.native.phpstan import _run_phpstan
 from ai_pr_review.analyzers.native.ruff import _run_ruff
 from ai_pr_review.analyzers.native.semgrep import _run_semgrep
 from ai_pr_review.analyzers.native.shellcheck import _run_shellcheck
+from ai_pr_review.analyzers.native.suppression_check import _run_suppression_check
 from ai_pr_review.analyzers.native.tflint import _run_tflint
 from ai_pr_review.analyzers.native.trufflehog import _run_trufflehog
 from ai_pr_review.findings.models import Finding
@@ -72,6 +73,8 @@ _ANALYZERS: list[AnalyzerSpec] = [
     # the stale reference it's looking for typically lives in an UNCHANGED
     # doc elsewhere in the repo.
     AnalyzerSpec("docs-drift-check",   [],         _run_docs_drift_check),
+    # Reads added lines only, and only in source files (not tests, docs or config).
+    AnalyzerSpec("suppression-check",  ["source"], _run_suppression_check),
 ]
 
 # Public canonical set — used by config validation for the analyzers allowlist/denylist inputs.

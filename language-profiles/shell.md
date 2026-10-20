@@ -21,6 +21,7 @@ When reviewing shell scripts, pay particular attention to:
 ### Security (Shell-specific)
 - Command injection via unvalidated variables in `eval`, backticks, or `$()` with user input
 - Unquoted variables in `rm`, `mv`, `cp` — glob expansion risk
+- A destructive command (`rm`, `chmod`, `chown`, `mv`, `find -delete`) on `$VAR/*`, or with `-R`, where `$VAR` is a positional argument with no `${VAR:?message}` check — an empty value expands to `/*`. Critical when the script can run as root or as a deploy user. The `${VAR:?message}` form listed above is the validation that fixes it
 - `curl | bash` patterns — never pipe untrusted URLs to shell
 - Temp files in predictable locations without `mktemp` — symlink attacks
 - Secrets in command-line arguments — visible in `/proc/*/cmdline` and `ps`

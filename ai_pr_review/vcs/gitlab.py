@@ -28,6 +28,7 @@ from ai_pr_review.vcs._body import (
     TOKEN_TABLE_OPEN_MARKER,
     also_reported_notes,
     badge_suffix,
+    detail_lines,
     format_body_finding,
     format_source_tag,
     sanitize_bullet_text,
@@ -802,6 +803,7 @@ class GitLabProvider:
         tag = format_source_tag(f)
         header = f"{icon} **[{f.severity}]** {tag} {sanitize_bullet_text(f.finding)}{badge_suffix(f)}".strip()
         parts = [header]
+        parts.extend(f"\n**{label}:** {text}" for label, text in detail_lines(f))
         if f.remediation:
             parts.append(f"\n**Remediation:** {sanitize_bullet_text(f.remediation)}")
         parts.extend(f"\n**Also reported by:** {note}" for note in also_reported_notes(f))

@@ -11,7 +11,13 @@ from __future__ import annotations
 
 import pytest
 
-from ai_pr_review.findings.provenance import PROVENANCE_BOOST, boosted_confidence, is_corroborated
+from ai_pr_review.findings.models import Finding
+from ai_pr_review.findings.provenance import (
+    PROVENANCE_BOOST,
+    boosted_confidence,
+    is_corroborated,
+    is_corroborated_cluster,
+)
 from ai_pr_review.findings.scope import _ANALYZER_PREFIXES
 
 # ---------------------------------------------------------------------------
@@ -124,3 +130,44 @@ def test_all_analyzer_prefixes_trigger_corroboration(prefix: str) -> None:
     assert is_corroborated([source, "code-reviewer"]) is True, (
         f"Prefix {prefix!r} (source={source!r}) did not trigger corroboration"
     )
+
+
+# ---------------------------------------------------------------------------
+# is_corroborated_cluster: the members' categories decide (#1074)
+# ---------------------------------------------------------------------------
+
+
+def _member(source: str, category: str) -> Finding:
+    return Finding(
+        severity="High", confidence=80, finding="x", source=source, category=category, file="a.py", line=1
+    )
+
+
+@pytest.mark.parametrize(
+    ("analyzer_category", "agent_category", "expected"),
+    [
+        ("injection", "injection", True),
+        ("injection", "other", True),
+        ("other", "injection", True),
+        ("lint", "lint", True),
+        ("other", "other", False),
+        ("injection", "secret", False),
+        ("lint", "injection", False),
+    ],
+)
+def test_cluster_corroboration_by_category(
+    analyzer_category: str, agent_category: str, expected: bool
+) -> None:
+    cluster = [_member("semgrep", analyzer_category), _member("security-reviewer", agent_category)]
+    assert is_corroborated_cluster(cluster) is expected
+
+
+def test_cluster_corroboration_needs_both_kinds_of_member() -> None:
+    assert is_corroborated_cluster([_member("semgrep", "injection"), _member("ruff", "injection")]) is False
+    assert (
+        is_corroborated_cluster(
+            [_member("code-reviewer", "injection"), _member("blind-hunter", "injection")]
+        )
+        is False
+    )
+    assert is_corroborated_cluster([]) is False

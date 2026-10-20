@@ -18,13 +18,14 @@ JudgeVerdict = Literal["keep", "downrank"]
 # it runs before pydantic's type check and coerces any unknown/missing input
 # to "other" ahead of time, so the Literal type never sees an invalid value to
 # reject. CATEGORIES is derived from Category via get_args() so there is
-# exactly one place that lists the 11 values; the tuple form is what
+# exactly one place that lists the values; the tuple form is what
 # _normalise_category checks membership against.
 Category = Literal[
     "authz",
     "injection",
     "dependency-cve",
     "secret",
+    "crypto",
     "architecture-coupling",
     "test-gap",
     "edge-case",
@@ -34,6 +35,9 @@ Category = Literal[
     "other",
 ]
 CATEGORIES: tuple[str, ...] = get_args(Category)
+
+# Longest `impact` or `trigger` text that a Finding keeps (#1078).
+MAX_DETAIL_CHARS = 300
 
 
 MAX_ALSO_REPORTED = 5
@@ -93,6 +97,12 @@ class Finding(BaseModel):
     line: int | None = Field(default=None, ge=1)
     start_line: int | None = Field(default=None, ge=1)
     remediation: str = ""
+    # Optional text from the agent (#1078). `impact` says who is harmed and
+    # how, in one sentence. `trigger` gives a concrete input or call that
+    # reaches the defect. They are display text only: neither one enters the
+    # fingerprint, the clustering, the judge payload or any approval decision.
+    impact: str = ""
+    trigger: str = ""
     suggested_code: str = ""
     sources: list[str] = Field(default_factory=list)
     # cve-check only: "dependency-check" tag required in the output.
@@ -149,6 +159,14 @@ class Finding(BaseModel):
     # finding + remediation) cannot hide the surviving finding through the
     # other tool's text. Internal-only: not serialised by to_dict().
     also_reported: list[str] = Field(default_factory=list)
+    # Set by an analyzer when the rule it reports is about style only (a phpcs
+    # style sniff, a ruff formatting or naming code, an eslint formatting rule).
+    # ruff, eslint and phpcs use the category "lint" for style and for real
+    # defects, so the category cannot tell them apart. The merge keeps a
+    # style-only finding out of a cluster with a finding that is not style-only
+    # (#1074). Internal-only: not serialised by to_dict(), and reset on agent
+    # output by extract.py.
+    style_only: bool = False
 
     @field_validator("severity", mode="before")
     @classmethod
@@ -172,6 +190,19 @@ class Finding(BaseModel):
             return v
         return "other"
 
+    @field_validator("impact", "trigger", mode="before")
+    @classmethod
+    def _normalise_detail(cls, v: object) -> object:
+        # Permissive like _normalise_category: a missing or odd value must never
+        # drop the finding. A non-string becomes empty, and a long string is cut
+        # so one verbose agent cannot fill a comment.
+        if not isinstance(v, str):
+            return ""
+        text = " ".join(v.split())
+        if len(text) > MAX_DETAIL_CHARS:
+            text = text[: MAX_DETAIL_CHARS - 1] + "…"
+        return text
+
     @model_validator(mode="after")
     def _populate_sources(self) -> Finding:
         if self.source and not self.sources:
@@ -193,6 +224,10 @@ class Finding(BaseModel):
             d["line"] = self.line
         if self.start_line is not None:
             d["start_line"] = self.start_line
+        if self.impact:
+            d["impact"] = self.impact
+        if self.trigger:
+            d["trigger"] = self.trigger
         if self.remediation:
             d["remediation"] = self.remediation
         if self.suggested_code:

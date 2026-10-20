@@ -49,6 +49,27 @@ _CHECK_ID_CATEGORY_HINTS: tuple[tuple[str, str], ...] = (
     ("xss", "injection"),
     ("ssrf", "injection"),
     ("deserialization", "injection"),
+    # PHP rule packs name these rules after the dangerous function, not after
+    # the vulnerability class (#1074). Without these tokens they fell through
+    # to "other", the category that matches every other category.
+    ("unserialize-use", "injection"),
+    ("exec-use", "injection"),
+    ("system-use", "injection"),
+    ("backticks-use", "injection"),
+    ("eval-use", "injection"),
+    # Weak hashes and weak randomness (#1076). The rule IDs name the primitive
+    # (use-of-md5, math-random-used) and carry no vulnerability-class token.
+    ("md5", "crypto"),
+    ("sha1", "crypto"),
+    ("use-of-md5", "crypto"),
+    ("use-of-sha1", "crypto"),
+    ("use_of_weak_crypto", "crypto"),
+    ("weak-hash", "crypto"),
+    ("weak-crypto", "crypto"),
+    ("insecure-hash", "crypto"),
+    ("insecure-random", "crypto"),
+    ("math-random", "crypto"),
+    ("math_random", "crypto"),
     ("secrets", "secret"),
     ("secret", "secret"),
     ("hardcoded", "secret"),

@@ -30,7 +30,7 @@ Each finding category maps to one of the three `annotation_type` values of Code 
 
 | `annotation_type` | Categories |
 |---|---|
-| `VULNERABILITY` | `authz`, `injection`, `secret`, `dependency-cve` |
+| `VULNERABILITY` | `authz`, `injection`, `secret`, `crypto`, `dependency-cve` |
 | `BUG` | `edge-case`, `test-gap` |
 | `CODE_SMELL` | `architecture-coupling`, `observability`, `docs`, `lint`, `other` |
 
