@@ -1066,3 +1066,24 @@ def test_merge_a_non_style_analyzer_hit_stays_out_of_a_cluster_with_a_style_hit_
     assert any(f.style_only for f in result)
     assert any(not f.style_only and f.severity == "High" for f in result)
 
+
+def test_merge_an_agent_lint_finding_joins_the_nearest_cluster_not_an_earlier_style_cluster() -> None:
+    """ruff E501 (style) on line 10, ruff F821 (defect) on line 12, and an agent `lint`
+    finding about the same undefined name on line 12. The agent finding must merge with
+    F821, not with the earlier style cluster, so the defect posts once and the style hit
+    does not corroborate it."""
+    findings = [
+        _make_finding(file="a.py", line=10, source="ruff", category="lint", severity="Low",
+                      style_only=True, finding="E501: Line too long"),
+        _make_finding(file="a.py", line=12, source="ruff", category="lint", severity="High",
+                      finding="F821: Undefined name `user`"),
+        _make_finding(file="a.py", line=12, source="code-reviewer", category="lint",
+                      severity="High", finding="`user` is not defined"),
+    ]
+    result = merge_findings(findings)
+    assert len(result) == 2
+    style = next(f for f in result if f.style_only)
+    assert style.sources == ["ruff"] and not style.corroborated
+    defect = next(f for f in result if not f.style_only)
+    assert defect.corroborated and sorted(defect.sources) == ["code-reviewer", "ruff"]
+
