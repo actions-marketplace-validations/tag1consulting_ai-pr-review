@@ -1344,3 +1344,29 @@ def test_decide_action_only_update_and_escalate_puts() -> None:
         canonical, event="REQUEST_CHANGES", classified=classified, any_new_inline_eligible=False
     )
     assert action == "put"
+
+
+def test_classify_suppression_check_finding_does_not_claim_another_kinds_thread() -> None:
+    agent = _finding("agent issue", source="code-reviewer", line=48, category="other")
+    standalone = _finding(
+        "comment turns off a rule", source="suppression-check", line=48, category="lint"
+    )
+    agent_thread = _thread(thread_id="t-agent", comment_id=1, line=48, fp=fingerprint(agent))
+    standalone_thread = _thread(
+        thread_id="t-sup", comment_id=2, line=48, category="lint", fp=fingerprint(standalone)
+    )
+    threads = [agent_thread, standalone_thread]
+
+    got = classify(standalone, verdicts={}, all_threads=threads)
+    assert got.thread is standalone_thread
+    got = classify(agent, verdicts={}, all_threads=threads)
+    assert got.thread is agent_thread
+    # With only the other kind of thread open, the finding is new.
+    assert classify(standalone, verdicts={}, all_threads=[agent_thread]).kind == "new"
+
+
+def test_classify_prefers_the_thread_with_its_own_fingerprint() -> None:
+    f = _finding("issue", line=10)
+    older = _thread(thread_id="old", comment_id=1, line=10, fp="code-reviewer|app.py|10|aaaa")
+    own = _thread(thread_id="own", comment_id=2, line=10, fp=fingerprint(f))
+    assert classify(f, verdicts={}, all_threads=[older, own]).thread is own

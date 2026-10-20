@@ -1152,3 +1152,41 @@ def test_merge_many_analyzer_findings_in_one_file_is_fast() -> None:
     result = merge_findings(findings)
     assert time.monotonic() - start < 5.0
     assert len(result) == 3000
+
+
+def test_merge_a_dense_run_of_findings_is_fast() -> None:
+    """Chained findings form one large cluster, which must not cost quadratic time (#1073)."""
+    import time
+
+    findings = [
+        _make_finding(file="legacy.php", line=i, source="phpcs", category="lint", style_only=True)
+        for i in range(1, 10_001)
+    ]
+    start = time.monotonic()
+    result = merge_findings(findings)
+    assert time.monotonic() - start < 5.0
+    assert len(result) == 1
+
+
+def test_cluster_state_accepts_matches_a_scan_of_the_members() -> None:
+    import random
+
+    from ai_pr_review.findings import merge as m
+
+    rng = random.Random(3)
+    cats = ["other", "secret", "injection", "lint", "docs"]
+    srcs = ["phpcs", "ruff", "suppression-check", "code-reviewer"]
+
+    def make() -> Finding:
+        src = rng.choice(srcs)
+        return _make_finding(
+            line=rng.randint(1, 5),
+            source=src,
+            category=rng.choice(cats),
+            style_only=src in ("phpcs", "ruff") and rng.random() < 0.4,
+        )
+
+    for _ in range(3000):
+        members = [make() for _ in range(rng.randint(1, 6))]
+        probe = make()
+        assert m._ClusterState.of(members).accepts(probe) == m._cluster_category_compatible(members, probe)

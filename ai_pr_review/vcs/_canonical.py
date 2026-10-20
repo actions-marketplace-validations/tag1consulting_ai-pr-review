@@ -646,11 +646,26 @@ def _fuzzy_dismissed_match(
     return None
 
 
+_STANDALONE_SOURCE = "suppression-check"
+
+
+def _thread_is_standalone(t: PriorThread) -> bool:
+    """Does `t` carry a suppression-check finding, which the merge never clusters?"""
+    if not t.fingerprint:
+        return False
+    parts = split_fingerprint(t.fingerprint)
+    return len(parts) == 4 and parts[0] == _STANDALONE_SOURCE
+
+
 def _fuzzy_open_match(
-    finding: Finding, open_threads: Sequence[PriorThread]
+    finding: Finding, open_threads: Sequence[PriorThread], fp: str | None = None
 ) -> PriorThread | None:
     if not finding.file or finding.line is None:
         return None
+    # The merge keeps a suppression-check finding apart from every other
+    # finding, so a thread of that kind matches only a finding of that kind.
+    # Otherwise two findings on one line claim one thread on every re-run.
+    standalone = finding.source == _STANDALONE_SOURCE
     candidates = [
         t
         for t in open_threads
@@ -658,11 +673,19 @@ def _fuzzy_open_match(
         and t.line is not None
         and abs(t.line - finding.line) <= PROXIMITY_LINES
         and categories_compatible(t.category, finding.category)
+        and _thread_is_standalone(t) == standalone
     ]
     if not candidates:
         return None
-    # Prefer the closest line match; ties broken by the oldest comment.
-    candidates.sort(key=lambda t: (abs((t.line or 0) - (finding.line or 0)), t.comment_id))
+    # Prefer the thread that carries this finding's own fingerprint, then the
+    # closest line match. Ties are broken by the oldest comment.
+    candidates.sort(
+        key=lambda t: (
+            not (fp is not None and (t.fingerprint == fp or fp in t.prior_fingerprints)),
+            abs((t.line or 0) - (finding.line or 0)),
+            t.comment_id,
+        )
+    )
     return candidates[0]
 
 
@@ -701,7 +724,7 @@ def classify(
         thread = _find_thread_by_fingerprint(all_threads, fp)
         return Classified(finding, "recurred", thread)
 
-    thread = _fuzzy_open_match(finding, open_threads)
+    thread = _fuzzy_open_match(finding, open_threads, fp)
     if thread is not None:
         if thread.is_outdated:
             return Classified(finding, "new", None)
