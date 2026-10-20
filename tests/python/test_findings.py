@@ -1138,3 +1138,17 @@ def test_merge_a_chain_through_an_agent_finding_joins_two_analyzer_clusters() ->
     (merged,) = merge_findings(findings)
     assert "security-reviewer" in merged.sources and "semgrep" in merged.sources
 
+
+
+def test_merge_many_analyzer_findings_in_one_file_is_fast() -> None:
+    """A large legacy file must not stall the merge step (#1073 F8)."""
+    import time
+
+    findings = [
+        _make_finding(file="legacy.php", line=i * 10, source="phpcs", category="lint", style_only=True)
+        for i in range(1, 3001)
+    ]
+    start = time.monotonic()
+    result = merge_findings(findings)
+    assert time.monotonic() - start < 5.0
+    assert len(result) == 3000

@@ -164,6 +164,16 @@ def _cluster_category_compatible(cluster: list[Finding], f: Finding) -> bool:
     return categories_compatible(established, f.category)
 
 
+def _line_span(cluster: list[Finding]) -> tuple[int, int]:
+    lines = [m.line or 0 for m in cluster]
+    return min(lines), max(lines)
+
+
+def _span_gap(a: tuple[int, int], b: tuple[int, int]) -> int:
+    """Return the distance between two line spans, 0 when they overlap."""
+    return max(a[0] - b[1], b[0] - a[1], 0)
+
+
 def _merge_linked_clusters(clusters: list[list[Finding]]) -> None:
     """Join clusters that a member of each links within PROXIMITY_LINES.
 
@@ -176,9 +186,15 @@ def _merge_linked_clusters(clusters: list[list[Finding]]) -> None:
     merged = True
     while merged:
         merged = False
+        spans = [_line_span(c) for c in clusters]
         for i, a in enumerate(clusters):
             for j in range(i + 1, len(clusters)):
                 b = clusters[j]
+                # The gap between the two line spans is a lower bound on the
+                # distance between any two members, so a wide gap rules the
+                # pair out without a member scan.
+                if _span_gap(spans[i], spans[j]) > PROXIMITY_LINES:
+                    continue
                 if any(_is_standalone(m) for m in a + b):
                     continue
                 if min(abs((x.line or 0) - (y.line or 0)) for x in a for y in b) > PROXIMITY_LINES:
@@ -205,6 +221,7 @@ def _dedup_file(findings: list[Finding]) -> list[Finding]:
     sorted_fs = sorted(findings, key=lambda f: f.line or 0)
 
     clusters: list[list[Finding]] = []
+    spans: dict[int, tuple[int, int]] = {}
 
     def place(f: Finding) -> None:
         f_line = f.line or 0
@@ -218,6 +235,9 @@ def _dedup_file(findings: list[Finding]) -> list[Finding]:
         best_rank = (True, PROXIMITY_LINES + 1)
         if not _is_standalone(f):
             for cluster in clusters:
+                lo, hi = spans[id(cluster)]
+                if f_line < lo - PROXIMITY_LINES or f_line > hi + PROXIMITY_LINES:
+                    continue
                 distance = min(abs((m.line or 0) - f_line) for m in cluster)
                 # An agent finding cannot say whether it is style. When a style
                 # cluster and a defect cluster both accept it, it joins the
@@ -232,8 +252,11 @@ def _dedup_file(findings: list[Finding]) -> list[Finding]:
                     best_cluster, best_rank = cluster, rank
         if best_cluster is not None:
             best_cluster.append(f)
+            lo, hi = spans[id(best_cluster)]
+            spans[id(best_cluster)] = (min(lo, f_line), max(hi, f_line))
         else:
             clusters.append([f])
+            spans[id(clusters[-1])] = (f_line, f_line)
 
     # Analyzer findings cluster first, then every other finding joins its
     # nearest compatible cluster. An agent finding cannot carry `style_only`, so
