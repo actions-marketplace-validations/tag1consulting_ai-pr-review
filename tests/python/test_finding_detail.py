@@ -178,3 +178,14 @@ class TestStyleOnly:
         )
         (finding,) = extract_findings(output, "security-reviewer")
         assert finding.style_only is False
+
+
+class TestRolledUp:
+    def test_an_agent_cannot_set_it(self) -> None:
+        output = (
+            '```json-findings\n[{"severity":"High","confidence":85,"finding":"bug",'
+            '"category":"injection","rolled_up":true}]\n```'
+        )
+        (finding,) = extract_findings(output, "security-reviewer")
+        assert finding.rolled_up is False
+        assert "rolled_up" not in finding.to_dict()

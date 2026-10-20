@@ -1370,3 +1370,14 @@ def test_classify_prefers_the_thread_with_its_own_fingerprint() -> None:
     older = _thread(thread_id="old", comment_id=1, line=10, fp="code-reviewer|app.py|10|aaaa")
     own = _thread(thread_id="own", comment_id=2, line=10, fp=fingerprint(f))
     assert classify(f, verdicts={}, all_threads=[older, own]).thread is own
+
+
+def test_classify_current_fingerprint_outranks_a_prior_fingerprint() -> None:
+    """An older thread that only kept the fingerprint as a prior one must not win (#1085)."""
+    f = _finding("issue", line=10)
+    older = _thread(
+        thread_id="old", comment_id=1, line=10, fp="other|app.py|10|aaaa",
+        prior_fingerprints=frozenset({fingerprint(f)}),
+    )
+    own = _thread(thread_id="own", comment_id=2, line=10, fp=fingerprint(f))
+    assert classify(f, verdicts={}, all_threads=[older, own]).thread is own

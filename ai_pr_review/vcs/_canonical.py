@@ -677,11 +677,14 @@ def _fuzzy_open_match(
     ]
     if not candidates:
         return None
-    # Prefer the thread that carries this finding's own fingerprint, then the
-    # closest line match. Ties are broken by the oldest comment.
+    # Prefer the thread whose current fingerprint is this finding's own, then a
+    # thread that kept it as a prior fingerprint, then the closest line match.
+    # Ties are broken by the oldest comment.
     candidates.sort(
         key=lambda t: (
-            not (fp is not None and (t.fingerprint == fp or fp in t.prior_fingerprints)),
+            0 if fp is not None and t.fingerprint == fp
+            else 1 if fp is not None and fp in t.prior_fingerprints
+            else 2,
             abs((t.line or 0) - (finding.line or 0)),
             t.comment_id,
         )

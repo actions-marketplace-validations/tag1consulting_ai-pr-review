@@ -165,6 +165,11 @@ def _parse_and_validate(
             # that corroborates it (#1074).
             if f.style_only:
                 f = f.model_copy(update={"style_only": False})
+            # Strip rolled_up: only scope.rollup_repeated_findings sets it. An
+            # injected true value would skip the fuzzy dismissal match and bring
+            # back a finding that a maintainer dismissed (#1085).
+            if f.rolled_up:
+                f = f.model_copy(update={"rolled_up": False})
             results.append(f)
         except Exception as exc:  # noqa: BLE001
             print(f"WARNING: {agent_name} dropped malformed finding: {exc}", file=sys.stderr)
