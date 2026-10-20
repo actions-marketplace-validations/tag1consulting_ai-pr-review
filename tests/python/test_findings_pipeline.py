@@ -114,10 +114,11 @@ def _sql_hit(line: int) -> Finding:
               finding=f"{_SQL_RULE}: Avoiding SQL string concatenation ({line})")
 
 
-def test_a_dismissed_semgrep_finding_stays_dismissed_when_a_second_site_rolls_it_up() -> None:
+def test_a_dismissed_semgrep_finding_is_reported_again_when_a_second_site_rolls_it_up() -> None:
     """The rollup changes the text of the finding at the lowest line, so its fingerprint
-    changes. The dismissal must still apply through the location match, or every second
-    occurrence of a rule would bring back a finding that a human already dismissed."""
+    changes. The rolled-up finding stands for the new site as well, and a person dismissed
+    only the first one. A fuzzy match on the lowest line must not hide a real second hit
+    (#1073), so only an exact fingerprint verdict can suppress a rolled-up finding."""
     run1 = rollup_repeated_findings(merge_findings([_sql_hit(31)]))
     dismissed_fp = fingerprint(run1[0])
     thread = _thread(fp=dismissed_fp, severity="High", category="injection", is_resolved=True)
@@ -126,8 +127,12 @@ def test_a_dismissed_semgrep_finding_stays_dismissed_when_a_second_site_rolls_it
     assert len(run2) == 1 and "2 occurrences" in run2[0].finding
     assert fingerprint(run2[0]) != dismissed_fp  # the churn is real
 
+    assert run2[0].rolled_up
     result = classify(run2[0], verdicts={dismissed_fp: "dismissed"}, all_threads=[thread])
-    assert result.kind == "suppressed"
+    assert result.kind == "new"
+    # The same dismissal still covers the lone finding, which is not rolled up.
+    assert not run1[0].rolled_up
+    assert classify(run1[0], verdicts={dismissed_fp: "dismissed"}, all_threads=[thread]).kind == "suppressed"
 
 
 def test_a_new_semgrep_site_far_above_a_dismissed_one_is_reported_again() -> None:

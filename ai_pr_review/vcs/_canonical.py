@@ -717,7 +717,10 @@ def classify(
 
     if verdicts.get(fp) == "dismissed":
         return Classified(finding, "suppressed", None)
-    if _fuzzy_dismissed_match(finding, verdicts, all_threads) is not None:
+    # A rolled-up representative stands for lines far from its own. A dismissal
+    # near its line says nothing about the other lines, so only an exact
+    # fingerprint verdict above can suppress it.
+    if not finding.rolled_up and _fuzzy_dismissed_match(finding, verdicts, all_threads) is not None:
         return Classified(finding, "suppressed", None)
 
     if verdicts.get(fp) == "fixed":

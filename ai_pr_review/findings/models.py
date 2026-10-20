@@ -132,6 +132,11 @@ class Finding(BaseModel):
     # source — independent corroboration of the same file+line region.
     # Internal-only: not serialised by to_dict().
     corroborated: bool = False
+    # Set by scope.rollup_repeated_findings on the representative of a rolled-up
+    # group. The representative stands for lines far from its own, so a fuzzy
+    # match on its line must not read as a match for the whole group (#1073).
+    # Internal-only: not serialised by to_dict().
+    rolled_up: bool = False
     # Display preference only: when True, the renderers show the evidence label and
     # score beside the finding. The label is computed from this finding's own fields
     # when it is rendered (findings/badge.py), so it cannot go stale. The orchestrator

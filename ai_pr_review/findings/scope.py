@@ -232,7 +232,7 @@ def rollup_repeated_findings(
         if len(lines) > 10:
             line_preview += f" ... (+{len(lines) - 10} more)"
         summary = f" ({len(group)} occurrences in {key[0]}, lines: {line_preview})"
-        update: dict[str, object] = {"finding": rep.finding + summary}
+        update: dict[str, object] = {"finding": rep.finding + summary, "rolled_up": True}
         notes = combine_also_reported([g.also_reported for g in group])
         if notes:
             update["also_reported"] = notes
