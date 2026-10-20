@@ -37,10 +37,14 @@ def _is_style(f: Finding) -> bool:
     """Does `f` describe style or documentation, not a defect in how the code behaves?
 
     A `docs` finding does. A `lint` finding does when its severity is Low: the
-    analyzers rate style findings Low (the phpcs style sniffs, and ruff W, C and
-    other codes), and a lint finding of higher severity (ruff F821, an unsafe
-    call) is a real defect. ruff, eslint and phpcs all use the category `lint`
-    for both kinds, so the severity is what tells them apart.
+    analyzers rate style findings Low (the phpcs style sniffs, and the ruff codes
+    other than F, E, W and C), and a lint finding of higher severity (ruff F821,
+    an unsafe call) is a real defect. ruff, eslint and phpcs all use the category
+    `lint` for both kinds, so the severity is what tells them apart.
+
+    Known limit: the ruff S (security) codes are rated Low by the ruff analyzer, so
+    they count as style here and do not merge with an agent finding that has the
+    category `other`. They still merge with a finding of the category `lint`.
 
     A style finding clusters only with findings of its own category. Without
     this rule, the "other" wildcard below let a phpcs "Missing doc comment"
