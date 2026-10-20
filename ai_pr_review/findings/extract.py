@@ -10,7 +10,7 @@ import json
 import re
 import sys
 
-from ai_pr_review.findings.models import Finding
+from ai_pr_review.findings.models import INTERNAL_ONLY_FIELDS, Finding
 
 _FENCE_RE = re.compile(r"```json-findings\n(.*?)```", re.DOTALL)
 
@@ -120,6 +120,13 @@ def _parse_and_validate(
         # findings never pass through here).
         item["source"] = agent_name
         item.pop("sources", None)
+        # Drop every field that only the pipeline sets (#913, #1074, #1085). An
+        # injected value would fake corroboration or a judge verdict, hide the
+        # finding from the CHANGES_REQUESTED check, keep it out of a cluster, or
+        # skip dismissal matching. A listed set protects a new field by default,
+        # and a test requires every `Finding` field to be classified.
+        for name in INTERNAL_ONLY_FIELDS:
+            item.pop(name, None)
         try:
             f = Finding.model_validate(item)
             # Drop self-refuting findings whose own narrative concludes the
@@ -135,41 +142,6 @@ def _parse_and_validate(
                     file=sys.stderr,
                 )
                 continue
-            # Strip out_of_diff: it is set internally by apply_diff_scope, not
-            # by agents.  An injected "out_of_diff": true in agent JSON would
-            # otherwise suppress the finding from CHANGES_REQUESTED evaluation.
-            if f.out_of_diff:
-                f = f.model_copy(update={"out_of_diff": False})
-            # Strip demoted_to_body: it is set internally by
-            # judge._apply_verdicts, not by agents.  An injected
-            # "demoted_to_body": true in agent JSON would otherwise let a
-            # prompt-injected or malicious agent force its own finding out of
-            # inline PR visibility into the collapsed review-body section --
-            # the same suppression-bypass class the out_of_diff strip above
-            # defends against, for demoted_to_body's twin field.
-            if f.demoted_to_body:
-                f = f.model_copy(update={"demoted_to_body": False})
-            # Strip corroborated/judge_verdict: both are set internally
-            # (provenance.py's _collapse_cluster and judge._apply_verdicts,
-            # respectively), not by agents. An injected "corroborated": true
-            # would otherwise grant the confidence boost real corroboration
-            # earns; an injected "judge_verdict" would fake having already
-            # passed judge review. Same class of injected-internal-state
-            # bug as out_of_diff/demoted_to_body above.
-            if f.corroborated:
-                f = f.model_copy(update={"corroborated": False})
-            if f.judge_verdict is not None:
-                f = f.model_copy(update={"judge_verdict": None})
-            # Strip style_only: only an analyzer sets it. An injected true value
-            # would keep a security finding out of the cluster of the finding
-            # that corroborates it (#1074).
-            if f.style_only:
-                f = f.model_copy(update={"style_only": False})
-            # Strip rolled_up: only scope.rollup_repeated_findings sets it. An
-            # injected true value would skip the fuzzy dismissal match and bring
-            # back a finding that a maintainer dismissed (#1085).
-            if f.rolled_up:
-                f = f.model_copy(update={"rolled_up": False})
             results.append(f)
         except Exception as exc:  # noqa: BLE001
             print(f"WARNING: {agent_name} dropped malformed finding: {exc}", file=sys.stderr)
