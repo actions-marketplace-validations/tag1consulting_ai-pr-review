@@ -225,6 +225,166 @@ def test_skip_path_no_agent_dispatch(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Provider "prompt too long" rejection at run time (#1056)
+# ---------------------------------------------------------------------------
+
+
+def _spec(name: str) -> AgentSpec:
+    return AgentSpec(
+        name=name,
+        prompt_path=f"prompts/{name}.md",
+        tier=1,
+        conditional_trigger=None,
+        max_output_tokens=4096,
+        full_mode_only=False,
+        context_enrichment_eligible=False,
+    )
+
+
+def _prompt_too_long_ctx(tmp_path: Path) -> DispatchContext:
+    ctx = _make_dispatch_context(tmp_path, "diff text")
+    prompts = tmp_path / "prompts"
+    prompts.mkdir(exist_ok=True)
+    for fragment in ("_governance", "_knowledge-cutoff", "_trailer-findings", "suggestion-addendum"):
+        (prompts / f"{fragment}.md").write_text("fragment\n")
+    for name in ("code-reviewer", "blind-hunter"):
+        (prompts / f"{name}.md").write_text(f"## {name} prompt\n")
+    return ctx
+
+
+def test_all_agents_prompt_too_long_takes_the_skip_path(tmp_path: Path) -> None:
+    provider = _FakeProvider()
+    ctx = _prompt_too_long_ctx(tmp_path)
+    analyzer_finding = Finding(
+        severity="Medium", confidence=90, finding="lint issue",
+        source="ruff", file="app.py", line=1,
+    )
+
+    async def _llm(_req: LLMRequest) -> LLMResponse:
+        raise SystemExit(4)
+
+    async def _run() -> None:
+        result = await run_review(
+            diff=DiffContext(diff_text="--- a/app.py\n+++ b/app.py\n", head_sha="abc1234567"),
+            summary_text="## Summary",
+            agents=[_spec("code-reviewer"), _spec("blind-hunter")],
+            llm_call=_llm,
+            dispatch_context=ctx,
+            provider=provider,
+            config=OrchestrationConfig(extra_findings=(analyzer_finding,)),
+        )
+        assert result.skipped is True
+        assert result.context_window_rejected is True
+        assert result.ok is True
+        assert len(provider.skip_calls) == 1
+        reason = provider.skip_calls[0]
+        assert "provider rejected the prompt as too long" in reason
+        assert "code-reviewer" in reason and "blind-hunter" in reason
+        assert "claude-sonnet-4-6" in reason
+        assert "AI_EXCLUDE_PATTERNS" in reason
+        assert "pre-flight" not in reason.lower()
+        # Analyzer findings still reach the skip comment.
+        assert [f.finding for f in provider.skip_findings_calls[0]] == ["lint issue"]
+        # Nothing else is posted and the watermark does not move.
+        assert provider.summary_calls == []
+        assert provider.findings_calls == []
+        assert provider.stale_calls == 0
+        assert "advance_sha_watermark" not in provider.last_call_order
+        assert [f.name for f in result.failed_agents] == ["code-reviewer", "blind-hunter"]
+        # No LLM agent reviewed the PR, so the outcome is incomplete and not
+        # approvable. AI_FAIL_ON_FINDINGS then exits 2, as the failed run did
+        # before this skip path existed.
+        assert result.outcome.incomplete is True
+        assert result.outcome.may_approve is False
+
+    anyio.run(_run)
+
+
+def test_all_agents_prompt_too_long_incremental_run_keeps_watermark(tmp_path: Path) -> None:
+    provider = _FakeProvider()
+    ctx = _prompt_too_long_ctx(tmp_path)
+
+    async def _llm(_req: LLMRequest) -> LLMResponse:
+        raise SystemExit(4)
+
+    async def _run() -> None:
+        result = await run_review(
+            diff=DiffContext(diff_text="diff text", head_sha="abc1234567"),
+            summary_text="",  # incremental run
+            agents=[_spec("code-reviewer")],
+            llm_call=_llm,
+            dispatch_context=ctx,
+            provider=provider,
+        )
+        assert result.context_window_rejected is True
+        assert provider.last_watermark_sha == ""
+        assert "advance_sha_watermark" not in provider.last_call_order
+
+    anyio.run(_run)
+
+
+def test_some_agents_prompt_too_long_continues_and_names_the_cause(tmp_path: Path) -> None:
+    provider = _FakeProvider()
+    ctx = _prompt_too_long_ctx(tmp_path)
+
+    async def _llm(req: LLMRequest) -> LLMResponse:
+        if "blind-hunter" in req.system_prompt:
+            raise SystemExit(4)
+        return LLMResponse(
+            text="```json-findings\n[]\n```", input_tokens=10, output_tokens=20,
+            stop_reason="end_turn",
+        )
+
+    async def _run() -> None:
+        result = await run_review(
+            diff=DiffContext(diff_text="diff text", head_sha="abc1234567"),
+            summary_text="## Summary",
+            agents=[_spec("code-reviewer"), _spec("blind-hunter")],
+            llm_call=_llm,
+            dispatch_context=ctx,
+            provider=provider,
+        )
+        assert result.skipped is False
+        assert result.context_window_rejected is False
+        assert provider.skip_calls == []
+        assert provider.last_call_order[:2] == ["post_summary", "post_findings"]
+        assert provider.findings_calls[0]["failed_agents"] == [
+            "blind-hunter (prompt too long for the model)"
+        ]
+        assert result.outcome.event == "COMMENT"  # a failed agent never approves
+
+    anyio.run(_run)
+
+
+def test_mixed_failure_causes_do_not_take_the_skip_path(tmp_path: Path) -> None:
+    """Only when every failure is a prompt-too-long rejection does the run skip."""
+    provider = _FakeProvider()
+    ctx = _prompt_too_long_ctx(tmp_path)
+
+    async def _llm(req: LLMRequest) -> LLMResponse:
+        raise SystemExit(4 if "blind-hunter" in req.system_prompt else 1)
+
+    async def _run() -> None:
+        result = await run_review(
+            diff=DiffContext(diff_text="diff text", head_sha="abc1234567"),
+            summary_text="## Summary",
+            agents=[_spec("code-reviewer"), _spec("blind-hunter")],
+            llm_call=_llm,
+            dispatch_context=ctx,
+            provider=provider,
+        )
+        assert result.skipped is False
+        assert result.context_window_rejected is False
+        assert provider.skip_calls == []
+        assert sorted(provider.findings_calls[0]["failed_agents"]) == [
+            "blind-hunter (prompt too long for the model)",
+            "code-reviewer",
+        ]
+
+    anyio.run(_run)
+
+
+# ---------------------------------------------------------------------------
 # Happy path with no agents, no findings
 # ---------------------------------------------------------------------------
 
@@ -1095,6 +1255,7 @@ def test_orchestrate_judge_on_downranks_weak_finding(tmp_path: Path) -> None:
         "confidence": 90,
         "file": "db.py",
         "line": 42,
+        "category": "injection",
         "finding": "SQL injection via f-string",
         "remediation": "Use parameterized queries",
         # source intentionally omitted; extract_findings stamps "code-reviewer"
@@ -1131,6 +1292,7 @@ def test_orchestrate_judge_on_downranks_weak_finding(tmp_path: Path) -> None:
         finding="SQL injection via f-string",
         source="semgrep",
         sources=["semgrep"],
+        category="injection",
         corroborated=False,
     )
 

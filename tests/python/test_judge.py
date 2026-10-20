@@ -230,6 +230,34 @@ async def test_judge_corroborated_exempt(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_judge_fail_soft_when_the_prompt_is_too_long(tmp_path: Path) -> None:
+    """call_llm exit code 4 (#1056) is soft. The findings stay unchanged."""
+    prompt = tmp_path / "finding-judge.md"
+    prompt.write_text("You are a finding-quality judge.")
+
+    f = _finding(confidence=80)
+    call = AsyncMock(side_effect=SystemExit(4))
+
+    result = await judge_findings([f], llm_call=call, model="claude-test", prompt_path=prompt)
+    assert len(result.findings) == 1
+    assert result.findings[0].confidence == 80
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("code", [1, 2, 3])
+async def test_judge_still_stops_the_run_on_other_llm_exit_codes(
+    tmp_path: Path, code: int
+) -> None:
+    prompt = tmp_path / "finding-judge.md"
+    prompt.write_text("You are a finding-quality judge.")
+
+    call = AsyncMock(side_effect=SystemExit(code))
+    with pytest.raises(SystemExit) as excinfo:
+        await judge_findings([_finding(confidence=80)], llm_call=call, model="claude-test", prompt_path=prompt)
+    assert excinfo.value.code == code
+
+
+@pytest.mark.anyio
 async def test_judge_fail_soft_on_llm_error(tmp_path: Path) -> None:
     prompt = tmp_path / "finding-judge.md"
     prompt.write_text("You are a finding-quality judge.")

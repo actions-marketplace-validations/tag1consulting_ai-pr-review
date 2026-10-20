@@ -52,6 +52,8 @@ Single-line replacement (line 42 of `cmd/server.go`):
   "file": "cmd/server.go",
   "line": 42,
   "finding": "Error return from os.Open is discarded",
+  "impact": "A missing file crashes the handler with a nil pointer instead of returning an error",
+  "trigger": "A request for a path that does not exist",
   "remediation": "Check the error return value and handle it before using the file handle",
   "suggested_code": "    f, err := os.Open(path)"
 }

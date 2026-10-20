@@ -9,8 +9,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from ai_pr_review.analyzers.native.eslint import (
+    _eslint_finding,
     _find_eslint_bin,
     _has_eslint_config,
+    _is_style_rule,
     _run_eslint,
 )
 from ai_pr_review.manifest import ChangedFiles
@@ -379,3 +381,30 @@ class TestBridgeIntegration:
             await run_analyzers(ChangedFiles(), "/dev/null")
 
         assert not called
+
+
+class TestStyleOnly:
+    """eslint uses the category lint for every rule. The style flag is per rule (#1074)."""
+
+    @pytest.mark.parametrize(
+        "rule",
+        ["indent", "semi", "quotes", "comma-dangle", "no-trailing-spaces", "max-len", "eol-last",
+         "@stylistic/indent", "@stylistic/js/semi", "prettier/prettier"],
+    )
+    def test_formatting_rules_are_style(self, rule: str) -> None:
+        assert _is_style_rule(rule) is True
+
+    @pytest.mark.parametrize(
+        "rule",
+        ["no-eval", "no-undef", "no-unused-vars", "eqeqeq", "no-implied-eval", "security/detect-eval-with-expression",
+         "no-unsanitized/method", "react/no-danger", "@next/next/no-script-url", "prefer-const", ""],
+    )
+    def test_defect_rules_are_not_style(self, rule: str) -> None:
+        assert _is_style_rule(rule) is False
+
+    def test_the_finding_carries_the_flag(self) -> None:
+        style = _eslint_finding(("a.js", {"ruleId": "indent", "message": "bad indent", "severity": 2, "line": 3}))
+        defect = _eslint_finding(("a.js", {"ruleId": "no-eval", "message": "eval", "severity": 2, "line": 4}))
+        assert style is not None and defect is not None
+        assert (style.style_only, defect.style_only) == (True, False)
+        assert style.category == defect.category == "lint"

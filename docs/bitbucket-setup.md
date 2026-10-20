@@ -30,7 +30,7 @@ Each finding category maps to one of the three `annotation_type` values of Code 
 
 | `annotation_type` | Categories |
 |---|---|
-| `VULNERABILITY` | `authz`, `injection`, `secret`, `dependency-cve` |
+| `VULNERABILITY` | `authz`, `injection`, `secret`, `crypto`, `dependency-cve` |
 | `BUG` | `edge-case`, `test-gap` |
 | `CODE_SMELL` | `architecture-coupling`, `observability`, `docs`, `lint`, `other` |
 
@@ -94,11 +94,13 @@ The review never ignores a command silently.
 
 **Finding numbers stay stable across runs.** Bitbucket keeps one summary comment and rewrites it on each run, so the hidden id-map marker is the only record of finding numbers. The review keeps the entries of earlier runs in that marker. A finding that an incremental run does not report again keeps its `F<n>`, so a waiting command can still name it. A run with no findings does not restart the numbering at F1. A finding that returns after a run without it keeps its number and does not get the "new" badge. The earlier entries have a size budget of 4,000 bytes of JSON (about 5.4 KB in the comment). If the budget is full, the lowest numbers go first and the highest number always stays. If the summary comment is too large, the review keeps fewer earlier entries and writes a WARNING to the job log.
 
+**Feedback command (issue #933):** `/ai-pr-review feedback [F<n>] <text>` saves free-form feedback to the learning-loop store, with no change to any finding. It uses the same authorization as the verdict commands and the same polling. The text is required, and a bare command gets a usage reply. The text passes the same sanitization as on GitHub before it reaches later review prompts. It needs both `AI_FEEDBACK_LOOP=true` and `AI_BITBUCKET_VERDICTS=true`. Without the learning loop, the bot replies that it saved nothing. Text that looks like a secret, such as a token, is removed. The command then gets the usage reply and nothing is saved.
+
 **Learning loop (issue #906):** A `false-positive` or `wont-fix` verdict (including the `dismiss` alias) also writes to the cross-repo learning-loop store. A `fixed` verdict is never saved, on either provider. The store supplies the `<repo-feedback>` context that the review injects into future review prompts. This works the same way as a GitHub dismiss. It needs both `AI_FEEDBACK_LOOP=true` and `AI_BITBUCKET_VERDICTS=true`. See [Learning loop → Required setup](learning-loop#required-setup) for the full checklist. The checklist includes the **Repository:Write** token scope. This is a step up from the Repository:Read and Pull request:Write scopes that the base setup needs. See the security note under [Grant PR scopes](#3-grant-pr-scopes) below. If the token does not have that scope, or the write fails for any other reason, the review still suppresses the finding on this PR. The reply of the bot then says that it did **not** save the entry and that future reviews will not learn from it. If `AI_FEEDBACK_LOOP` is off, the reply says that instead. A missing scope produces exactly one "not saved" reply for each verdict (issue #941). The reply does not repeat on later pipeline runs. After you add the scope, the next review run saves the same verdict automatically. You do not need to post the command again.
 
 ## What does not work on Bitbucket
 
-- Slash commands other than dismiss, false-positive, wont-fix, and fixed (`explain`, `revise`, `feedback`, `rescan`, `review-full`, `skip`): Bitbucket Pipelines has no `issue_comment` equivalent, so these commands have no trigger. Only the verdict commands work, and only because the review run polls for them (see [Dismissing findings](#dismissing-findings) above). The review does not react when the comment is posted.
+- Slash commands other than dismiss, false-positive, wont-fix, fixed, and feedback (`explain`, `revise`, `rescan`, `review-full`, `skip`): Bitbucket Pipelines has no `issue_comment` equivalent, so these commands have no trigger. Only the verdict commands work, and only because the review run polls for them (see [Dismissing findings](#dismissing-findings) above). The review does not react when the comment is posted.
 - Collapsed and expandable sections: the PR-summary Walkthrough and the token-usage table (under `token-usage-display: full`) render as flat, always-expanded content on Bitbucket. Bitbucket Cloud renders no HTML in comments, so `<details>` is not an option (see [BCLOUD-20231](https://jira.atlassian.com/browse/BCLOUD-20231)). The default `token-usage-display: compact` is one plain line, so this matters only if you choose `full`.
 
 ## One-time setup
@@ -117,13 +119,13 @@ In your Bitbucket repo, go to **Repository settings → Pipelines → Repository
 | `BITBUCKET_API_TOKEN` | Yes | The API token from step 1 |
 | `ANTHROPIC_API_KEY` | Yes | Your Anthropic API key (or swap for your provider) |
 | `AI_PROVIDER` | No | `anthropic` (default). Alternatives: `openai`, `google`, `bedrock-proxy` |
-| `AI_REVIEW_MODE` | No | Empty (default): defer to `.github/ai-pr-review/policy.yml` route matching if present, else `quick`. Set to `full` to override. |
+| `AI_REVIEW_MODE` | No | Empty (default): defer to `.ai-pr-review/policy.yml` route matching if present, else `quick`. Set to `full` to override. |
 | `AI_FAIL_ON_FINDINGS` | No | `true` (default, see the starter pipeline). Exit code 2 when Critical/High findings block approval, failing the pipeline step. Set to `false` to always exit 0. |
 | `AI_REVIEW_IMAGE_TAG` | No | Container tag to pull, for example `latest`. Required, no default. The `image.name` field of the starter pipeline uses this variable through the Bitbucket `${{VAR}}` syntax. That syntax cannot resolve a secured variable at all, so this variable must stay non-secured. |
-| `AI_BITBUCKET_VERDICTS` | No | `false` (default). Set to `true` to enable dismiss/false-positive/wont-fix/fixed comment commands. See [Dismissing findings](#dismissing-findings). |
+| `AI_BITBUCKET_VERDICTS` | No | `false` (default). Set to `true` to enable the `dismiss`, `false-positive`, `wont-fix`, `fixed`, and `feedback` comment commands. See [Dismissing findings](#dismissing-findings). |
 | `AI_BITBUCKET_VERDICT_MIN_ROLE` | No | `write` (default). Minimum Bitbucket repository permission (`read`, `write`, or `admin`) required to apply a verdict command through the permission lookup. With `admin`, the owners file `.bitbucket/CODEOWNERS` is not used. It has an effect only when `AI_BITBUCKET_VERDICTS=true`. |
 | `AI_BITBUCKET_REVIEW_STATE` | No | `true` (default). Set to `false` to stop the bot from calling the approve and request-changes endpoints of Bitbucket. The decided outcome still renders as heading text in the summary comment in both cases. |
-| `AI_FEEDBACK_LOOP` | No | `false` (default). Set to `true` to save `false-positive` and `wont-fix` verdicts to the cross-repo learning-loop store. See [Dismissing findings → Learning loop](#dismissing-findings). It also needs `AI_BITBUCKET_VERDICTS=true` and the **Repository:Write** scope below. |
+| `AI_FEEDBACK_LOOP` | No | `false` (default). Set to `true` to save `false-positive`, `wont-fix`, and `feedback` entries to the cross-repo learning-loop store. See [Dismissing findings → Learning loop](#dismissing-findings). It also needs `AI_BITBUCKET_VERDICTS=true` and the **Repository:Write** scope below. |
 | `AI_FEEDBACK_BRANCH` | No | `ai-pr-review-bot` (default). Branch that holds the JSONL file of the learning-loop store. GitHub reads the same variable. |
 
 ### 3. Grant PR scopes

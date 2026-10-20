@@ -9,6 +9,7 @@ from ai_pr_review.findings.models import Finding
 from ai_pr_review.findings.scope import (
     _ANALYZER_PREFIXES,
     ROLLUP_THRESHOLD,
+    SEMGREP_ROLLUP_THRESHOLD,
     _is_analyzer,
     apply_diff_scope,
     rollup_repeated_findings,
@@ -440,10 +441,260 @@ def test_rollup_unions_also_reported_notes_of_all_occurrences() -> None:
     assert result[0].also_reported == [f"phpstan (line {11 + i * 20}): msg{i}" for i in range(4)]
 
 
-def test_combine_also_reported_caps_and_recounts_overflow() -> None:
+def test_rollup_with_eight_notes_renders_five_plus_overflow_line() -> None:
+    """#1047: storage keeps all notes, the display cap applies at render time."""
+    from ai_pr_review.findings.scope import rollup_repeated_findings
+    from ai_pr_review.vcs._body import also_reported_notes
+
+    findings = [
+        Finding(
+            severity="High",
+            confidence=90,
+            finding="Same sniff",
+            source="phpcs",
+            file="a.php",
+            line=10 + i * 20,
+            category="lint",
+            also_reported=[f"phpstan (line {11 + i * 20}): msg{i}", f"psalm (line {12 + i * 20}): p{i}"],
+        )
+        for i in range(4)
+    ]
+    result = rollup_repeated_findings(findings, threshold=3)
+    assert len(result) == 1
+    assert len(result[0].also_reported) == 8
+    shown = also_reported_notes(result[0])
+    assert len(shown) == 6
+    assert shown[:5] == result[0].also_reported[:5]
+    assert shown[5] == "(+3 more from other analyzers)"
+
+
+def _finding_with_notes(n: int) -> Finding:
+    return Finding(
+        severity="High", confidence=90, finding="Same sniff", source="phpcs",
+        file="a.php", line=10, category="lint",
+        also_reported=[f"phpstan: m{i}" for i in range(n)],
+    )
+
+
+@pytest.mark.parametrize(
+    ("count", "overflow"), [(1, None), (4, None), (5, None), (6, "(+1 more from other analyzers)")]
+)
+def test_also_reported_display_cap_boundary(count: int, overflow: str | None) -> None:
+    """The display cap is 5 notes. The overflow line appears only past it."""
+    from ai_pr_review.vcs._body import also_reported_notes
+
+    shown = also_reported_notes(_finding_with_notes(count))
+    assert shown[:min(count, 5)] == [f"phpstan: m{i}" for i in range(min(count, 5))]
+    if overflow is None:
+        assert len(shown) == count
+    else:
+        assert len(shown) == 6
+        assert shown[-1] == overflow
+
+
+def test_also_reported_storage_bound_boundary() -> None:
+    """100 notes fit. The 101st is cut and the render says "or more"."""
+    from ai_pr_review.findings.models import (
+        ALSO_REPORTED_TRUNCATED_NOTE,
+        MAX_ALSO_REPORTED_STORED,
+        combine_also_reported,
+    )
+    from ai_pr_review.vcs._body import also_reported_notes
+
+    exact = combine_also_reported([[f"n{i}" for i in range(MAX_ALSO_REPORTED_STORED)]])
+    assert len(exact) == MAX_ALSO_REPORTED_STORED
+    assert ALSO_REPORTED_TRUNCATED_NOTE not in exact
+    shown_exact = also_reported_notes(_finding_with_notes(0).model_copy(update={"also_reported": exact}))
+    assert shown_exact[-1] == f"(+{MAX_ALSO_REPORTED_STORED - 5} more from other analyzers)"
+
+    over = combine_also_reported([[f"n{i}" for i in range(MAX_ALSO_REPORTED_STORED + 1)]])
+    assert len(over) == MAX_ALSO_REPORTED_STORED + 1
+    assert over[-1] == ALSO_REPORTED_TRUNCATED_NOTE
+    shown_over = also_reported_notes(_finding_with_notes(0).model_copy(update={"also_reported": over}))
+    assert shown_over[-1] == f"(+{MAX_ALSO_REPORTED_STORED - 5} or more from other analyzers)"
+
+
+def test_combine_also_reported_drops_old_markers_and_keeps_order() -> None:
     from ai_pr_review.findings.models import combine_also_reported
 
     notes = combine_also_reported([[f"n{i}" for i in range(4)], ["n3", "(+9 more from other analyzers)", "n4", "n5", "n6"]])
-    assert notes[:5] == ["n0", "n1", "n2", "n3", "n4"]
-    assert notes[5] == "(+2 more from other analyzers)"
+    assert notes == ["n0", "n1", "n2", "n3", "n4", "n5", "n6"]
 
+
+def test_combine_also_reported_storage_bound_keeps_first_and_marks_truncation() -> None:
+    from ai_pr_review.findings.models import (
+        ALSO_REPORTED_TRUNCATED_NOTE,
+        MAX_ALSO_REPORTED_STORED,
+        combine_also_reported,
+    )
+
+    notes = combine_also_reported([[f"n{i}" for i in range(MAX_ALSO_REPORTED_STORED + 20)]])
+    assert len(notes) == MAX_ALSO_REPORTED_STORED + 1
+    assert notes[0] == "n0"
+    assert notes[MAX_ALSO_REPORTED_STORED - 1] == f"n{MAX_ALSO_REPORTED_STORED - 1}"
+    assert notes[-1] == ALSO_REPORTED_TRUNCATED_NOTE
+    # The flag survives a second combine and no second marker appears.
+    again = combine_also_reported([notes, ["extra"]])
+    assert again.count(ALSO_REPORTED_TRUNCATED_NOTE) == 1
+    assert len(again) == MAX_ALSO_REPORTED_STORED + 1
+
+
+def test_also_reported_display_says_or_more_past_storage_bound() -> None:
+    from ai_pr_review.findings.models import MAX_ALSO_REPORTED_STORED, combine_also_reported
+    from ai_pr_review.vcs._body import also_reported_notes
+
+    f = Finding(
+        severity="High", confidence=90, finding="x", source="phpcs", file="a.php", line=1, category="lint",
+        also_reported=combine_also_reported([[f"n{i}" for i in range(MAX_ALSO_REPORTED_STORED + 5)]]),
+    )
+    shown = also_reported_notes(f)
+    assert len(shown) == 6
+    assert shown[-1] == f"(+{MAX_ALSO_REPORTED_STORED - 5} or more from other analyzers)"
+
+
+# rollup_repeated_findings: semgrep rules (#1081)
+
+_SQL_RULE = "python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query"
+
+
+def _semgrep(
+    line: int,
+    rule: str = _SQL_RULE,
+    message: str = "Avoiding SQL string concatenation",
+    file: str = "api/user.py",
+    **kw: object,
+) -> Finding:
+    fields: dict[str, object] = {
+        "severity": "High",
+        "confidence": 90,
+        "finding": f"{rule}: {message}",
+        "source": "semgrep",
+        "file": file,
+        "line": line,
+    }
+    return Finding.model_validate(fields | kw)
+
+
+def test_semgrep_rule_rolls_up_at_two_occurrences() -> None:
+    assert SEMGREP_ROLLUP_THRESHOLD == 1
+    result = rollup_repeated_findings([_semgrep(31), _semgrep(65)])
+    assert len(result) == 1
+    assert "(2 occurrences in api/user.py, lines: 31, 65)" in result[0].finding
+
+
+def test_semgrep_single_hit_is_not_rolled_up() -> None:
+    findings = [_semgrep(31)]
+    assert rollup_repeated_findings(findings) == findings
+
+
+def test_semgrep_pr70_sql_hits_become_one_finding_at_first_line() -> None:
+    """PR #70: the same rule fired at lines 31, 65, 93 and 101 of api/user.py,
+    each with a message that names the site, so the text key never matched."""
+    findings = [
+        _semgrep(31, message="query built from search term"),
+        _semgrep(65, message="query built from user id"),
+        _semgrep(93, message="query built from new_email"),
+        _semgrep(101, message="query built from user id"),
+    ]
+    result = rollup_repeated_findings(findings)
+    assert len(result) == 1
+    assert result[0].line == 31
+    assert "(4 occurrences in api/user.py, lines: 31, 65, 93, 101)" in result[0].finding
+
+
+def test_semgrep_different_rules_and_files_stay_apart() -> None:
+    other_rule = "python.lang.security.audit.subprocess-shell-true.subprocess-shell-true"
+    result = rollup_repeated_findings(
+        [
+            _semgrep(31),
+            _semgrep(65),
+            _semgrep(37, rule=other_rule),
+            _semgrep(40, rule=other_rule),
+            _semgrep(5, file="api/other.py"),
+            _semgrep(9, file="api/other.py"),
+        ]
+    )
+    assert len(result) == 3
+    assert sorted(f.file for f in result) == ["api/other.py", "api/user.py", "api/user.py"]
+
+
+def test_semgrep_rule_id_is_case_insensitive_and_severity_still_splits() -> None:
+    result = rollup_repeated_findings(
+        [_semgrep(1), _semgrep(2, rule=_SQL_RULE.upper()), _semgrep(3, severity="Medium")]
+    )
+    assert len(result) == 2
+
+
+def test_semgrep_corroborated_finding_is_left_out_of_the_rollup() -> None:
+    corroborated = _semgrep(
+        31, corroborated=True, sources=["code-reviewer", "semgrep"], confidence=100
+    )
+    result = rollup_repeated_findings([corroborated, _semgrep(65), _semgrep(93)])
+    assert corroborated in result
+    assert len(result) == 2
+    rolled = next(f for f in result if f is not corroborated)
+    assert "(2 occurrences in api/user.py, lines: 65, 93)" in rolled.finding
+
+
+def test_semgrep_finding_with_only_the_corroborated_flag_is_left_out_of_the_rollup() -> None:
+    """The flag guards on its own, even when the sources list shows a single tool."""
+    flagged = _semgrep(31, corroborated=True)
+    result = rollup_repeated_findings([flagged, _semgrep(65), _semgrep(93)])
+    assert flagged in result and len(result) == 2
+
+
+def test_semgrep_multi_source_finding_is_left_out_of_the_rollup() -> None:
+    merged = _semgrep(31, sources=["ruff", "semgrep"])
+    result = rollup_repeated_findings([merged, _semgrep(65)])
+    assert len(result) == 2
+
+
+def test_semgrep_text_without_rule_prefix_uses_the_text_key() -> None:
+    free = [
+        Finding(
+            severity="High", confidence=90, finding="no rule prefix here", source="semgrep",
+            file="api/user.py", line=i,
+        )
+        for i in (1, 2)
+    ]
+    assert len(rollup_repeated_findings(free)) == 2
+
+
+def test_semgrep_rollup_keeps_input_order_and_first_slot() -> None:
+    first = _agent("api/user.py", 1, text="agent first")
+    last = _agent("api/user.py", 200, text="agent last")
+    result = rollup_repeated_findings([first, _semgrep(31), _phpcs("x.php", 3), _semgrep(65), last])
+    assert [f.source for f in result] == ["code-reviewer", "semgrep", "phpcs", "code-reviewer"]
+
+
+def test_semgrep_rollup_keeps_impact_and_trigger_empty() -> None:
+    """Agents set impact and trigger. Analyzer groups have none to reconcile."""
+    result = rollup_repeated_findings([_semgrep(31), _semgrep(65)])
+    assert result[0].impact == ""
+    assert result[0].trigger == ""
+
+
+def test_non_semgrep_analyzer_still_needs_more_than_the_global_threshold() -> None:
+    assert len(rollup_repeated_findings(_make_repeated(2))) == 2
+    assert len(rollup_repeated_findings(_make_repeated(ROLLUP_THRESHOLD + 1))) == 1
+
+
+def test_a_group_of_the_same_message_is_marked_as_a_message_rollup() -> None:
+    group = [
+        Finding(severity="Low", confidence=90, finding="Missing doc comment", source="phpcs",
+                file="a.php", line=n, category="lint")
+        for n in range(1, 8)
+    ]
+    (rolled,) = rollup_repeated_findings(group)
+    assert "occurrences" in rolled.finding
+    assert rolled.rollup_kind == "message"
+
+
+def test_a_message_that_starts_with_rule_colon_is_still_a_message_rollup() -> None:
+    group = [
+        Finding(severity="Low", confidence=90, finding="Rule: no-unused-vars", source="phpstan",
+                file="a.php", line=n, category="lint")
+        for n in range(1, 8)
+    ]
+    (rolled,) = rollup_repeated_findings(group)
+    assert rolled.rollup_kind == "message"

@@ -12,7 +12,7 @@ On every PR push, this action:
 1. Computes the diff (full on the first run, incremental on later pushes)
 2. Detects languages from changed file extensions
 3. Runs a roster of AI review agents against the diff
-4. Runs deterministic checks on changed files: shellcheck, CVE lookups ([OSV.dev](https://osv.dev/)), semgrep SAST, trufflehog secret scanning, ruff (Python), golangci-lint (Go), hadolint (Dockerfiles), checkov (Terraform/K8s/IaC), phpcs (PHP/Drupal), eslint (JS/TS), dep-exists (new dependencies that no public registry knows), phpstan (PHP static analysis), kube-linter (Kubernetes), tflint (Terraform), and three documentation checks (docs-api-check, docs-ref-check, docs-drift-check). See [Static Analyzers](static-analyzers)
+4. Runs deterministic checks on changed files: shellcheck, CVE lookups ([OSV.dev](https://osv.dev/)), semgrep SAST, trufflehog secret scanning, ruff (Python), golangci-lint (Go), hadolint (Dockerfiles), checkov (Terraform/K8s/IaC), phpcs (PHP/Drupal), eslint (JS/TS), dep-exists (new dependencies that no public registry knows), phpstan (PHP static analysis), kube-linter (Kubernetes), tflint (Terraform), suppression-check (comments that turn off a security rule), and three documentation checks (docs-api-check, docs-ref-check, docs-drift-check). See [Static Analyzers](static-analyzers)
 5. Posts a summary comment (first run only) and a review with inline findings
 6. Auto-resolves stale bot threads and dismisses superseded reviews
 
@@ -59,20 +59,20 @@ You can set these in three places. The list shows them in precedence order (high
        # exclude-agents: 'edge-case-hunter,adversarial-general'  # or: run everything except these two
    ```
 
-3. **`.github/ai-pr-review/policy.yml`**: the `agents` and `exclude-agents` fields of a named policy. The action routes by changed-file path, base branch, or head branch. Different PRs can get different agent rosters without a change to the workflow file. See [Policies](policy) for the full schema.
+3. **`.ai-pr-review/policy.yml`** (the action also reads `.github/ai-pr-review/policy.yml` as a fallback): the `agents` and `exclude-agents` fields of a named policy. The action routes by changed-file path, base branch, or head branch. Different PRs can get different agent rosters without a change to the workflow file. See [Policies](policy) for the full schema.
 
 An explicit action input or repo variable always wins over a `policy.yml` route match. A route match wins over the engine default (all eligible agents run). The same three-place precedence applies to the `analyzers`/`exclude-analyzers` allowlist and denylist for static analyzers. See [Static Analyzers → Controlling which analyzers run](static-analyzers#controlling-which-analyzers-run).
 
 ## Severity icons
 
-Findings use color-distinct icons:
+Findings use icons with distinct shapes:
 
 | Icon | Severity | Review action |
 |------|----------|---------------|
-| 🚨 | Critical | REQUEST_CHANGES |
-| 🔴 | High | REQUEST_CHANGES |
-| 🟡 | Medium | APPROVE (informational) |
-| 🔵 | Low | APPROVE (informational) |
+| ⛔ | Critical | REQUEST_CHANGES |
+| 🚨 | High | REQUEST_CHANGES |
+| 🔶 | Medium | APPROVE (informational) |
+| 💬 | Low | APPROVE (informational) |
 
 ## Review modes
 
@@ -82,11 +82,11 @@ Findings use color-distinct icons:
 - Adding the `ai-review-full` label to the PR
 - Using `workflow_dispatch` with `review_mode: full`
 - Setting the `review-mode` input to `full`
-- Routing by changed-file path, base branch, or head branch via a repo-local `.github/ai-pr-review/policy.yml` (see below)
+- Routing by changed-file path, base branch, or head branch via a repo-local `.ai-pr-review/policy.yml` (see below)
 
 ### Routing review depth by branch or path
 
-For anything beyond a single global quick/full choice (for example, near-zero-cost review for content-only PRs, one full smoke-test review when features land on a staging branch, and quick review on other feature branches), add `.github/ai-pr-review/policy.yml` to your repo. See **[Policies](policy)** for the full schema, the precedence chain (an explicit `ai-review-full` label or `review-mode` input always wins over policy routing), and worked examples that include a release-branch escalation.
+For anything beyond a single global quick/full choice (for example, near-zero-cost review for content-only PRs, one full smoke-test review when features land on a staging branch, and quick review on other feature branches), add `.ai-pr-review/policy.yml` to your repo. See **[Policies](policy)** for the full schema, the precedence chain (an explicit `ai-review-full` label or `review-mode` input always wins over policy routing), and worked examples that include a release-branch escalation.
 
 The `ai-review-full` label and `review_mode` input of `workflow_dispatch` are the way to force a one-time full review, whatever the policy file says.
 

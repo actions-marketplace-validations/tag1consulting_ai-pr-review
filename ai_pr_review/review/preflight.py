@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import anyio
 
+from ai_pr_review.llm.client import EXIT_PROMPT_TOO_LONG
 from ai_pr_review.vcs._body import sanitize_display_text
 
 if TYPE_CHECKING:
@@ -23,6 +24,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _SUMMARIZER_FAILURE_NOTICE = "> ⚠️ PR summary generation failed — see CI logs.\n\n"
+
+
+def _reraise_unless_prompt_too_long(exc: BaseException) -> None:
+    """Re-raise a `SystemExit` from `call_llm` unless it is exit code 4.
+
+    Exit code 4 means the provider rejected the prompt as too long (#1056). A
+    pre-flight agent treats that as soft. The agents of the main review then
+    meet the same rejection and the review takes the skip path. Every other
+    `SystemExit` (bad key, retries exhausted, content filter) keeps its old
+    effect and stops the run.
+    """
+    if isinstance(exc, SystemExit) and exc.code != EXIT_PROMPT_TOO_LONG:
+        raise exc
+
 
 
 def should_run_summarizer(
@@ -118,6 +133,10 @@ async def run_summarizer(
     omitting the summary.  except Exception is intentional: the fail-soft contract
     requires that any unexpected error (KeyError, TypeError, etc.) in the prompt
     assembly or parse path skips the summary rather than aborting the whole review.
+    One `SystemExit` is soft too: exit code 4 from `call_llm` (the provider
+    rejected the prompt as too long, #1056). The main agents then meet the same
+    rejection and the review takes the skip path. Other `call_llm` exit codes
+    (1 to 3) still stop the run, as before.
     """
     from ai_pr_review.agents.roster import get_agent
     from ai_pr_review.agents.summarizer import (
@@ -194,7 +213,8 @@ async def run_summarizer(
         if collapse_walkthrough:
             return wrap_walkthrough_in_details(text, file_count=len(parsed.walkthrough))
         return text
-    except Exception as exc:
+    except (Exception, SystemExit) as exc:
+        _reraise_unless_prompt_too_long(exc)
         logger.warning(
             "pr-summarizer: failed (review will continue without summary): %s: %s",
             type(exc).__name__, exc, exc_info=True,
@@ -384,7 +404,8 @@ async def run_issue_linker(
         # #886: same rationale as run_summarizer above -- this output is
         # also carried forward verbatim into the posted summary comment.
         return sanitize_display_text(text)
-    except Exception as exc:
+    except (Exception, SystemExit) as exc:
+        _reraise_unless_prompt_too_long(exc)
         logger.warning(
             "issue-linker: failed (review will continue without issue links): %s: %s",
             type(exc).__name__, exc, exc_info=True,

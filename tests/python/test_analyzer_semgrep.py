@@ -205,6 +205,51 @@ class TestRunSemgrepFindings:
         findings = self._run_with_check_id(tmp_path, "python.lang.author-metadata-check")
         assert findings[0].category == "other"
 
+    @pytest.mark.parametrize(
+        "check_id",
+        [
+            "php.lang.security.exec-use.exec-use",
+            "php.lang.security.unserialize-use.unserialize-use",
+            "php.lang.security.system-use.system-use",
+            "php.lang.security.backticks-use.backticks-use",
+            "php.lang.security.eval-use.eval-use",
+        ],
+    )
+    def test_category_maps_php_dangerous_function_rules_to_injection(
+        self, tmp_path: Path, check_id: str
+    ) -> None:
+        """#1074: these PHP rules carry the function name, not the class name.
+        They used to fall through to "other", the category that matches all."""
+        findings = self._run_with_check_id(tmp_path, check_id, {"category": "security"})
+        assert findings[0].category == "injection"
+
+    @pytest.mark.parametrize(
+        "check_id",
+        [
+            "go.lang.security.audit.crypto.use_of_weak_crypto.use-of-md5",
+            "go.lang.security.audit.crypto.math_random.math-random-used",
+            "python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5",
+            "javascript.lang.security.audit.weak-hash.sha1-hash",
+        ],
+    )
+    def test_category_maps_weak_crypto_rules_to_crypto(self, tmp_path: Path, check_id: str) -> None:
+        findings = self._run_with_check_id(tmp_path, check_id, {"category": "security"})
+        assert findings[0].category == "crypto"
+
+    def test_category_md5_needs_whole_token(self, tmp_path: Path) -> None:
+        findings = self._run_with_check_id(tmp_path, "python.lang.md5ification-config")
+        assert findings[0].category == "other"
+
+    def test_finding_text_starts_with_the_rule_id(self, tmp_path: Path) -> None:
+        """findings/scope.py reads the rule id from this prefix to roll up repeated
+        rules (#1081). Change the format and the rollup stops working."""
+        findings = self._run_with_check_id(tmp_path, "python.lang.security.audit.sql-injection")
+        assert findings[0].finding.startswith("python.lang.security.audit.sql-injection: ")
+
+    def test_category_exec_use_needs_whole_token(self, tmp_path: Path) -> None:
+        findings = self._run_with_check_id(tmp_path, "python.lang.flexec-user-config")
+        assert findings[0].category == "other"
+
     def test_category_secretary_does_not_false_positive_as_secret(
         self, tmp_path: Path
     ) -> None:

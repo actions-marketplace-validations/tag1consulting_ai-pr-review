@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ai_pr_review.analyzers.native.ruff import _run_ruff
+from ai_pr_review.analyzers.native.ruff import _is_style_code, _ruff_finding, _run_ruff
 from ai_pr_review.manifest import ChangedFiles
 
 _FIXTURE_DIR = Path(__file__).parent.parent / "fixtures" / "ruff"
@@ -362,3 +362,32 @@ class TestBridgeIntegration:
             await run_analyzers(ChangedFiles(), "/dev/null")
 
         assert not called
+
+
+class TestStyleOnly:
+    """ruff uses the category lint for every rule. The style flag is per rule (#1074)."""
+
+    @pytest.mark.parametrize(
+        "code",
+        ["I001", "N802", "D417", "Q000", "UP031", "COM812", "ISC001", "E101", "E203", "E302", "E501",
+         "W191", "W291", "W293", "C408", "RUF100"],
+    )
+    def test_style_codes(self, code: str) -> None:
+        assert _is_style_code(code) is True
+
+    @pytest.mark.parametrize(
+        "code",
+        ["F821", "F401", "S301", "S608", "S105", "B006", "E711", "E722", "E999", "W605", "C901",
+         "PLR0913", "NPY001", "RUF012", "PT011", "ARG001", "", "123", "lowercase1"],
+    )
+    def test_defect_codes_are_not_style(self, code: str) -> None:
+        # The S security codes are rated Low by the ruff analyzer. They are not style.
+        assert _is_style_code(code) is False
+
+    def test_the_finding_carries_the_flag_and_keeps_its_severity(self) -> None:
+        style = _ruff_finding({"code": "W291", "message": "Trailing whitespace",
+                               "filename": "a.py", "location": {"row": 3}})
+        assert (style.style_only, style.severity, style.category) == (True, "Medium", "lint")
+        security = _ruff_finding({"code": "S608", "message": "SQL injection",
+                                  "filename": "a.py", "location": {"row": 4}})
+        assert (security.style_only, security.severity, security.category) == (False, "Low", "lint")

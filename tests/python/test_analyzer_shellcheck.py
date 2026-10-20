@@ -161,6 +161,7 @@ class TestScanFile:
             findings = _scan_file("f.sh")
         assert len(findings) == 1
         assert findings[0].severity == "Low"
+        assert findings[0].style_only is True
 
     def test_info_level_maps_to_low(self) -> None:
         payload = json.dumps({"comments": [
@@ -172,6 +173,8 @@ class TestScanFile:
             findings = _scan_file("f.sh")
         assert len(findings) == 1
         assert findings[0].severity == "Low"
+        # info is a defect level (SC2086 is info), so it is not style-only.
+        assert findings[0].style_only is False
 
     def test_finding_text_format(self) -> None:
         payload = json.dumps({"comments": [

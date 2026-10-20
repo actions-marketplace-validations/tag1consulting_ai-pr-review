@@ -23,6 +23,17 @@ unsafe deserialization, command injection, and path traversal.
 **Error Handling**: Missing error checks, swallowed errors, error paths that leak resources
 or leave state inconsistent.
 
+**Cross-Function Consistency**: When one function writes a value and another function
+reads it, check that both sides agree on how the value travels. Compare the transport
+(cookie, header, body, query string), the key or field name, any prefix or encoding
+(for example a `Bearer ` prefix that the writer adds and the reader never strips), and
+the format. A mismatch makes the feature fail for every caller, even when each function
+looks correct on its own. Example: a login handler stores a token in a `session` cookie,
+and the admin route reads the token from the `Authorization` header, so every admin
+gets a 403. Report the mismatch once, on the reading side, and name the writing side in
+the finding. Check only values that both functions appear in the code you were given.
+Do not guess about code that you cannot see.
+
 **Code Quality**: Only flag significant issues — code duplication that will cause maintenance
 problems, missing critical validation at system boundaries, clear performance problems
 (N+1 queries, unbounded allocations).

@@ -8,7 +8,7 @@ doesn't mistake this for something github.py/gitlab.py also call into.
 
 Bitbucket Pipelines has no comment-triggered event, so this module IS the
 trigger: whatever `/ai-pr-review dismiss|false-positive|wont-fix|fixed F<n>`
-commands are sitting in the PR's comment log get applied the next time the
+and `/ai-pr-review feedback [F<n>] <text>` (#933) commands are sitting in the PR's comment log get applied the next time the
 review pipeline runs, not immediately. There is no inline-comment-reply
 path the way GitHub has (`dismiss_inline_reply` alongside
 `dismiss_by_finding_id`) -- Bitbucket findings anchor to the diff via Code
@@ -89,6 +89,7 @@ from typing import TYPE_CHECKING, Any, Final, Literal
 
 from ai_pr_review.feedback.models import FeedbackEntry
 from ai_pr_review.slash.parser import (
+    _FID_RE,
     ParseError,
     SlashCommand,
     parse_commands,
@@ -436,6 +437,54 @@ def _reply_for_missing_finding_id(actor: str, command: SlashCommand) -> str:
     )
 
 
+def _split_feedback_text(reason: str) -> tuple[int | None, str]:
+    """Split ``reason`` of a ``feedback`` command into ``(finding_id, text)``.
+
+    ``reason`` is already sanitized by the parser. A first word shaped like
+    ``F3`` or ``[F3]`` is the optional finding id. The rest is the text.
+    """
+    words = reason.split(None, 1)
+    if words:
+        match = _FID_RE.match(words[0])
+        if match:
+            return int(match.group(1)), words[1] if len(words) > 1 else ""
+    return None, reason
+
+
+def _reply_for_feedback_usage(actor: str) -> str:
+    return (
+        f"@{actor} `/ai-pr-review feedback` needs text, e.g. "
+        "`/ai-pr-review feedback F3 <what the review got wrong>`. The `F<n>` is "
+        "optional. Text that looks like a secret, such as a token, is removed "
+        "before the check, so write the note without it. Nothing was saved."
+    )
+
+
+def _reply_for_feedback(
+    actor: str, finding_id: int | None, *, persisted: bool | None
+) -> str:
+    """*persisted* has the same three states as in `_reply_for_verdict`."""
+    target = f" on **F{finding_id}**" if finding_id is not None else ""
+    if persisted is None:
+        reply = (
+            f"@{actor} read your feedback{target}, but the learning loop is "
+            "disabled on this repo, so nothing was saved. See "
+            "docs/learning-loop.md to enable it."
+        )
+    elif persisted is False:
+        reply = (
+            f"@{actor} your feedback{target} was **not** saved to the "
+            "learning-loop store. Check that the Bitbucket API token has "
+            "Repository:Write (see docs/bitbucket-setup.md)."
+        )
+    else:
+        reply = (
+            f"@{actor} saved your feedback{target}. Later reviews on this "
+            "repo will use it."
+        )
+    return reply
+
+
 def _reply_for_unknown_finding_id(actor: str, finding_id: int) -> str:
     return (
         f"@{actor} F{finding_id} was not found in the current review. It "
@@ -668,17 +717,29 @@ def apply_pending_verdicts(
                 continue
 
             command = result
-            if command.canonical_name not in _VERDICT_BY_CANONICAL_COMMAND:
-                # Not a verdict command (explain/revise/feedback) -- out of
+            is_feedback = command.canonical_name == "feedback"
+            if not is_feedback and command.canonical_name not in _VERDICT_BY_CANONICAL_COMMAND:
+                # Not a verdict or feedback command (explain/revise) -- out of
                 # scope for this poller, which only ever applies
-                # dismiss/false-positive/wont-fix/fixed. Leave it alone
-                # entirely: don't ack it, don't reply, so a future phase
+                # dismiss/false-positive/wont-fix/fixed and feedback. Leave it
+                # alone entirely: don't ack it, don't reply, so a future phase
                 # that does handle these commands isn't starved of seeing
                 # them by this one having already marked the comment acked.
                 continue
 
             comment_had_a_command = True
-            if command.finding_id is None:
+            feedback_reason = ""
+            finding_id = command.finding_id
+            if is_feedback:
+                # The parser peels an F<n> only for the verdict commands, so
+                # the first word of a feedback reason is still in the text.
+                finding_id, feedback_reason = _split_feedback_text(command.reason)
+                if not feedback_reason:
+                    replies.append(
+                        (comment_id, "feedback-usage", _reply_for_feedback_usage(actor))
+                    )
+                    continue
+            elif finding_id is None:
                 replies.append(
                     (
                         comment_id,
@@ -688,16 +749,18 @@ def apply_pending_verdicts(
                 )
                 continue
 
-            fp = fingerprint_for_finding_id([existing_body], command.finding_id)
-            if fp is None:
-                replies.append(
-                    (
-                        comment_id,
-                        f"unknown-fid:{command.finding_id}",
-                        _reply_for_unknown_finding_id(actor, command.finding_id),
+            fp: str | None = None
+            if finding_id is not None:
+                fp = fingerprint_for_finding_id([existing_body], finding_id)
+                if fp is None:
+                    replies.append(
+                        (
+                            comment_id,
+                            f"unknown-fid:{finding_id}",
+                            _reply_for_unknown_finding_id(actor, finding_id),
+                        )
                     )
-                )
-                continue
+                    continue
 
             if account_id is None:
                 replies.append(
@@ -731,6 +794,56 @@ def apply_pending_verdicts(
                 )
                 continue
 
+            if is_feedback:
+                persisted_fb: bool | None = None
+                if feedback_store is not None:
+                    source, file_ = "", ""
+                    if fp is not None:
+                        source, file_, _line, _text_hash = split_fingerprint(fp)
+                    extras: dict[str, Any] = {}
+                    if finding_id is not None:
+                        extras["finding_id"] = finding_id
+                    else:
+                        extras["context_missing"] = True
+                    # Separates feedback lines in one comment in the store's
+                    # comment-id dedup key. Two `feedback F3` lines, or a
+                    # verdict and a `feedback F3` line, share the comment id
+                    # and the finding id, so the key needs the line text too.
+                    extras["source_line_key"] = _reply_key_hash(feedback_reason)
+                    # Same keys `slash/handlers.py:build_entry` always writes.
+                    # This poller has no judge data to recover, so they stay at
+                    # their "unknown" values.
+                    extras["judge_verdict"] = None
+                    extras["corroborated"] = False
+                    extras["confidence"] = None
+                    extras["source_comment_id"] = comment_id
+                    persisted_fb = feedback_store.append(
+                        FeedbackEntry(
+                            ts=_utcnow_iso(),
+                            command="feedback",
+                            reason=feedback_reason,
+                            source=source,
+                            file=file_,
+                            extras=extras,
+                        )
+                    )
+                    if persisted_fb is False:
+                        comment_had_retryable_failure = True
+                        errors.append(
+                            f"apply_pending_verdicts: comment {comment_id}: "
+                            "feedback store append failed, will retry on next run"
+                        )
+                fb_state = "none" if persisted_fb is None else str(persisted_fb).lower()
+                replies.append(
+                    (
+                        comment_id,
+                        f"feedback:{finding_id}:{fb_state}:{_reply_key_hash(feedback_reason)}",
+                        _reply_for_feedback(actor, finding_id, persisted=persisted_fb),
+                    )
+                )
+                continue
+
+            assert fp is not None  # verdict commands always carry an F<n>
             verdict = _VERDICT_BY_CANONICAL_COMMAND[command.canonical_name]
             verdicts[fp] = verdict
 

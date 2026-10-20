@@ -35,6 +35,7 @@ from ai_pr_review.agents.dispatch import LLMCall
 from ai_pr_review.findings.models import Finding
 from ai_pr_review.findings.models import JudgeVerdict as JudgeVerdict  # re-exported
 from ai_pr_review.llm.base import LLMRequest
+from ai_pr_review.llm.client import EXIT_PROMPT_TOO_LONG
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +225,11 @@ async def judge_findings(
 
     try:
         response = await llm_call(request)
-    except Exception as exc:
+    except (Exception, SystemExit) as exc:
+        # Exit code 4 from `call_llm` (prompt too long, #1056) is soft here. Any
+        # other `SystemExit` keeps its old effect and stops the run.
+        if isinstance(exc, SystemExit) and exc.code != EXIT_PROMPT_TOO_LONG:
+            raise
         logger.warning("judge: LLM call failed (fail-soft); keeping findings unchanged: %s", exc, exc_info=True)
         return JudgeResult(findings=kept)
 

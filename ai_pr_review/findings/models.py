@@ -18,13 +18,14 @@ JudgeVerdict = Literal["keep", "downrank"]
 # it runs before pydantic's type check and coerces any unknown/missing input
 # to "other" ahead of time, so the Literal type never sees an invalid value to
 # reject. CATEGORIES is derived from Category via get_args() so there is
-# exactly one place that lists the 11 values; the tuple form is what
+# exactly one place that lists the values; the tuple form is what
 # _normalise_category checks membership against.
 Category = Literal[
     "authz",
     "injection",
     "dependency-cve",
     "secret",
+    "crypto",
     "architecture-coupling",
     "test-gap",
     "edge-case",
@@ -35,30 +36,97 @@ Category = Literal[
 ]
 CATEGORIES: tuple[str, ...] = get_args(Category)
 
+# Longest `impact` or `trigger` text that a Finding keeps (#1078).
+MAX_DETAIL_CHARS = 300
+
 
 MAX_ALSO_REPORTED = 5
+MAX_ALSO_REPORTED_STORED = 100
 _ALSO_REPORTED_OVERFLOW_PREFIX = "(+"
+ALSO_REPORTED_TRUNCATED_NOTE = "(+more notes past the storage bound)"
+
+
+def split_also_reported(notes: list[str]) -> tuple[list[str], bool]:
+    """Split a stored `also_reported` list into real notes and a truncation flag.
+
+    Marker entries start with `(+`. The flag is true when the list carries the
+    storage-bound marker, so a count taken from the real notes is a floor.
+    """
+    real = [n for n in notes if not n.startswith(_ALSO_REPORTED_OVERFLOW_PREFIX)]
+    return real, ALSO_REPORTED_TRUNCATED_NOTE in notes
 
 
 def combine_also_reported(groups: list[list[str]]) -> list[str]:
-    """Union several `Finding.also_reported` lists, keep order, drop repeats, apply the cap.
+    """Union several `Finding.also_reported` lists, keep order, drop repeats.
 
     Used by `merge._collapse_cluster` and by `scope.rollup_repeated_findings`,
-    so a collapsed group keeps the notes of every member (#1044). The overflow
-    marker of an input list is dropped and recounted.
+    so a collapsed group keeps the notes of every member (#1044). The display
+    cap (`MAX_ALSO_REPORTED`) is applied at render time. This function only
+    applies the storage bound `MAX_ALSO_REPORTED_STORED`. It keeps the first
+    notes and appends `ALSO_REPORTED_TRUNCATED_NOTE`, so the count is a floor.
+    Other marker entries of an input list are dropped.
     """
     notes: list[str] = []
     seen: set[str] = set()
+    truncated = False
     for group in groups:
-        for note in group:
-            if note.startswith(_ALSO_REPORTED_OVERFLOW_PREFIX) or note in seen:
+        real, group_truncated = split_also_reported(group)
+        truncated = truncated or group_truncated
+        for note in real:
+            if note in seen:
                 continue
             seen.add(note)
             notes.append(note)
-    if len(notes) > MAX_ALSO_REPORTED:
-        extra = len(notes) - MAX_ALSO_REPORTED
-        notes = [*notes[:MAX_ALSO_REPORTED], f"(+{extra} more from other analyzers)"]
+    if len(notes) > MAX_ALSO_REPORTED_STORED:
+        notes = notes[:MAX_ALSO_REPORTED_STORED]
+        truncated = True
+    if truncated:
+        notes.append(ALSO_REPORTED_TRUNCATED_NOTE)
     return notes
+
+
+# The pipeline sets these fields. Agent JSON must never set them: each one
+# changes how a finding is scored, grouped, suppressed, or shown. The extract
+# step drops every name in this set from agent output. A test requires each
+# `Finding` field to be in exactly one of the two sets, so a new field forces a
+# decision here and an agent cannot set it by default (#1085).
+INTERNAL_ONLY_FIELDS: frozenset[str] = frozenset({
+    "out_of_diff",
+    "demoted_to_body",
+    "corroborated",
+    "rollup_kind",
+    "show_badge",
+    "judge_verdict",
+    "also_reported",
+    "style_only",
+})
+
+# The fields that agent JSON may carry. `source` and `sources` are stamped by
+# the extract step after the agent output is read.
+AGENT_INPUT_FIELDS: frozenset[str] = frozenset({
+    "severity",
+    "confidence",
+    "finding",
+    "source",
+    "sources",
+    "category",
+    "file",
+    "line",
+    "start_line",
+    "remediation",
+    "impact",
+    "trigger",
+    "suggested_code",
+    "agent",
+})
+
+# A finding from one of these sources never joins a cluster, and a thread that
+# carries one never matches a finding of another kind. The suppression-check
+# finding names a comment that turns off a security rule on a line. If it
+# clustered with the agent finding for that line, the agent finding (higher
+# severity) would win the headline and the suppression would vanish from the
+# review (#1077). The merge and the thread matching both use this one set.
+STANDALONE_SOURCES: frozenset[str] = frozenset({"suppression-check"})
 
 
 class Finding(BaseModel):
@@ -73,6 +141,12 @@ class Finding(BaseModel):
     line: int | None = Field(default=None, ge=1)
     start_line: int | None = Field(default=None, ge=1)
     remediation: str = ""
+    # Optional text from the agent (#1078). `impact` says who is harmed and
+    # how, in one sentence. `trigger` gives a concrete input or call that
+    # reaches the defect. They are display text only: neither one enters the
+    # fingerprint, the clustering, the judge payload or any approval decision.
+    impact: str = ""
+    trigger: str = ""
     suggested_code: str = ""
     sources: list[str] = Field(default_factory=list)
     # cve-check only: "dependency-check" tag required in the output.
@@ -102,6 +176,14 @@ class Finding(BaseModel):
     # source — independent corroboration of the same file+line region.
     # Internal-only: not serialised by to_dict().
     corroborated: bool = False
+    # Set by scope.rollup_repeated_findings on the representative of a rolled-up
+    # group: "rule" for a semgrep rule-id group, "message" for a group of one
+    # message, "" for any other finding. A rule-id group joins hits with
+    # different messages, so a fuzzy dismissal match on the lowest line must not
+    # read as a match for the whole group (#1073). A message group may use the
+    # fuzzy match only against a dismissal from the same source (#1086).
+    # Internal-only: not serialised by to_dict().
+    rollup_kind: Literal["", "rule", "message"] = ""
     # Display preference only: when True, the renderers show the evidence label and
     # score beside the finding. The label is computed from this finding's own fields
     # when it is rendered (findings/badge.py), so it cannot go stale. The orchestrator
@@ -129,6 +211,14 @@ class Finding(BaseModel):
     # finding + remediation) cannot hide the surviving finding through the
     # other tool's text. Internal-only: not serialised by to_dict().
     also_reported: list[str] = Field(default_factory=list)
+    # Set by an analyzer when the rule it reports is about style only (a phpcs
+    # style sniff, a ruff formatting or naming code, an eslint formatting rule).
+    # ruff, eslint and phpcs use the category "lint" for style and for real
+    # defects, so the category cannot tell them apart. The merge keeps a
+    # style-only finding out of a cluster with a finding that is not style-only
+    # (#1074). Internal-only: not serialised by to_dict(), and reset on agent
+    # output by extract.py.
+    style_only: bool = False
 
     @field_validator("severity", mode="before")
     @classmethod
@@ -152,6 +242,19 @@ class Finding(BaseModel):
             return v
         return "other"
 
+    @field_validator("impact", "trigger", mode="before")
+    @classmethod
+    def _normalise_detail(cls, v: object) -> object:
+        # Permissive like _normalise_category: a missing or odd value must never
+        # drop the finding. A non-string becomes empty, and a long string is cut
+        # so one verbose agent cannot fill a comment.
+        if not isinstance(v, str):
+            return ""
+        text = " ".join(v.split())
+        if len(text) > MAX_DETAIL_CHARS:
+            text = text[: MAX_DETAIL_CHARS - 1] + "…"
+        return text
+
     @model_validator(mode="after")
     def _populate_sources(self) -> Finding:
         if self.source and not self.sources:
@@ -173,6 +276,10 @@ class Finding(BaseModel):
             d["line"] = self.line
         if self.start_line is not None:
             d["start_line"] = self.start_line
+        if self.impact:
+            d["impact"] = self.impact
+        if self.trigger:
+            d["trigger"] = self.trigger
         if self.remediation:
             d["remediation"] = self.remediation
         if self.suggested_code:
@@ -180,3 +287,8 @@ class Finding(BaseModel):
         if self.sources:
             d["sources"] = self.sources
         return d
+
+
+def is_standalone(f: Finding) -> bool:
+    """Does `f` come from a source that never joins a cluster?"""
+    return any(s in STANDALONE_SOURCES for s in (f.sources or ([f.source] if f.source else [])))

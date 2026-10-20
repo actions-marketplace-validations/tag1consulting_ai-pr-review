@@ -24,6 +24,7 @@ from ai_pr_review.findings.extract import extract_findings
 from ai_pr_review.findings.merge import merge_findings
 from ai_pr_review.findings.models import Finding
 from ai_pr_review.findings.suppress import SuppressionRule, apply_suppressions
+from ai_pr_review.llm.client import EXIT_PROMPT_TOO_LONG
 from ai_pr_review.review.outcome import (
     ApprovalCeiling,
     ReviewMode,
@@ -74,6 +75,10 @@ class ReviewResult:
     agent_results: list[AgentResult] = field(default_factory=list)
     skipped: bool = False
     skip_reason: str = ""
+    context_window_rejected: bool = False
+    """True when the skip came from a provider "prompt too long" rejection at
+    run time (#1056). cli.py reads it next to `SkipPlan.is_context_window_skip`
+    so `AI_FAIL_ON_CONTEXT_WINDOW` gives exit code 2 for both."""
     sarif_elapsed_s: float | None = None
     judge_input_tokens: int = 0
     judge_output_tokens: int = 0
@@ -134,6 +139,99 @@ TokenRenderer = Callable[
 # them would break Bitbucket's accordion-stripping regex).
 
 
+_PROMPT_TOO_LONG_NOTE = "prompt too long for the model"
+
+
+def _failed_agent_label(failure: FailedAgent) -> str:
+    """Name for the failed-agent note in the review body.
+
+    A provider "prompt too long" rejection gets its cause appended, so the
+    reader can tell it from a crash or a transient outage (#1056).
+    """
+    if failure.exit_code == EXIT_PROMPT_TOO_LONG:
+        return f"{failure.name} ({_PROMPT_TOO_LONG_NOTE})"
+    return failure.name
+
+
+def _prompt_too_long_skip_reason(failures: Sequence[FailedAgent]) -> str:
+    """Skip-comment text for a run where the provider rejected every prompt.
+
+    This is a rejection at run time and not an estimate, so the text says that
+    the provider refused the prompt after the call was made. The text does not
+    use the word "pre-flight", which names the other skip.
+    """
+    first = failures[0]
+    model = f" ({first.model})" if first.model else ""
+    names = ", ".join(f.name for f in failures)
+    return (
+        "The provider rejected the prompt as too long for the model context window. "
+        f"The {first.name} agent{model} received this error. "
+        f"Agents that failed this way: {names}. "
+        "The token estimate made before the run did not predict this rejection. "
+        "Exclude generated files with AI_EXCLUDE_PATTERNS or review a smaller diff."
+    )
+
+
+def _post_skip(
+    *,
+    diff: DiffContext,
+    cfg: OrchestrationConfig,
+    provider: VcsProvider,
+    skip_reason: str,
+    failed_agents: list[FailedAgent] | None = None,
+    context_window_rejected: bool = False,
+) -> ReviewResult:
+    """Post the one skip comment and return the skipped `ReviewResult`.
+
+    Shared by the pre-flight skips (`skip_reason` set by the caller) and the
+    runtime "provider rejected the prompt as too long" skip (#1056).
+    """
+    failed_agents = failed_agents or []
+    kept = list(cfg.extra_findings)
+    if kept:
+        kept = merge_findings(kept, confidence_threshold=cfg.confidence_threshold)
+        kept, _ = apply_suppressions(kept, list(cfg.suppression_rules))
+        if cfg.analyzer_diff_scope != "off":
+            from ai_pr_review.findings.scope import (
+                apply_diff_scope,
+                rollup_repeated_findings,
+            )
+            try:
+                kept = apply_diff_scope(kept, diff.diff_text, mode=cfg.analyzer_diff_scope)
+            except Exception as exc:
+                logger.warning(
+                    "skip path: apply_diff_scope failed (head_sha=%s); "
+                    "proceeding with unscoped findings: %s",
+                    diff.head_sha, exc, exc_info=True,
+                )
+            try:
+                kept = rollup_repeated_findings(kept)
+            except Exception as exc:
+                logger.warning(
+                    "skip path: rollup_repeated_findings failed "
+                    "(head_sha=%s); proceeding without rollup: %s",
+                    diff.head_sha, exc, exc_info=True,
+                )
+    outcome = cap_review_outcome(
+        classify_review_outcome(
+            [_AsFindingLike(f) for f in kept], [f.name for f in failed_agents], cfg.mode
+        ),
+        cfg.approval_ceiling,
+    )
+    skip_result = provider.post_skip_comment(skip_reason, findings=kept)
+    return ReviewResult(
+        findings=kept,
+        outcome=outcome,
+        failed_agents=failed_agents,
+        summary=skip_result,
+        findings_post=None,
+        stale=None,
+        skipped=True,
+        skip_reason=skip_reason,
+        context_window_rejected=context_window_rejected,
+    )
+
+
 async def run_review(
     *,
     diff: DiffContext,
@@ -185,47 +283,8 @@ async def run_review(
         # stale-thread resolution, no formal APPROVE/REQUEST_CHANGES event,
         # and no dependency on a prior summary comment existing (Bitbucket's
         # post_findings requires one; post_skip_comment does not).
-        kept = list(cfg.extra_findings)
-        if kept:
-            kept = merge_findings(kept, confidence_threshold=cfg.confidence_threshold)
-            kept, _ = apply_suppressions(kept, list(cfg.suppression_rules))
-            if cfg.analyzer_diff_scope != "off":
-                from ai_pr_review.findings.scope import (
-                    apply_diff_scope,
-                    rollup_repeated_findings,
-                )
-                try:
-                    kept = apply_diff_scope(kept, diff.diff_text, mode=cfg.analyzer_diff_scope)
-                except Exception as exc:
-                    logger.warning(
-                        "skip path: apply_diff_scope failed (head_sha=%s); "
-                        "proceeding with unscoped findings: %s",
-                        diff.head_sha, exc, exc_info=True,
-                    )
-                try:
-                    kept = rollup_repeated_findings(kept)
-                except Exception as exc:
-                    logger.warning(
-                        "skip path: rollup_repeated_findings failed "
-                        "(head_sha=%s); proceeding without rollup: %s",
-                        diff.head_sha, exc, exc_info=True,
-                    )
-        outcome = cap_review_outcome(
-            classify_review_outcome(
-                [_AsFindingLike(f) for f in kept], [], cfg.mode
-            ),
-            cfg.approval_ceiling,
-        )
-        skip_result = provider.post_skip_comment(skip_reason, findings=kept)
-        return ReviewResult(
-            findings=kept,
-            outcome=outcome,
-            failed_agents=[],
-            summary=skip_result,
-            findings_post=None,
-            stale=None,
-            skipped=True,
-            skip_reason=skip_reason,
+        return _post_skip(
+            diff=diff, cfg=cfg, provider=provider, skip_reason=skip_reason,
         )
 
     # Note: feedback addendum is wired by the caller via
@@ -241,6 +300,26 @@ async def run_review(
         )
     else:
         successes, failures = [], []
+
+    # #1056: when the provider rejects the prompt of every agent as too long,
+    # no LLM agent produced output. Post the skip comment, as the pre-flight
+    # context-window skip does, and return before the summary, findings,
+    # watermark and stale-thread steps. A run where only some agents were
+    # rejected goes on, and `_failed_agent_label` names the cause in the note.
+    if (
+        agents
+        and not successes
+        and failures
+        and all(f.exit_code == EXIT_PROMPT_TOO_LONG for f in failures)
+    ):
+        return _post_skip(
+            diff=diff,
+            cfg=cfg,
+            provider=provider,
+            skip_reason=_prompt_too_long_skip_reason(failures),
+            failed_agents=failures,
+            context_window_rejected=True,
+        )
 
     # Phase 1.5: inject pre-computed findings (SARIF, native analyzers) assembled by caller.
     raw_findings: list[Finding] = []
@@ -396,7 +475,7 @@ async def run_review(
                 kept,
                 diff,
                 event=outcome.event,
-                failed_agents=[f.name for f in failures],
+                failed_agents=[_failed_agent_label(f) for f in failures],
                 usage_block=usage_block,
                 usage_warning=usage_warning,
                 max_inline=cfg.max_inline,

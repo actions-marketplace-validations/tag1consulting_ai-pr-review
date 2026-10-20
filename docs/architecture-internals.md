@@ -25,7 +25,7 @@ The `source` field is optional in agent output. If the field is absent, the find
 
 The fields `suggested_code` and `start_line` are optional. Agents emit them when the `enable-suggestions` action input is `true` (the default). See [Code suggestions](#code-suggestions).
 
-The pipeline removes findings with confidence below 75. It removes duplicates with proximity-based matching. Findings in the same file within 3 lines of each other join one cluster. The pipeline keeps the highest-severity finding of the cluster. The surviving finding carries a `sources` array that holds all sources from the cluster. When a finding has more than one source, the VCS provider renders `[first-source] *(also flagged by: other)*`. The provider sorts the sources alphabetically.
+The pipeline removes findings with confidence below 75. It removes duplicates with proximity-based matching. Findings in the same file within 3 lines of each other join one cluster. The pipeline keeps the highest-severity finding of the cluster. The surviving finding carries a `sources` array that holds all sources from the cluster. When a finding has more than one source, the VCS provider renders the sorted sources as `[source1, source2]`.
 
 ## Runtime flow
 
@@ -132,7 +132,7 @@ The current code has no "context variant" or cache-cohort concept. Every eligibl
 
 ## Parallel agent execution
 
-By default, the engine runs all eligible agents at the same time, with a limit on the number in flight. In `full` mode, this reduces the wall-clock time from about 5-7 minutes to about 2 minutes.
+By default, the engine runs all eligible agents at the same time, with a limit on the number in flight. The wall-clock time depends on the model and on the size of the diff.
 
 To turn this off, set the `parallel: false` action input or `AI_PARALLEL=false`. The default is `true`.
 
@@ -207,14 +207,7 @@ The trusted global config can hold a catch-all rule (a rule with no `match` cons
 
 An optional `verify` field starts a check before the engine suppresses a finding:
 
-| Value | Extracts | Checks |
-|-------|----------|--------|
-| `github-release` | `owner/repo@vN` | `gh api repos/{owner}/{repo}/git/ref/tags/{tag}` |
-| `npm` | `pkg@version` or `"pkg": "version"` | `registry.npmjs.org/{pkg}/{version}` |
-| `pypi` | `pkg==version` | `pypi.org/pypi/{pkg}/{version}/json` |
-| `go-module` | `module@vX.Y.Z` | `proxy.golang.org/{module}/@v/{version}.info` |
-| `cargo` | `pkg = "version"` or `pkg@version` | `crates.io/api/v1/crates/{pkg}/{version}` |
-| `docker-hub` | `image:tag` or `ns/image:tag` | `hub.docker.com/v2/namespaces/{ns}/repositories/{name}/tags/{tag}` |
+See the table in [Suppression rules](suppression.md) for the `verify` values, what each one extracts, and the registry endpoint that it checks.
 
 If the check confirms that the version exists, the suppression stands. If the check cannot confirm it, the engine keeps the finding. This covers a lookup error and a version that is not found. The engine does not support private registries (GHCR, GCR, ECR).
 
@@ -225,7 +218,7 @@ Consuming repos can add **local suppressions** at `.ai-pr-review/suppressions.js
 The findings pipeline (extract, merge, suppress, diff-scope) produces a final candidate list. Then `ai_pr_review/findings/judge.py:judge_findings()` runs. This is Phase 2.75, and `AI_JUDGE_PASS` gates it (default `true`). It sends one compact call to the standard model. A cheap model returns a `keep` or `downrank` verdict for each finding.
 
 - `downrank` is the only verdict besides `keep`. There is no `drop`. The judge never removes a finding. The design prefers a visible false positive to a silently dropped true positive. `downrank` lowers confidence by `JUDGE_DOWNRANK_AMOUNT` (15). It moves the finding to the review body (`demoted_to_body=True`) and away from an inline comment. Severity does not change, because downranking affects placement and not the assessed risk.
-- The judge always keeps findings with `Finding.corroborated=True`, whatever its verdict. An LLM agent and a static analyzer both confirmed these findings (see `findings/provenance.py`). One cheap-model call cannot override agreement from independent sources.
+- The judge always keeps findings with `Finding.corroborated=True`, whatever its verdict. An LLM agent and a static analyzer both confirmed these findings (see `findings/provenance.py`). The merge sets the flag only when an analyzer member and an agent member of the cluster describe the same kind of defect: equal real categories, or one real category and `other`. Two `other` findings do not count. A `docs` finding, and a finding with `Finding.style_only` set (an analyzer sets it per rule for style findings), cluster only with style findings of their own category. An agent finding never carries the flag, so the merge compares the flag only between analyzer findings. An agent `lint` finding can join a style hit of the same category. A style finding near a security finding of another category neither joins it nor corroborates it. A `lint` finding that is not style only, such as ruff F821, is a real defect and still merges with the agent finding for it. `extract.py` resets `style_only` on agent output. One cheap-model call cannot override agreement from independent sources.
 - The pass is always fail-soft. After any LLM error, parse error, timeout, or empty input, it returns the findings unchanged (still `keep`) and logs a WARNING. `JudgeResult` also carries the token usage of the pass (`input_tokens`, `output_tokens`, `cache_creation_tokens`, `cache_read_tokens`). The token usage table shows it next to the finding-producing agents (see below).
 
 ## Token usage and cost estimation
@@ -258,6 +251,10 @@ The `AI_COST_CEILING_UNPRICED` values work as follows:
 An empty pricing file (`cost_ceiling_pricing_missing`) never blocks, because it would skip every review that has a ceiling.
 
 **Context-window check (#1056).** After it logs `COST_ESTIMATE`, `build_review_runtime()` calls `check_context_window()`. The check runs whether or not a cost ceiling is set. For each agent in the estimate (including the preflight agents) it adds the estimated input tokens and the output cap. It compares the sum with `AI_CONTEXT_WINDOW_MARGIN` times the `context_window` of the model in `config/model-pricing.json`. A model with no `context_window`, and a margin of `0`, are not checked. When an agent does not fit, the check raises `ContextWindowExceeded`. This is not a subclass of `CostCeilingExceeded`, because the cause is the diff size and not the cost. `build_review_runtime()` turns it into a `SkipPlan(is_context_window_skip=True)` that goes through the same skip-comment path, with the same analyzer and SARIF findings. `AI_FAIL_ON_CONTEXT_WINDOW` (read in `cli.py`) makes that skip exit with code 2. `AI_FAIL_ON_COST_CEILING` does not affect it.
+
+**Provider "prompt too long" rejection (#1056).** The estimate can be too low. The provider can then reject a prompt with an HTTP 400 after the call is made. `retry_post()` in `llm/_http.py` raises `LLMContextLengthError` (a subclass of `LLMError`) when the status is 400 and the body matches a verified text. Only the Anthropic text `prompt is too long` is matched. The OpenAI, Google and Bedrock texts are not matched, because their exact 400 messages are not confirmed. A 400 with any other text stays a plain `LLMError`. `call_llm()` maps `LLMContextLengthError` to exit code 4 (`EXIT_PROMPT_TOO_LONG`). `_run_single_agent` copies the code and the model id into `FailedAgent`. The content-filter fallback does not apply to code 4, because it only handles code 3.
+
+If every LLM agent failed with code 4, `run_review()` takes the skip path after `run_tier()`. It calls `_post_skip()`, which the pre-flight skip also uses. The skip comment has its own reason text, with the agent, the model and the `AI_EXCLUDE_PATTERNS` hint. It also carries the analyzer and SARIF findings. The run does not post a summary or findings, does not advance the watermark, and does not resolve stale threads. `ReviewResult.context_window_rejected` is set. `cli.py` reads it next to `SkipPlan.is_context_window_skip`. When `AI_FAIL_ON_CONTEXT_WINDOW` is `true`, the exit code is 2 and the telemetry outcome is `skipped_context_window_failed`. The run does not post the policy gate check. If only some agents get code 4, the review goes on. The failed-agent note then reads `<agent> (prompt too long for the model)`. If the failures have mixed causes, the review also goes on. The outcome counts the failed agents, so it is incomplete and not approvable, and `AI_FAIL_ON_FINDINGS` exits with code 2.
 
 When `AI_MAX_COST_USD` is set and the estimate exceeds it, `enforce_cost_ceiling()` raises `CostCeilingExceeded`. `build_review_runtime()` turns it into `SkipPlan(is_cost_ceiling_skip=True)`. This uses the same skip-comment mechanism as the max-diff-lines skip in `review/compute.py`. Native static analyzers and SARIF ingestion run *before* this check (#848). They make no billed call and do not affect the estimate, so a cost-ceiling skip no longer skips them.
 
@@ -366,7 +363,7 @@ The LLM client retries transient API failures with exponential backoff and jitte
 | `LLM_RETRY_COUNT` | `3` | Number of retry attempts (set to 0 to disable) |
 | `LLM_RETRY_BASE_DELAY` | `2` | Base delay in seconds (doubles each retry) |
 
-The VCS provider HTTP layer wraps critical API calls with retry logic (3 retries, exponential backoff and jitter) for all three providers.
+The VCS provider HTTP layer wraps critical API calls with retry logic (up to 3 attempts in total, exponential backoff and jitter) for all three providers.
 
 ## Graceful failure handling
 
@@ -391,11 +388,11 @@ The engine accepts `review-target: standalone` (`REVIEW_TARGET=standalone`). Its
 
 ## Multi-arch container image
 
-The `Dockerfile` builds for linux/amd64 and linux/arm64. Each binary download uses a `case "${TARGETARCH}"` block with SHA256 checksums for each architecture. The pip-installed tools (ruff, semgrep, checkov) and the composer-installed tools (phpcs, phpstan) are arch-neutral.
+The `Dockerfile` builds for linux/amd64 and linux/arm64. Seven tools (shellcheck, trufflehog, golangci-lint, hadolint, kube-linter, tflint, and ruff) are copied from digest-pinned official images. Only `gh` is downloaded, and its download is checked with SHA256. The pip-installed tools (semgrep, checkov) and the composer-installed tools (phpcs, phpstan) are arch-neutral.
 
 ### Multi-stage layout
 
-- **`builder`**: installs build-time tooling, downloads analyzer binaries, pip-installs ruff, semgrep, and checkov, and composer-installs phpcs and phpstan. The image does **not** include the Semgrep registry rulesets, because the Semgrep Rules License v1.0 restricts their use. The semgrep analyzer uses `--config=auto` to fetch rules at runtime. See [`THIRD-PARTY-LICENSES/`](https://github.com/tag1consulting/ai-pr-review/tree/main/THIRD-PARTY-LICENSES).
+- **`builder`**: installs build-time tooling, copies analyzer binaries from digest-pinned images, downloads `gh`, pip-installs semgrep and checkov, and composer-installs phpcs and phpstan. The image does **not** include the Semgrep registry rulesets, because the Semgrep Rules License v1.0 restricts their use. The semgrep analyzer uses `--config=auto` to fetch rules at runtime. See [`THIRD-PARTY-LICENSES/`](https://github.com/tag1consulting/ai-pr-review/tree/main/THIRD-PARTY-LICENSES).
 - **final stage**: a slim runtime with `bash`, `ca-certificates`, `curl`, `git`, `jq`, `php-cli` and extensions, and `python3`. It copies `/usr/local/bin` and `/usr/local/lib/python${PYTHON_VERSION}/dist-packages` from the builder as a whole. `ARG PYTHON_VERSION` sets the version (default `3.14`, to match Ubuntu 26.04). The Python package and action assets are copied last. A change to source only then does not invalidate the heavy builder layers.
 
 ## Test architecture
