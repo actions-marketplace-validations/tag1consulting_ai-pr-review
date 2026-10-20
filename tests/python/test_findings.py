@@ -609,11 +609,13 @@ def test_merge_pr70_php_clusters_keep_security_findings_visible() -> None:
     A phpcs "Missing doc comment" ERROR sat within 3 lines of a security
     finding. The `other` wildcard let them cluster, the phpcs text won the
     headline on a tie, the semgrep or agent security text was dropped, and the
-    docblock finding showed "corroborated by analyzer, confidence 100".
+    docblock finding showed "corroborated by analyzer, confidence 100". The
+    docblock findings are Low here because #1075 now rates the phpcs style
+    sniffs Low, and a Low `lint` finding is a style finding.
     """
     docblocks = [
         _make_finding(
-            file=_PHP, line=line, source="phpcs", confidence=90, category="lint",
+            file=_PHP, line=line, source="phpcs", confidence=90, category="lint", severity="Low",
             finding=f"Squiz.Commenting.FunctionComment.Missing: Missing doc comment for function f{line}()",
         )
         for line in (7, 14, 21, 29, 35, 45)
@@ -655,29 +657,53 @@ def test_merge_pr70_php_clusters_keep_security_findings_visible() -> None:
     assert exec_finding.severity == "Critical"
     assert exec_finding.corroborated is True
     unserialize = by_line[37]
-    assert unserialize.source == "security-reviewer"  # tie on severity: the agent text wins
+    assert unserialize.source == "semgrep"  # a tie on severity keeps the analyzer headline
     assert unserialize.corroborated is True
     assert unserialize.sources == ["security-reviewer", "semgrep"]
+    # The text of the dropped agent finding is kept, so the review still says it.
+    assert unserialize.also_reported == [
+        "security-reviewer (line 37): unserialize() on $data enables PHP object injection"
+    ]
     md5 = by_line[47]
     assert "md5" in md5.finding
     assert md5.corroborated is False
     assert md5.confidence == 80
 
 
-def test_merge_lint_does_not_cluster_with_other_category() -> None:
+def test_merge_a_low_lint_finding_does_not_cluster_with_other_category() -> None:
     findings = [
-        _make_finding(file="a.php", line=10, source="phpcs", category="lint"),
+        _make_finding(file="a.php", line=10, source="phpcs", category="lint", severity="Low"),
         _make_finding(file="a.php", line=11, source="security-reviewer", category="other"),
     ]
     assert len(merge_findings(findings)) == 2
 
 
-def test_merge_lint_does_not_cluster_with_real_category() -> None:
+def test_merge_a_low_lint_finding_does_not_cluster_with_real_category() -> None:
     findings = [
-        _make_finding(file="a.php", line=10, source="phpcs", category="lint"),
+        _make_finding(file="a.php", line=10, source="phpcs", category="lint", severity="Low"),
         _make_finding(file="a.php", line=11, source="semgrep", category="injection"),
     ]
     assert len(merge_findings(findings)) == 2
+
+
+@pytest.mark.parametrize(
+    ("source", "severity"), [("ruff", "High"), ("eslint", "High"), ("phpcs", "Medium"), ("ruff", "Critical")]
+)
+def test_merge_a_lint_finding_above_low_still_merges_with_an_agent_finding(
+    source: str, severity: str
+) -> None:
+    """ruff, eslint and phpcs use the category `lint` for every rule. A rule that is not
+    style (ruff F821, an unsafe call) is rated above Low, and it still merges with the
+    agent finding for the same defect and corroborates it."""
+    findings = [
+        _make_finding(file="a.py", line=42, source=source, category="lint", severity=severity,
+                      confidence=90, finding="F821: Undefined name `user`"),
+        _make_finding(file="a.py", line=42, source="code-reviewer", category="other",
+                      severity=severity, confidence=85, finding="`user` is not defined"),
+    ]
+    (merged,) = merge_findings(findings)
+    assert merged.corroborated is True
+    assert sorted(merged.sources) == sorted([source, "code-reviewer"])
 
 
 def test_merge_docs_clusters_only_with_docs() -> None:
@@ -702,7 +728,10 @@ def test_merge_other_still_bridges_real_categories_without_lint() -> None:
     assert len(merge_findings(findings)) == 1
 
 
-def test_merge_tie_prefers_agent_text_over_analyzer() -> None:
+def test_merge_tie_keeps_the_analyzer_headline_and_the_agent_text_as_a_note() -> None:
+    """The headline is chosen by severity alone, as before #1074. A suppression rule that
+    matches the text of an analyzer finding still sees that text. The agent text is not
+    lost: it goes to the notes."""
     findings = [
         _make_finding(
             file="a.py", line=10, source="semgrep", category="injection",
@@ -715,9 +744,12 @@ def test_merge_tie_prefers_agent_text_over_analyzer() -> None:
     ]
     result = merge_findings(findings)
     assert len(result) == 1
-    assert result[0].source == "security-reviewer"
-    assert result[0].finding == "get_user concatenates user_id into the query"
+    assert result[0].source == "semgrep"
+    assert result[0].finding.startswith("python.lang.security.audit.sql-injection:")
     assert result[0].sources == ["security-reviewer", "semgrep"]
+    assert result[0].also_reported == [
+        "security-reviewer (line 12): get_user concatenates user_id into the query"
+    ]
 
 
 def test_merge_higher_severity_analyzer_keeps_dropped_agent_text() -> None:

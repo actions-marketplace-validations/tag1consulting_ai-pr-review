@@ -2,10 +2,11 @@
 
 Proximity-based dedup: findings in the same file within PROXIMITY_LINES of
 each other are clustered; the highest-severity finding survives with a union
-of sources. Style (`lint`) and `docs` findings cluster only with their own
-category, and a cluster counts as corroborated only when an analyzer member
-and an agent member describe the same kind of defect (#1074). When the cluster mixes two different analyzer tools, the other
-tool's message is kept in `Finding.also_reported` so it is not lost (#1044).
+of sources. Style findings (`docs`, and `lint` at Low severity) cluster only with
+their own category, and a cluster counts as corroborated only when an analyzer
+member and an agent member describe the same kind of defect (#1074). When the
+cluster mixes two different analyzer tools, the other tool's message is kept in
+`Finding.also_reported` so it is not lost (#1044).
 
 Closes #185 (dedup preserves distinct nearby findings; merges exact
 cross-source duplicates).
@@ -32,11 +33,21 @@ _SEVERITY_ORDER: dict[Severity, int] = {
 # candidates for dedup.
 PROXIMITY_LINES = 3
 
-# A finding in one of these categories describes style or documentation, not a
-# defect in the behavior of the code. It clusters only with findings of the
-# same category. Without this rule, the "other" wildcard below let a phpcs
-# "Missing doc comment" finding absorb a nearby security finding (#1074).
-_STRICT_CATEGORIES = frozenset({"lint", "docs"})
+def _is_style(f: Finding) -> bool:
+    """Does `f` describe style or documentation, not a defect in how the code behaves?
+
+    A `docs` finding does. A `lint` finding does when its severity is Low: the
+    analyzers rate style findings Low (the phpcs style sniffs, and ruff W, C and
+    other codes), and a lint finding of higher severity (ruff F821, an unsafe
+    call) is a real defect. ruff, eslint and phpcs all use the category `lint`
+    for both kinds, so the severity is what tells them apart.
+
+    A style finding clusters only with findings of its own category. Without
+    this rule, the "other" wildcard below let a phpcs "Missing doc comment"
+    finding absorb a nearby security finding (#1074).
+    """
+    return f.category == "docs" or (f.category == "lint" and f.severity == "Low")
+
 
 # A finding from one of these sources never joins a cluster. The
 # suppression-check finding names a comment that turns off a security rule on
@@ -128,7 +139,7 @@ def _cluster_category_compatible(cluster: list[Finding], f: Finding) -> bool:
     within PROXIMITY_LINES of their neighbor), silently dropping one of them
     when the cluster collapses.
     """
-    if f.category in _STRICT_CATEGORIES or any(m.category in _STRICT_CATEGORIES for m in cluster):
+    if _is_style(f) or any(_is_style(m) for m in cluster):
         # `categories_compatible` is not used here on purpose: it also drives
         # the cross-run thread match in `vcs/_canonical.py`, and a change to it
         # would change which old threads a new finding updates. Only the
@@ -224,24 +235,9 @@ def _also_reported_notes(cluster: list[Finding], best: Finding) -> list[str]:
     return combine_also_reported([notes])
 
 
-def _headline_key(f: Finding) -> tuple[int, int]:
-    """Sort key for the finding that represents a cluster.
-
-    Severity decides first. On a tie, an agent finding wins over an analyzer
-    finding, because agent text carries the context. Ties after that keep the
-    input order (`min` is stable). A style finding never shares a cluster with
-    a finding of another category (see `_STRICT_CATEGORIES`), so the category
-    plays no part here.
-    """
-    return (
-        _SEVERITY_ORDER.get(f.severity, 99),
-        1 if _analyzer_tools(f) is not None else 0,
-    )
-
-
 def _collapse_cluster(cluster: list[Finding]) -> Finding:
     """Collapse a cluster to the highest-severity representative."""
-    best = min(cluster, key=_headline_key)
+    best = min(cluster, key=lambda f: _SEVERITY_ORDER.get(f.severity, 99))
     all_sources: list[str] = []
     seen: set[str] = set()
     for f in cluster:
@@ -251,10 +247,11 @@ def _collapse_cluster(cluster: list[Finding]) -> Finding:
                 all_sources.append(s)
 
     update: dict[str, object] = {"sources": sorted(all_sources)}
-    # impact and trigger come from agents only. When an analyzer finding wins
-    # the headline, keep the text of the first member that has one (#1078).
-    for detail in ("impact", "trigger"):
-        if not getattr(best, detail):
+    # impact and trigger come from agents only. When an analyzer finding wins the
+    # headline, keep the text of the first member that has one (#1078). When an agent
+    # wins, its own fields stand: another agent's text may describe another defect.
+    if _analyzer_tools(best) is not None:
+        for detail in ("impact", "trigger"):
             value = next((getattr(m, detail) for m in cluster if getattr(m, detail)), "")
             if value:
                 update[detail] = value

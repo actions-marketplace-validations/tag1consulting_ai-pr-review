@@ -8,6 +8,10 @@ Labels, in order:
 
 - ``corroborated by analyzer``: a static analyzer and an agent reported the same
   kind of defect at the same place (the merge decides, see ``provenance.py``).
+- ``analyzer and agent, not confirmed``: a static analyzer and an agent reported
+  something at the same place, but not the same kind of defect, so the merge did
+  not count it as corroboration (for example, both findings have the category
+  ``other``).
 - ``analyzer finding``: a static analyzer reported it alone.
 - ``judge kept``: the judge pass ran and kept it.
 - ``single agent, unverified``: one agent reported it and the judge did not keep
@@ -28,6 +32,9 @@ def finding_label(finding: Finding) -> str:
     # agent described the same defect (#1074).
     if finding.corroborated:
         return "corroborated by analyzer"
+    has_analyzer = any(is_analyzer_source(s) for s in sources)
+    if has_analyzer and not all(is_analyzer_source(s) for s in sources):
+        return "analyzer and agent, not confirmed"
     if sources and all(is_analyzer_source(s) for s in sources):
         return "analyzer finding"
     if finding.judge_verdict == "keep":

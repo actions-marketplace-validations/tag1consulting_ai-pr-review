@@ -54,7 +54,9 @@ assessments than surface-level pattern recognition.
 - Insecure deserialization of untrusted input
 
 ### Cryptographic Issues
-Report every finding in this section with `category` set to `crypto`.
+Report the findings in this section with `category` set to `crypto`. The exception is a
+hardcoded key, IV or token secret: use `secret` for it. The secret scanners report those
+with `secret`, and a finding with the same category merges with theirs and is corroborated.
 
 - Weak or deprecated algorithms (MD5, SHA1 for integrity, DES, RC4, ECB mode)
 - AES ECB mode specifically (`AES.MODE_ECB`, `modes.ECB`, `Cipher.MODE_ECB`)

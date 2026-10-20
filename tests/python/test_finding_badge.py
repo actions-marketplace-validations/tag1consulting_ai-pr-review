@@ -42,6 +42,18 @@ class TestLabel:
         # shared category must not get the label from their sources alone.
         label = finding_label(_f(sources=["semgrep", "code-reviewer"], corroborated=False))
         assert label != "corroborated by analyzer"
+        # And it must not say that only one agent saw it: an analyzer reported it too.
+        assert label == "analyzer and agent, not confirmed"
+        assert "single agent" not in label
+
+    def test_mixed_sources_keep_the_label_whatever_the_judge_said(self) -> None:
+        for verdict in (None, "keep", "downrank"):
+            f = _f(sources=["semgrep", "code-reviewer"], judge_verdict=verdict)
+            assert finding_label(f) == "analyzer and agent, not confirmed"
+
+    def test_corroborated_still_wins_over_mixed_sources(self) -> None:
+        f = _f(sources=["semgrep", "code-reviewer"], corroborated=True)
+        assert finding_label(f) == "corroborated by analyzer"
 
     def test_analyzer_only(self) -> None:
         assert finding_label(_f(source="semgrep", sources=["semgrep"])) == "analyzer finding"

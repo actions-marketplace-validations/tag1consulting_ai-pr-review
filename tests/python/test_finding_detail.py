@@ -136,6 +136,16 @@ class TestMerge:
         assert merged.source == "semgrep"
         assert (merged.impact, merged.trigger) == (_IMPACT, _TRIGGER)
 
+    def test_an_agent_headline_never_borrows_text_from_another_agent(self) -> None:
+        """Two agent findings can describe two defects. The text of one must not appear
+        under the other."""
+        winner = _f(line=37, severity="Critical")
+        other = _f(source="adversarial-general", category="other", line=38, severity="High",
+                   impact="An empty list crashes the handler", trigger="process([])")
+        (merged,) = merge_findings([winner, other])
+        assert merged.source == "security-reviewer"
+        assert (merged.impact, merged.trigger) == ("", "")
+
     def test_the_winner_keeps_its_own_text(self) -> None:
         winner = _f(impact="own impact", line=37)
         other = _f(source="code-reviewer", impact="other impact", line=38)

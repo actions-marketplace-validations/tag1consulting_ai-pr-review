@@ -19,6 +19,6 @@ or `trigger`, because the review matches findings across runs by the `finding` t
 `confidence` must be an integer 0–100. Only include findings with confidence ≥ 75.
 `category` must be exactly one of: `authz`, `injection`, `dependency-cve`, `secret`, `crypto`,
 `architecture-coupling`, `test-gap`, `edge-case`, `observability`, `docs`, `lint`, `other`.
-Use `crypto` for weak hashes, weak or predictable randomness, and insecure token or key handling.
+Use `crypto` for weak hashes, weak or predictable randomness, and weak algorithms or modes. A hardcoded key or secret stays `secret`.
 Use `other` if none fit.
 If no findings, emit an empty array: `[]`.

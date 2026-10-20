@@ -47,7 +47,7 @@ def _pr70_findings() -> list[Finding]:
            category="lint", finding="A comment on this line turns off a security check (noqa: S301)."),
         # lib/data_processor.php: six docblock findings, two semgrep rules, agent findings, md5.
         *(
-            _f(file=php, line=n, source="phpcs", category="lint",
+            _f(file=php, line=n, source="phpcs", category="lint", severity="Low",
                finding=f"Squiz.Commenting.FunctionComment.Missing: Missing doc comment ({n})")
             for n in (7, 14, 21, 29, 35, 45)
         ),
@@ -97,7 +97,8 @@ def test_pr70_pipeline_keeps_every_security_finding_visible() -> None:
     assert len(docblocks) == 6 and not any(f.corroborated for f in docblocks)
     by_line = {f.line: f for f in php if f.sources != ["phpcs"]}
     assert by_line[31].source == "security-reviewer" and by_line[31].corroborated
-    assert by_line[37].source == "security-reviewer" and by_line[37].corroborated
+    assert by_line[37].source == "semgrep" and by_line[37].corroborated
+    assert any("security-reviewer" in note for note in by_line[37].also_reported)
     assert "md5" in by_line[47].finding and not by_line[47].corroborated
 
 

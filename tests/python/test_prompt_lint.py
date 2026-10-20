@@ -143,6 +143,16 @@ def test_security_reviewer_routes_crypto_findings_to_crypto_category() -> None:
     content = (PROMPTS_DIR / "security-reviewer.md").read_text()
     section = content.split("### Cryptographic Issues", 1)[1].split("###", 1)[0]
     assert "`crypto`" in section
+    # A hardcoded key is a secret. The secret scanners report `secret`, and the same
+    # category merges the agent finding with theirs and corroborates it.
+    assert "hardcoded key, IV or token secret: use `secret`" in section
+
+
+def test_trailer_keeps_hardcoded_keys_in_the_secret_category() -> None:
+    content = (PROMPTS_DIR / "_trailer-findings.md").read_text()
+    line = next(line for line in content.splitlines() if line.startswith("Use `crypto`"))
+    assert "A hardcoded key or secret stays `secret`" in line
+    assert "insecure token or key handling" not in line
 
 
 @pytest.mark.parametrize("filename", _CATEGORY_LIST_PROMPTS)
