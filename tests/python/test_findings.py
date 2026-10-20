@@ -1087,3 +1087,23 @@ def test_merge_an_agent_lint_finding_joins_the_nearest_cluster_not_an_earlier_st
     defect = next(f for f in result if not f.style_only)
     assert defect.corroborated and sorted(defect.sources) == ["code-reviewer", "ruff"]
 
+
+def test_merge_an_agent_lint_finding_one_line_above_an_analyzer_defect_merges_with_the_defect() -> None:
+    """ruff E501 (style) on line 10, an agent `lint` finding on line 11, ruff F821 (defect)
+    on line 12. Placement must not depend on line order: the agent finding merges with
+    F821 and the style hit stays alone."""
+    findings = [
+        _make_finding(file="a.py", line=10, source="ruff", category="lint", severity="Low",
+                      style_only=True, finding="E501: Line too long"),
+        _make_finding(file="a.py", line=11, source="code-reviewer", category="lint",
+                      severity="High", finding="`user` is not defined"),
+        _make_finding(file="a.py", line=12, source="ruff", category="lint", severity="High",
+                      finding="F821: Undefined name `user`"),
+    ]
+    result = merge_findings(findings)
+    assert len(result) == 2
+    style = next(f for f in result if f.style_only)
+    assert style.sources == ["ruff"] and not style.corroborated
+    defect = next(f for f in result if not f.style_only)
+    assert defect.corroborated and sorted(defect.sources) == ["code-reviewer", "ruff"]
+
