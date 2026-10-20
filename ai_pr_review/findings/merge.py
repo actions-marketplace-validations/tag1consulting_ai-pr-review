@@ -129,6 +129,21 @@ def categories_compatible(a: str | None, b: str) -> bool:
     return a == b
 
 
+def _style_flags_agree(m: Finding, f: Finding) -> bool:
+    """Do two findings agree on style, where both can carry the flag?
+
+    Only analyzers set `style_only`, and extract resets it on agent output. An
+    agent finding therefore reads as not style whatever it reports. Comparing
+    the flag against an agent finding would keep an agent `lint` finding away
+    from a style hit on the same line that it describes. The category match in
+    the caller still keeps such a finding out of a style cluster of another
+    category.
+    """
+    if _analyzer_tools(m) is None or _analyzer_tools(f) is None:
+        return True
+    return _is_style(m) == _is_style(f)
+
+
 def _cluster_category_compatible(cluster: list[Finding], f: Finding) -> bool:
     """Can `f` join `cluster` without introducing a second, conflicting real category?
 
@@ -144,7 +159,7 @@ def _cluster_category_compatible(cluster: list[Finding], f: Finding) -> bool:
         # the cross-run thread match in `vcs/_canonical.py`, and a change to it
         # would change which old threads a new finding updates. Only the
         # within-run clustering is strict.
-        return all(m.category == f.category and _is_style(m) == _is_style(f) for m in cluster)
+        return all(m.category == f.category and _style_flags_agree(m, f) for m in cluster)
     established = next((m.category for m in cluster if m.category != "other"), None)
     return categories_compatible(established, f.category)
 

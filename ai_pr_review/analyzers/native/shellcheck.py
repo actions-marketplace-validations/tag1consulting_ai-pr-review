@@ -87,4 +87,5 @@ def _shellcheck_finding(item: dict[str, Any], file_path: str) -> Finding:
         finding=f"SC{code}: {message}",
         remediation=f"See https://www.shellcheck.net/wiki/SC{code}",
         category="lint",
+        style_only=level == "style",
     )

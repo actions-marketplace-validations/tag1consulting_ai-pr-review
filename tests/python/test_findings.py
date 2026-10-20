@@ -1016,3 +1016,53 @@ def test_finding_to_dict() -> None:
     assert d["file"] == "f.py"
     assert d["line"] == 5
     assert d["category"] == "other"
+
+
+def test_merge_an_agent_lint_finding_joins_a_style_hit_of_the_same_category() -> None:
+    """extract resets `style_only` on agent output, so an agent finding never carries it.
+    An agent `lint` finding about the same formatting problem as a ruff style hit still
+    merges with it and corroborates it, as it did before #1074."""
+    findings = [
+        _make_finding(file="a.py", line=20, source="ruff", category="lint", severity="Low",
+                      style_only=True, finding="E501: Line too long"),
+        _make_finding(file="a.py", line=20, source="code-reviewer", category="lint",
+                      severity="Low", finding="This line is too long"),
+    ]
+    (merged,) = merge_findings(findings)
+    assert merged.corroborated is True
+    assert sorted(merged.sources) == ["code-reviewer", "ruff"]
+
+
+@pytest.mark.parametrize("agent_category", ["other", "injection"])
+def test_merge_an_agent_finding_of_another_category_stays_out_of_a_shellcheck_style_cluster(
+    agent_category: str,
+) -> None:
+    """A shellcheck `style` hit is style-only. A nearby agent finding that is not `lint`
+    is not absorbed by it and is not marked corroborated."""
+    findings = [
+        _make_finding(file="a.sh", line=10, source="shellcheck", category="lint", severity="Low",
+                      style_only=True, finding="SC2006: Use $(...) notation"),
+        _make_finding(file="a.sh", line=11, source="security-reviewer", category=agent_category,
+                      severity="High", finding="Unquoted input reaches eval"),
+    ]
+    result = merge_findings(findings)
+    assert len(result) == 2
+    assert not any(f.corroborated for f in result)
+
+
+def test_merge_a_non_style_analyzer_hit_stays_out_of_a_cluster_with_a_style_hit_and_agent_finding() -> None:
+    """The agent finding may join the style cluster. A non-style analyzer hit on the same
+    line still may not, because both analyzer findings carry the flag."""
+    findings = [
+        _make_finding(file="a.py", line=20, source="ruff", category="lint", severity="Low",
+                      style_only=True, finding="E501: Line too long"),
+        _make_finding(file="a.py", line=20, source="code-reviewer", category="lint",
+                      severity="Low", finding="This line is too long"),
+        _make_finding(file="a.py", line=21, source="ruff", category="lint", severity="High",
+                      finding="F821: Undefined name"),
+    ]
+    result = merge_findings(findings)
+    assert len(result) == 2
+    assert any(f.style_only for f in result)
+    assert any(not f.style_only and f.severity == "High" for f in result)
+
