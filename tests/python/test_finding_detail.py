@@ -184,11 +184,11 @@ class TestRolledUp:
     def test_an_agent_cannot_set_it(self) -> None:
         output = (
             '```json-findings\n[{"severity":"High","confidence":85,"finding":"bug",'
-            '"category":"injection","rolled_up_by_rule":true}]\n```'
+            '"category":"injection","rollup_kind":"rule"}]\n```'
         )
         (finding,) = extract_findings(output, "security-reviewer")
-        assert finding.rolled_up_by_rule is False
-        assert "rolled_up_by_rule" not in finding.to_dict()
+        assert finding.rollup_kind == ""
+        assert "rollup_kind" not in finding.to_dict()
 
 
 class TestInternalOnlyFields:
@@ -203,7 +203,7 @@ class TestInternalOnlyFields:
 
         injected = {
             "out_of_diff": True, "demoted_to_body": True, "corroborated": True,
-            "rolled_up_by_rule": True, "show_badge": True, "style_only": True,
+            "rollup_kind": "rule", "show_badge": True, "style_only": True,
             "judge_verdict": "downrank", "also_reported": ["forged note"],
         }
         assert set(injected) == INTERNAL_ONLY_FIELDS

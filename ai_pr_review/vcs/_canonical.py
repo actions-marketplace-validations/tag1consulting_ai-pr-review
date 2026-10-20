@@ -606,8 +606,13 @@ def _fuzzy_dismissed_match(
     finding: Finding,
     verdicts: Mapping[str, str],
     all_threads: Sequence[PriorThread],
+    *,
+    same_source: bool = False,
 ) -> str | None:
     """Return a dismissed fingerprint fuzzy-matching `finding`'s location, or `None`.
+
+    With `same_source`, a dismissed fingerprint also needs the same source tag
+    as `finding`.
 
     Applies the same `(file, ±PROXIMITY_LINES, compatible category)` key the
     original design's decision #5 specifies for *every* row of the decision
@@ -633,6 +638,8 @@ def _fuzzy_dismissed_match(
         if d_file != finding.file or d_line is None:
             continue
         if abs(d_line - finding.line) > PROXIMITY_LINES:
+            continue
+        if same_source and split_fingerprint(fp)[:1] != [finding.source]:
             continue
         thread = _find_thread_by_fingerprint(all_threads, fp)
         d_category = thread.category if thread else None
@@ -718,10 +725,18 @@ def classify(
 
     if verdicts.get(fp) == "dismissed":
         return Classified(finding, "suppressed", None)
-    # A rolled-up representative stands for lines far from its own. A dismissal
-    # near its line says nothing about the other lines, so only an exact
-    # fingerprint verdict above can suppress it.
-    if not finding.rolled_up_by_rule and _fuzzy_dismissed_match(finding, verdicts, all_threads) is not None:
+    # A rolled-up representative stands for lines far from its own. A rule-id
+    # group joins hits with different messages, so a dismissal near its line
+    # says nothing about the others and only an exact fingerprint verdict above
+    # can suppress it. A group of one message may use the fuzzy match, but only
+    # against a dismissal from its own source, so a dismissed finding of
+    # another source nearby cannot hide the whole group (#1086).
+    if finding.rollup_kind != "rule" and (
+        _fuzzy_dismissed_match(
+            finding, verdicts, all_threads, same_source=finding.rollup_kind == "message"
+        )
+        is not None
+    ):
         return Classified(finding, "suppressed", None)
 
     if verdicts.get(fp) == "fixed":

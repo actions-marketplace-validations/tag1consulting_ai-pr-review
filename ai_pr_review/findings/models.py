@@ -94,7 +94,7 @@ INTERNAL_ONLY_FIELDS: frozenset[str] = frozenset({
     "out_of_diff",
     "demoted_to_body",
     "corroborated",
-    "rolled_up_by_rule",
+    "rollup_kind",
     "show_badge",
     "judge_verdict",
     "also_reported",
@@ -176,14 +176,14 @@ class Finding(BaseModel):
     # source — independent corroboration of the same file+line region.
     # Internal-only: not serialised by to_dict().
     corroborated: bool = False
-    # Set by scope.rollup_repeated_findings on the representative of a group
-    # that it rolled up by rule id (semgrep). Rule-id groups join hits with
-    # different messages, so the representative stands for lines far from its
-    # own, and a fuzzy dismissal match on its line must not read as a match for
-    # the whole group (#1073). A group of the same message is not marked: a
-    # dismissal of one hit covers the repeats of it.
+    # Set by scope.rollup_repeated_findings on the representative of a rolled-up
+    # group: "rule" for a semgrep rule-id group, "message" for a group of one
+    # message, "" for any other finding. A rule-id group joins hits with
+    # different messages, so a fuzzy dismissal match on the lowest line must not
+    # read as a match for the whole group (#1073). A message group may use the
+    # fuzzy match only against a dismissal from the same source (#1086).
     # Internal-only: not serialised by to_dict().
-    rolled_up_by_rule: bool = False
+    rollup_kind: Literal["", "rule", "message"] = ""
     # Display preference only: when True, the renderers show the evidence label and
     # score beside the finding. The label is computed from this finding's own fields
     # when it is rendered (findings/badge.py), so it cannot go stale. The orchestrator

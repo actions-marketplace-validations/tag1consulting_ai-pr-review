@@ -127,11 +127,11 @@ def test_a_dismissed_semgrep_finding_is_reported_again_when_a_second_site_rolls_
     assert len(run2) == 1 and "2 occurrences" in run2[0].finding
     assert fingerprint(run2[0]) != dismissed_fp  # the churn is real
 
-    assert run2[0].rolled_up_by_rule
+    assert run2[0].rollup_kind == "rule"
     result = classify(run2[0], verdicts={dismissed_fp: "dismissed"}, all_threads=[thread])
     assert result.kind == "new"
     # The same dismissal still covers the lone finding, which is not rolled up.
-    assert not run1[0].rolled_up_by_rule
+    assert run1[0].rollup_kind == ""
     assert classify(run1[0], verdicts={dismissed_fp: "dismissed"}, all_threads=[thread]).kind == "suppressed"
 
 

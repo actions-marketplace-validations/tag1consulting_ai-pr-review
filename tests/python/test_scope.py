@@ -679,7 +679,7 @@ def test_non_semgrep_analyzer_still_needs_more_than_the_global_threshold() -> No
     assert len(rollup_repeated_findings(_make_repeated(ROLLUP_THRESHOLD + 1))) == 1
 
 
-def test_a_group_of_the_same_message_is_not_marked_as_rolled_up_by_rule() -> None:
+def test_a_group_of_the_same_message_is_marked_as_a_message_rollup() -> None:
     group = [
         Finding(severity="Low", confidence=90, finding="Missing doc comment", source="phpcs",
                 file="a.php", line=n, category="lint")
@@ -687,4 +687,14 @@ def test_a_group_of_the_same_message_is_not_marked_as_rolled_up_by_rule() -> Non
     ]
     (rolled,) = rollup_repeated_findings(group)
     assert "occurrences" in rolled.finding
-    assert rolled.rolled_up_by_rule is False
+    assert rolled.rollup_kind == "message"
+
+
+def test_a_message_that_starts_with_rule_colon_is_still_a_message_rollup() -> None:
+    group = [
+        Finding(severity="Low", confidence=90, finding="Rule: no-unused-vars", source="phpstan",
+                file="a.php", line=n, category="lint")
+        for n in range(1, 8)
+    ]
+    (rolled,) = rollup_repeated_findings(group)
+    assert rolled.rollup_kind == "message"

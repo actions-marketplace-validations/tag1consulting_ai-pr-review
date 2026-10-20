@@ -1381,3 +1381,23 @@ def test_classify_current_fingerprint_outranks_a_prior_fingerprint() -> None:
     )
     own = _thread(thread_id="own", comment_id=2, line=10, fp=fingerprint(f))
     assert classify(f, verdicts={}, all_threads=[older, own]).thread is own
+
+
+def test_classify_message_rollup_needs_a_dismissal_from_its_own_source() -> None:
+    """A dismissed finding of another source nearby must not hide a rollup (#1086)."""
+    other = _finding("agent issue", source="code-reviewer", line=10, severity="Low", category="lint")
+    other_fp = fingerprint(other)
+    other_thread = _thread(fp=other_fp, severity="Low", category="lint", is_resolved=True)
+    rollup = _finding(
+        "Missing doc comment (7 occurrences in app.py, lines: 11)", source="phpcs", line=11,
+        severity="Low", category="lint",
+    ).model_copy(update={"rollup_kind": "message"})
+    got = classify(rollup, verdicts={other_fp: "dismissed"}, all_threads=[other_thread])
+    assert got.kind == "new"
+
+    same = _finding("Missing doc comment (6 occurrences in app.py, lines: 10)", source="phpcs",
+                    line=10, severity="Low", category="lint")
+    same_fp = fingerprint(same)
+    same_thread = _thread(fp=same_fp, severity="Low", category="lint", is_resolved=True)
+    got = classify(rollup, verdicts={same_fp: "dismissed"}, all_threads=[same_thread])
+    assert got.kind == "suppressed"

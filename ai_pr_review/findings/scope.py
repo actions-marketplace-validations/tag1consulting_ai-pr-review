@@ -198,6 +198,7 @@ def rollup_repeated_findings(
     groups: dict[GroupKey, list[Finding]] = defaultdict(list)
     keys: list[GroupKey | None] = []
     limits: dict[GroupKey, int] = {}
+    by_rule: dict[GroupKey, bool] = {}
 
     for f in findings:
         if _is_analyzer(f) and f.file:
@@ -210,6 +211,7 @@ def rollup_repeated_findings(
             group_key: GroupKey = (f.file, src, text_key, f.severity, f.out_of_diff)
             groups[group_key].append(f)
             limits[group_key] = limit
+            by_rule[group_key] = rule is not None
             keys.append(group_key)
         else:
             keys.append(None)
@@ -232,9 +234,10 @@ def rollup_repeated_findings(
         if len(lines) > 10:
             line_preview += f" ... (+{len(lines) - 10} more)"
         summary = f" ({len(group)} occurrences in {key[0]}, lines: {line_preview})"
-        update: dict[str, object] = {"finding": rep.finding + summary}
-        if key[2].startswith("rule:"):
-            update["rolled_up_by_rule"] = True
+        update: dict[str, object] = {
+            "finding": rep.finding + summary,
+            "rollup_kind": "rule" if by_rule[key] else "message",
+        }
         notes = combine_also_reported([g.also_reported for g in group])
         if notes:
             update["also_reported"] = notes
