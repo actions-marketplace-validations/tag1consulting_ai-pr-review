@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ai_pr_review.analyzers.native.phpcs import _run_phpcs, _severity
+from ai_pr_review.analyzers.native.phpcs import _is_style_sniff, _run_phpcs, _severity
 from ai_pr_review.manifest import ChangedFiles
 
 _FIXTURE_DIR = Path(__file__).parent.parent / "fixtures" / "phpcs"
@@ -103,6 +103,29 @@ class TestRunPhpcsFindings:
     def test_category_is_lint(self, tmp_path: Path) -> None:
         findings = self._run_with_fixture("phpcs-warning.json", tmp_path)
         assert findings[0].category == "lint"
+
+    def test_the_style_flag_follows_the_sniff_category(self, tmp_path: Path) -> None:
+        findings = self._run_with_fixture("phpcs-style-error.json", tmp_path)
+        flags = {f.finding.split(":")[0]: f.style_only for f in findings}
+        assert flags == {
+            "Squiz.Commenting.FunctionComment.Missing": True,
+            "Generic.WhiteSpace.DisallowTabIndent.TabsUsed": True,
+            "Generic.Files.EndFileNewline.NotFound": False,
+        }
+
+    @pytest.mark.parametrize(
+        ("source_rule", "expected"),
+        [
+            ("Squiz.Commenting.FunctionComment.Missing", True),
+            ("Drupal.NamingConventions.ValidFunctionName.InvalidName", True),
+            ("Drupal.Security.XSS.OutputNotEscaped", False),
+            ("Generic.PHP.UpperCaseConstant.Found", False),
+            ("", False),
+            ("NoDots", False),
+        ],
+    )
+    def test_is_style_sniff(self, source_rule: str, expected: bool) -> None:
+        assert _is_style_sniff(source_rule) is expected
 
     def test_style_sniff_categories_map_to_low(self, tmp_path: Path) -> None:
         # A missing docblock is an ERROR in phpcs but only reports style, so it

@@ -386,10 +386,15 @@ def _invoke_phpcs(plan: _Plan) -> subprocess.CompletedProcess[str] | None:
         return None
 
 
+def _is_style_sniff(source_rule: str) -> bool:
+    """Is *source_rule* (``Squiz.Commenting.FunctionComment.Missing``) a style-only sniff?"""
+    parts = source_rule.split(".")
+    return len(parts) >= 2 and parts[1] in _STYLE_SNIFF_CATEGORIES
+
+
 def _severity(msg_type: str, source_rule: str) -> str:
     """Map a phpcs message to a severity, rating style-only sniffs Low."""
-    parts = source_rule.split(".")
-    if len(parts) >= 2 and parts[1] in _STYLE_SNIFF_CATEGORIES:
+    if _is_style_sniff(source_rule):
         return "Low"
     return "High" if msg_type == "ERROR" else "Medium"
 
@@ -503,6 +508,7 @@ def _run_phpcs(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
                         finding=f"{source_rule}: {msg.get('message', '')}",
                         remediation=_remediation(plan, normalized_path),
                         category="lint",
+                        style_only=_is_style_sniff(source_rule),
                     )
                 )
             except (ValueError, TypeError) as exc:

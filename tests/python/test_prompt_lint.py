@@ -148,11 +148,15 @@ def test_security_reviewer_routes_crypto_findings_to_crypto_category() -> None:
     assert "hardcoded key, IV or token secret: use `secret`" in section
 
 
-def test_trailer_keeps_hardcoded_keys_in_the_secret_category() -> None:
-    content = (PROMPTS_DIR / "_trailer-findings.md").read_text()
-    line = next(line for line in content.splitlines() if line.startswith("Use `crypto`"))
-    assert "A hardcoded key or secret stays `secret`" in line
-    assert "insecure token or key handling" not in line
+@pytest.mark.parametrize("filename", _CATEGORY_LIST_PROMPTS)
+def test_every_crypto_hint_keeps_hardcoded_keys_in_the_secret_category(filename: str) -> None:
+    """A prompt can carry its own copy of the `crypto` hint. Every copy must say that a
+    hardcoded key stays `secret`, or one agent contradicts the others and its finding
+    does not merge with the secret scanners' (#1076)."""
+    content = (PROMPTS_DIR / filename).read_text()
+    assert "insecure token or key handling" not in content
+    for line in (ln for ln in content.splitlines() if ln.startswith("Use `crypto`")):
+        assert "A hardcoded key or secret stays `secret`" in line, f"{filename}: {line}"
 
 
 @pytest.mark.parametrize("filename", _CATEGORY_LIST_PROMPTS)

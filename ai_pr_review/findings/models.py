@@ -159,6 +159,14 @@ class Finding(BaseModel):
     # finding + remediation) cannot hide the surviving finding through the
     # other tool's text. Internal-only: not serialised by to_dict().
     also_reported: list[str] = Field(default_factory=list)
+    # Set by an analyzer when the rule it reports is about style only (a phpcs
+    # style sniff, a ruff formatting or naming code, an eslint formatting rule).
+    # ruff, eslint and phpcs use the category "lint" for style and for real
+    # defects, so the category cannot tell them apart. The merge keeps a
+    # style-only finding out of a cluster with a finding that is not style-only
+    # (#1074). Internal-only: not serialised by to_dict(), and reset on agent
+    # output by extract.py.
+    style_only: bool = False
 
     @field_validator("severity", mode="before")
     @classmethod

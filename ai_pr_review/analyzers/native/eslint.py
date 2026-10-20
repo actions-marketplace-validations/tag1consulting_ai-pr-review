@@ -147,6 +147,24 @@ def _eslint_items(data: Any) -> list[tuple[str, dict[str, Any]]] | None:
     return items
 
 
+# ESLint rules that only report formatting. The plugin prefixes cover the stylistic and
+# prettier plugins. Rules that find defects (no-eval, no-undef, security/*) are not listed.
+_STYLE_RULES = frozenset({
+    "indent", "semi", "semi-spacing", "quotes", "quote-props", "comma-dangle", "comma-spacing",
+    "comma-style", "eol-last", "no-trailing-spaces", "no-multiple-empty-lines", "no-multi-spaces",
+    "no-extra-semi", "space-before-blocks", "space-before-function-paren", "space-infix-ops",
+    "space-in-parens", "space-unary-ops", "keyword-spacing", "brace-style", "object-curly-spacing",
+    "array-bracket-spacing", "key-spacing", "padded-blocks", "arrow-spacing", "func-call-spacing",
+    "linebreak-style", "operator-linebreak", "spaced-comment", "max-len", "block-spacing",
+    "computed-property-spacing", "template-curly-spacing", "wrap-iife", "dot-location",
+})
+_STYLE_RULE_PREFIXES = ("@stylistic/", "prettier/")
+
+
+def _is_style_rule(rule_id: str) -> bool:
+    return rule_id in _STYLE_RULES or rule_id.startswith(_STYLE_RULE_PREFIXES)
+
+
 def _eslint_finding(item: tuple[str, dict[str, Any]]) -> Finding | None:
     rel_path, msg = item
     rule_id = msg.get("ruleId")
@@ -167,4 +185,5 @@ def _eslint_finding(item: tuple[str, dict[str, Any]]) -> Finding | None:
         finding=f"{rule_id}: {message}",
         remediation=remediation,
         category="lint",
+        style_only=_is_style_rule(str(rule_id)),
     )

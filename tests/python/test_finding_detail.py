@@ -163,3 +163,18 @@ class TestMerge:
         ]
         (rolled,) = rollup_repeated_findings(group)
         assert (rolled.impact, rolled.trigger) == ("", "")
+
+
+class TestStyleOnly:
+    def test_defaults_to_false_and_is_not_serialised(self) -> None:
+        f = _f()
+        assert f.style_only is False
+        assert "style_only" not in f.to_dict()
+
+    def test_an_agent_cannot_set_it(self) -> None:
+        output = (
+            '```json-findings\n[{"severity":"High","confidence":85,"finding":"bug",'
+            '"category":"injection","style_only":true}]\n```'
+        )
+        (finding,) = extract_findings(output, "security-reviewer")
+        assert finding.style_only is False

@@ -610,12 +610,13 @@ def test_merge_pr70_php_clusters_keep_security_findings_visible() -> None:
     finding. The `other` wildcard let them cluster, the phpcs text won the
     headline on a tie, the semgrep or agent security text was dropped, and the
     docblock finding showed "corroborated by analyzer, confidence 100". The
-    docblock findings are Low here because #1075 now rates the phpcs style
-    sniffs Low, and a Low `lint` finding is a style finding.
+    docblock findings are Low and `style_only` here, as the phpcs analyzer now
+    sets them for the style sniffs (#1075).
     """
     docblocks = [
         _make_finding(
             file=_PHP, line=line, source="phpcs", confidence=90, category="lint", severity="Low",
+            style_only=True,
             finding=f"Squiz.Commenting.FunctionComment.Missing: Missing doc comment for function f{line}()",
         )
         for line in (7, 14, 21, 29, 35, 45)
@@ -670,31 +671,32 @@ def test_merge_pr70_php_clusters_keep_security_findings_visible() -> None:
     assert md5.confidence == 80
 
 
-def test_merge_a_low_lint_finding_does_not_cluster_with_other_category() -> None:
+def test_merge_a_style_only_finding_does_not_cluster_with_other_category() -> None:
     findings = [
-        _make_finding(file="a.php", line=10, source="phpcs", category="lint", severity="Low"),
+        _make_finding(file="a.php", line=10, source="phpcs", category="lint", style_only=True),
         _make_finding(file="a.php", line=11, source="security-reviewer", category="other"),
     ]
     assert len(merge_findings(findings)) == 2
 
 
-def test_merge_a_low_lint_finding_does_not_cluster_with_real_category() -> None:
+def test_merge_a_style_only_finding_does_not_cluster_with_real_category() -> None:
     findings = [
-        _make_finding(file="a.php", line=10, source="phpcs", category="lint", severity="Low"),
+        _make_finding(file="a.php", line=10, source="phpcs", category="lint", style_only=True),
         _make_finding(file="a.php", line=11, source="semgrep", category="injection"),
     ]
     assert len(merge_findings(findings)) == 2
 
 
 @pytest.mark.parametrize(
-    ("source", "severity"), [("ruff", "High"), ("eslint", "High"), ("phpcs", "Medium"), ("ruff", "Critical")]
+    ("source", "severity"),
+    [("ruff", "High"), ("ruff", "Low"), ("eslint", "High"), ("phpcs", "Medium"), ("ruff", "Critical")],
 )
-def test_merge_a_lint_finding_above_low_still_merges_with_an_agent_finding(
+def test_merge_a_lint_finding_that_is_not_style_only_merges_with_an_agent_finding(
     source: str, severity: str
 ) -> None:
-    """ruff, eslint and phpcs use the category `lint` for every rule. A rule that is not
-    style (ruff F821, an unsafe call) is rated above Low, and it still merges with the
-    agent finding for the same defect and corroborates it."""
+    """ruff, eslint and phpcs use the category `lint` for every rule. A rule that finds a
+    defect (ruff F821, or a ruff S security code, which ruff rates Low) is not style-only.
+    It still merges with the agent finding for the same defect and corroborates it."""
     findings = [
         _make_finding(file="a.py", line=42, source=source, category="lint", severity=severity,
                       confidence=90, finding="F821: Undefined name `user`"),
@@ -704,6 +706,26 @@ def test_merge_a_lint_finding_above_low_still_merges_with_an_agent_finding(
     (merged,) = merge_findings(findings)
     assert merged.corroborated is True
     assert sorted(merged.sources) == sorted([source, "code-reviewer"])
+
+
+def test_merge_a_defect_next_to_a_style_finding_still_merges_with_its_agent_finding() -> None:
+    """A style finding must not pull a real lint finding into a cluster that the agent
+    finding for that defect is then refused by. The defect and its agent finding merge
+    and corroborate. The style finding stays on its own."""
+    findings = [
+        _make_finding(file="a.php", line=10, source="phpcs", category="lint", severity="Low",
+                      style_only=True, finding="Drupal.Commenting.FunctionComment.Missing: no doc"),
+        _make_finding(file="a.php", line=12, source="phpcs", category="lint", severity="High",
+                      finding="WordPress.Security.EscapeOutput: output not escaped"),
+        _make_finding(file="a.php", line=12, source="security-reviewer", category="other",
+                      severity="High", finding="unescaped output allows XSS"),
+    ]
+    result = merge_findings(findings)
+    assert len(result) == 2
+    style = next(f for f in result if f.style_only)
+    assert style.sources == ["phpcs"] and not style.corroborated
+    defect = next(f for f in result if not f.style_only)
+    assert defect.corroborated and sorted(defect.sources) == ["phpcs", "security-reviewer"]
 
 
 def test_merge_docs_clusters_only_with_docs() -> None:

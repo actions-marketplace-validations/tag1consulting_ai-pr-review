@@ -160,6 +160,11 @@ def _parse_and_validate(
                 f = f.model_copy(update={"corroborated": False})
             if f.judge_verdict is not None:
                 f = f.model_copy(update={"judge_verdict": None})
+            # Strip style_only: only an analyzer sets it. An injected true value
+            # would keep a security finding out of the cluster of the finding
+            # that corroborates it (#1074).
+            if f.style_only:
+                f = f.model_copy(update={"style_only": False})
             results.append(f)
         except Exception as exc:  # noqa: BLE001
             print(f"WARNING: {agent_name} dropped malformed finding: {exc}", file=sys.stderr)

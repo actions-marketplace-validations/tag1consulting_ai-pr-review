@@ -41,13 +41,13 @@ def _pr70_findings() -> list[Finding]:
            finding="pickle.loads on a caller-supplied blob gives code execution"),
         _f(file=user, line=48, source="semgrep", category="injection",
            finding=f"{_PICKLE_RULE}: Avoid pickle"),
-        _f(file=user, line=48, source="ruff", severity="Low", category="lint",
+        _f(file=user, line=48, source="ruff", severity="Low", category="lint", style_only=True,
            finding="RUF100: Unused `noqa` directive (non-enabled: `S301`)"),
         _f(file=user, line=48, source="suppression-check", severity="Medium", confidence=85,
            category="lint", finding="A comment on this line turns off a security check (noqa: S301)."),
         # lib/data_processor.php: six docblock findings, two semgrep rules, agent findings, md5.
         *(
-            _f(file=php, line=n, source="phpcs", category="lint", severity="Low",
+            _f(file=php, line=n, source="phpcs", category="lint", severity="Low", style_only=True,
                finding=f"Squiz.Commenting.FunctionComment.Missing: Missing doc comment ({n})")
             for n in (7, 14, 21, 29, 35, 45)
         ),

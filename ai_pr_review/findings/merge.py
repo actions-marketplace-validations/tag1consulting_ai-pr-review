@@ -2,8 +2,8 @@
 
 Proximity-based dedup: findings in the same file within PROXIMITY_LINES of
 each other are clustered; the highest-severity finding survives with a union
-of sources. Style findings (`docs`, and `lint` at Low severity) cluster only with
-their own category, and a cluster counts as corroborated only when an analyzer
+of sources. Style findings (`docs`, and findings that an analyzer marks
+`style_only`) cluster only with style findings of their own category, and a cluster counts as corroborated only when an analyzer
 member and an agent member describe the same kind of defect (#1074). When the
 cluster mixes two different analyzer tools, the other tool's message is kept in
 `Finding.also_reported` so it is not lost (#1044).
@@ -34,23 +34,19 @@ _SEVERITY_ORDER: dict[Severity, int] = {
 PROXIMITY_LINES = 3
 
 def _is_style(f: Finding) -> bool:
-    """Does `f` describe style or documentation, not a defect in how the code behaves?
+    """Does `f` report style or documentation only, and not a defect in how the code behaves?
 
-    A `docs` finding does. A `lint` finding does when its severity is Low: the
-    analyzers rate style findings Low (the phpcs style sniffs, and the ruff codes
-    other than F, E, W and C), and a lint finding of higher severity (ruff F821,
-    an unsafe call) is a real defect. ruff, eslint and phpcs all use the category
-    `lint` for both kinds, so the severity is what tells them apart.
+    A `docs` finding does. So does a finding that an analyzer marked `style_only`
+    (a phpcs style sniff, a ruff formatting or naming code, an eslint formatting
+    rule). ruff, eslint and phpcs use the category `lint` for both style and real
+    defects, so the analyzers decide per rule and the category cannot.
 
-    Known limit: the ruff S (security) codes are rated Low by the ruff analyzer, so
-    they count as style here and do not merge with an agent finding that has the
-    category `other`. They still merge with a finding of the category `lint`.
-
-    A style finding clusters only with findings of its own category. Without
+    A style finding clusters only with style findings of its own category, and a
+    finding that is not style-only never joins a cluster that has one. Without
     this rule, the "other" wildcard below let a phpcs "Missing doc comment"
     finding absorb a nearby security finding (#1074).
     """
-    return f.category == "docs" or (f.category == "lint" and f.severity == "Low")
+    return f.category == "docs" or f.style_only
 
 
 # A finding from one of these sources never joins a cluster. The
@@ -148,7 +144,7 @@ def _cluster_category_compatible(cluster: list[Finding], f: Finding) -> bool:
         # the cross-run thread match in `vcs/_canonical.py`, and a change to it
         # would change which old threads a new finding updates. Only the
         # within-run clustering is strict.
-        return all(m.category == f.category for m in cluster)
+        return all(m.category == f.category and _is_style(m) == _is_style(f) for m in cluster)
     established = next((m.category for m in cluster if m.category != "other"), None)
     return categories_compatible(established, f.category)
 
