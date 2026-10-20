@@ -24,6 +24,13 @@ let any commenter silence a security finding): a permission-lookup failure
 rejects the verdict, it never falls back to accepting it. This is the one
 place in the Bitbucket-parity plan where fail-soft is the wrong default.
 
+The owners file comes first (`_bitbucket_owners.py`, `.bitbucket/CODEOWNERS`):
+`check_authority`'s endpoint is admin-only, so a bot account with write access
+gets HTTP 403 from it for every commenter and could never authorize anyone. A
+403 is its own outcome, "forbidden", because only a config change fixes it. It
+stays retryable like "degraded", so the command applies on the first run after
+the commenter is listed.
+
 Idempotency has two independent halves. Suppression is idempotent for
 free: writing the same fingerprint -> "dismissed" entry twice through
 `marker.upsert_verdicts_marker` produces the same result either time.
@@ -89,6 +96,8 @@ from ai_pr_review.slash.parser import (
 from ai_pr_review.slash.parser import (
     _sanitize_reason as _sanitize_free_text,
 )
+from ai_pr_review.vcs._bitbucket_owners import OWNERS_PATH, OwnersLoad
+from ai_pr_review.vcs._body import format_http_error_body
 from ai_pr_review.vcs._finding_ids import fingerprint_for_finding_id, split_fingerprint
 from ai_pr_review.vcs.http import RecordingClient
 
@@ -164,7 +173,7 @@ _VERDICT_BY_CANONICAL_COMMAND: Final[dict[str, Verdict]] = {
     "fixed": "fixed",
 }
 
-AuthorityCheck = Literal["authorized", "unauthorized", "degraded"]
+AuthorityCheck = Literal["authorized", "unauthorized", "degraded", "forbidden"]
 _ROLE_RANK: Final[dict[str, int]] = {"read": 0, "write": 1, "admin": 2}
 
 # Bitbucket account_ids observed live are either a bare UUID-ish hex string
@@ -318,6 +327,19 @@ def check_authority(
     url = f"/workspaces/{workspace}/permissions/repositories/{repo_slug}"
     params = {"q": f'user.account_id="{account_id}"'}
     resp = client.request("GET", url, params=params)
+    if resp.status_code == 403:
+        # Bitbucket allows this endpoint only for repository admins, so the
+        # bot account is not an admin. A retry cannot fix this, only a change
+        # of the bot's role or an owners file can.
+        _log.warning(
+            "ai-pr-review: permission lookup for account %s was refused (HTTP "
+            "403): the bot account is not an admin of %s/%s, or its token lacks "
+            "the permission. A commenter listed on a '*' line of %s does not need "
+            "this lookup. Response: %s",
+            account_id, workspace, repo_slug, OWNERS_PATH,
+            format_http_error_body(resp.text),
+        )
+        return "forbidden"
     if resp.status_code >= 400:
         _log.warning(
             "ai-pr-review: permission lookup failed for account %s: HTTP %d",
@@ -421,11 +443,53 @@ def _reply_for_unknown_finding_id(actor: str, finding_id: int) -> str:
     )
 
 
-def _reply_for_authority(actor: str, check: AuthorityCheck) -> str:
+ForbiddenContext = Literal["not-listed", "no-file", "admin-only"]
+
+
+def _forbidden_context(owners: OwnersLoad | None, min_role: str) -> ForbiddenContext:
+    """Why the owners file could not authorize a commenter, for the reply."""
+    if min_role == "admin":
+        return "admin-only"
+    if owners is None or owners.owners is None:
+        return "no-file"
+    return "not-listed"
+
+
+def _reply_for_authority(
+    actor: str, check: AuthorityCheck, forbidden: ForbiddenContext = "not-listed"
+) -> str:
     if check == "unauthorized":
         return (
             f"@{actor} you need write access to this repository to use "
             "`/ai-pr-review` commands, so this one was not applied."
+        )
+    if check == "forbidden":
+        cannot_check = (
+            "the review bot cannot check repository roles (Bitbucket answered "
+            "HTTP 403: the bot account is not an admin, or its token lacks the "
+            "permission)"
+        )
+        if forbidden == "admin-only":
+            return (
+                f"@{actor} `AI_BITBUCKET_VERDICT_MIN_ROLE` is `admin`, so only a "
+                f"role check can authorize this command, and {cannot_check}. "
+                "This command was not applied. A retry does not help. Make the "
+                "bot account an admin of this repository. The next review run "
+                "then applies this command."
+            )
+        if forbidden == "no-file":
+            return (
+                f"@{actor} `{OWNERS_PATH}` was not found, could not be read, or is larger than 64 KiB, "
+                f"and {cannot_check}. This command was not applied. A retry does "
+                f"not help. Add the file with a `*` line that lists your account, "
+                "or make the bot account an admin. The next review run then "
+                "applies this command."
+            )
+        return (
+            f"@{actor} you are not listed on a `*` line of `{OWNERS_PATH}`, and "
+            f"{cannot_check}. This command was not applied. A retry does not "
+            f"help. Add your account to that line, or ask a repository admin to "
+            "do it. The next review run then applies this command."
         )
     return (
         f"@{actor} could not verify your repository permissions right now, "
@@ -435,7 +499,11 @@ def _reply_for_authority(actor: str, check: AuthorityCheck) -> str:
 
 
 def _reply_for_verdict(
-    actor: str, command: SlashCommand, verdict: Verdict, *, persisted: bool | None,
+    actor: str,
+    command: SlashCommand,
+    verdict: Verdict,
+    *,
+    persisted: bool | None,
 ) -> str:
     """*persisted* (issue #906):
     - ``None`` -- the learning loop is off (``AI_FEEDBACK_LOOP`` unset), or
@@ -471,6 +539,52 @@ def _reply_for_verdict(
     return reply
 
 
+def _authorize(
+    client: RecordingClient,
+    *,
+    workspace: str,
+    repo_slug: str,
+    account_id: str,
+    min_role: str,
+    item: dict[str, Any],
+    owners: OwnersLoad | None,
+) -> AuthorityCheck:
+    """Decide whether the commenter may apply a verdict.
+
+    The owners file comes first, because it
+    needs no API call and works for a bot account that has only write access.
+    A listed commenter is authorized. Anyone else falls through to the
+    permission lookup, which only an admin bot account can pass. A missing or
+    unreadable owners file also falls through, so the check never authorizes on
+    a guess.
+
+    ``verdict_min_role=admin`` turns the owners file off: an operator who
+    asked for admins only did not ask for a list of names to widen that.
+
+    The owners file comes from the destination branch only (see
+    ``load_verdict_owners``), so a pull request cannot add its own author.
+    """
+    if owners is not None and owners.owners is not None and min_role != "admin":
+        user = item.get("user") or {}
+        uuid = user.get("uuid")
+        who = {
+            "account_id": account_id,
+            "uuid": str(uuid) if uuid else None,
+        }
+        kind = owners.owners.matches(**who)
+        if kind is not None:
+            _log.info(
+                "ai-pr-review: verdict authorized for account %s through %s "
+                "(%s match, destination branch)",
+                account_id, OWNERS_PATH, kind,
+            )
+            return "authorized"
+    return check_authority(
+        client, workspace=workspace, repo_slug=repo_slug,
+        account_id=account_id, min_role=min_role,
+    )
+
+
 def apply_pending_verdicts(
     client: RecordingClient,
     *,
@@ -480,6 +594,7 @@ def apply_pending_verdicts(
     existing_body: str,
     min_role: str,
     feedback_store: FeedbackStore | None = None,
+    owners: OwnersLoad | None = None,
 ) -> VerdictPollResult:
     """Poll `comments` (already fetched by the caller, see bitbucket.py's
     `_fetch_comments` cache) for `/ai-pr-review` verdict commands and apply
@@ -594,18 +709,25 @@ def apply_pending_verdicts(
                 )
                 continue
 
-            check = authority_cache.get(account_id)
-            if check is None:
-                check = check_authority(
+            cached = authority_cache.get(account_id)
+            if cached is None:
+                cached = _authorize(
                     client, workspace=workspace, repo_slug=repo_slug,
-                    account_id=account_id, min_role=min_role,
+                    account_id=account_id, min_role=min_role, item=item,
+                    owners=owners,
                 )
-                authority_cache[account_id] = check
+                authority_cache[account_id] = cached
+            check = cached
             if check != "authorized":
-                if check == "degraded":
+                # "forbidden" is retryable too: it heals once the owners file
+                # lists the commenter, or the bot account gets admin. The
+                # reply-key dedup keeps the repeated reply to one.
+                if check in ("degraded", "forbidden"):
                     comment_had_retryable_failure = True
+                context = _forbidden_context(owners, min_role)
+                key = f"authority:{check}" + (f":{context}" if check == "forbidden" else "")
                 replies.append(
-                    (comment_id, f"authority:{check}", _reply_for_authority(actor, check))
+                    (comment_id, key, _reply_for_authority(actor, check, context))
                 )
                 continue
 

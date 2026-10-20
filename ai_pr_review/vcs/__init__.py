@@ -305,6 +305,8 @@ def _build_bitbucket_from_env() -> BitbucketProvider:
             "rather than silently falling back to a weaker role"
         )
 
+    base_ref = os.environ.get("BASE_REF", "").strip()
+
     # Bitbucket parity (#918): actually set PR reviewer state, gated by its
     # own kill switch -- see BitbucketConfig.review_state's docstring.
     # Deny-list parse (defaults on) mirrors code_insights' pattern, not
@@ -342,6 +344,7 @@ def _build_bitbucket_from_env() -> BitbucketProvider:
         suppress_walkthrough=suppress_walkthrough,
         verdicts=verdicts,
         verdict_min_role=verdict_min_role,
+        base_ref=base_ref,
         review_state=review_state,
         enable_feedback_loop=enable_feedback_loop,
         feedback_branch=feedback_branch,

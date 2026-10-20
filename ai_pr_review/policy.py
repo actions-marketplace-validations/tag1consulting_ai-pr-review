@@ -297,6 +297,24 @@ def _read_policy_from_workspace(workspace: str) -> tuple[str | None, str | None]
     )
 
 
+def read_repo_file(
+    path: str, *, workspace: str, base_ref: str, source: str = "base-ref"
+) -> str | None:
+    """Read one repo file the way ``load_policy_file`` reads policy.yml.
+
+    ``source`` is ``"base-ref"`` (``git show origin/{base_ref}:{path}``, so a
+    pull request cannot change what is read) or ``"workspace"`` (the checked-out
+    tree, which includes the pull request's own changes). Returns ``None`` when
+    the file does not exist or cannot be read. A missing file is silent. Any
+    other failure prints one WARNING, as for policy.yml.
+    """
+    if source == "workspace":
+        return _read_workspace_policy_path(workspace, path)
+    if not base_ref:
+        return None
+    return _git_show_policy_path(workspace, base_ref, path)
+
+
 def _read_workspace_policy_path(workspace: str, path: str) -> str | None:
     full_path = os.path.join(workspace or ".", path)
     try:
