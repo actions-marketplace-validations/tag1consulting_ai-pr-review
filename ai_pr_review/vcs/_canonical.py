@@ -55,6 +55,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from ai_pr_review.findings.merge import _SEVERITY_ORDER, PROXIMITY_LINES, categories_compatible
+from ai_pr_review.findings.models import STANDALONE_SOURCES, is_standalone
 from ai_pr_review.vcs._finding_ids import (
     _ID_RE,
     fingerprint,
@@ -646,15 +647,12 @@ def _fuzzy_dismissed_match(
     return None
 
 
-_STANDALONE_SOURCE = "suppression-check"
-
-
 def _thread_is_standalone(t: PriorThread) -> bool:
     """Does `t` carry a suppression-check finding, which the merge never clusters?"""
     if not t.fingerprint:
         return False
     parts = split_fingerprint(t.fingerprint)
-    return len(parts) == 4 and parts[0] == _STANDALONE_SOURCE
+    return len(parts) == 4 and parts[0] in STANDALONE_SOURCES
 
 
 def _fuzzy_open_match(
@@ -665,7 +663,7 @@ def _fuzzy_open_match(
     # The merge keeps a suppression-check finding apart from every other
     # finding, so a thread of that kind matches only a finding of that kind.
     # Otherwise two findings on one line claim one thread on every re-run.
-    standalone = finding.source == _STANDALONE_SOURCE
+    standalone = is_standalone(finding)
     candidates = [
         t
         for t in open_threads
@@ -723,7 +721,7 @@ def classify(
     # A rolled-up representative stands for lines far from its own. A dismissal
     # near its line says nothing about the other lines, so only an exact
     # fingerprint verdict above can suppress it.
-    if not finding.rolled_up and _fuzzy_dismissed_match(finding, verdicts, all_threads) is not None:
+    if not finding.rolled_up_by_rule and _fuzzy_dismissed_match(finding, verdicts, all_threads) is not None:
         return Classified(finding, "suppressed", None)
 
     if verdicts.get(fp) == "fixed":

@@ -85,6 +85,50 @@ def combine_also_reported(groups: list[list[str]]) -> list[str]:
     return notes
 
 
+# The pipeline sets these fields. Agent JSON must never set them: each one
+# changes how a finding is scored, grouped, suppressed, or shown. The extract
+# step drops every name in this set from agent output. A test requires each
+# `Finding` field to be in exactly one of the two sets, so a new field forces a
+# decision here and an agent cannot set it by default (#1085).
+INTERNAL_ONLY_FIELDS: frozenset[str] = frozenset({
+    "out_of_diff",
+    "demoted_to_body",
+    "corroborated",
+    "rolled_up_by_rule",
+    "show_badge",
+    "judge_verdict",
+    "also_reported",
+    "style_only",
+})
+
+# The fields that agent JSON may carry. `source` and `sources` are stamped by
+# the extract step after the agent output is read.
+AGENT_INPUT_FIELDS: frozenset[str] = frozenset({
+    "severity",
+    "confidence",
+    "finding",
+    "source",
+    "sources",
+    "category",
+    "file",
+    "line",
+    "start_line",
+    "remediation",
+    "impact",
+    "trigger",
+    "suggested_code",
+    "agent",
+})
+
+# A finding from one of these sources never joins a cluster, and a thread that
+# carries one never matches a finding of another kind. The suppression-check
+# finding names a comment that turns off a security rule on a line. If it
+# clustered with the agent finding for that line, the agent finding (higher
+# severity) would win the headline and the suppression would vanish from the
+# review (#1077). The merge and the thread matching both use this one set.
+STANDALONE_SOURCES: frozenset[str] = frozenset({"suppression-check"})
+
+
 class Finding(BaseModel):
     """A single finding from an agent or static analyzer."""
 
@@ -132,11 +176,14 @@ class Finding(BaseModel):
     # source — independent corroboration of the same file+line region.
     # Internal-only: not serialised by to_dict().
     corroborated: bool = False
-    # Set by scope.rollup_repeated_findings on the representative of a rolled-up
-    # group. The representative stands for lines far from its own, so a fuzzy
-    # match on its line must not read as a match for the whole group (#1073).
+    # Set by scope.rollup_repeated_findings on the representative of a group
+    # that it rolled up by rule id (semgrep). Rule-id groups join hits with
+    # different messages, so the representative stands for lines far from its
+    # own, and a fuzzy dismissal match on its line must not read as a match for
+    # the whole group (#1073). A group of the same message is not marked: a
+    # dismissal of one hit covers the repeats of it.
     # Internal-only: not serialised by to_dict().
-    rolled_up: bool = False
+    rolled_up_by_rule: bool = False
     # Display preference only: when True, the renderers show the evidence label and
     # score beside the finding. The label is computed from this finding's own fields
     # when it is rendered (findings/badge.py), so it cannot go stale. The orchestrator
@@ -240,3 +287,8 @@ class Finding(BaseModel):
         if self.sources:
             d["sources"] = self.sources
         return d
+
+
+def is_standalone(f: Finding) -> bool:
+    """Does `f` come from a source that never joins a cluster?"""
+    return any(s in STANDALONE_SOURCES for s in (f.sources or ([f.source] if f.source else [])))

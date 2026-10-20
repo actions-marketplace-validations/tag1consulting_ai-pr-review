@@ -18,7 +18,7 @@ import bisect
 import logging
 from dataclasses import dataclass, field
 
-from ai_pr_review.findings.models import Finding, Severity, combine_also_reported
+from ai_pr_review.findings.models import Finding, Severity, combine_also_reported, is_standalone
 from ai_pr_review.findings.provenance import boosted_confidence, is_corroborated_cluster
 from ai_pr_review.findings.scope import is_analyzer_source
 
@@ -51,16 +51,7 @@ def _is_style(f: Finding) -> bool:
     return f.category == "docs" or f.style_only
 
 
-# A finding from one of these sources never joins a cluster. The
-# suppression-check finding names a comment that turns off a security rule on
-# a line. If it clustered with the agent finding for that line, the agent
-# finding (higher severity) would win the headline and the suppression would
-# vanish from the review (#1077).
-_STANDALONE_SOURCES = frozenset({"suppression-check"})
-
-
-def _is_standalone(f: Finding) -> bool:
-    return any(s in _STANDALONE_SOURCES for s in (f.sources or ([f.source] if f.source else [])))
+_is_standalone = is_standalone
 
 
 def merge_findings(

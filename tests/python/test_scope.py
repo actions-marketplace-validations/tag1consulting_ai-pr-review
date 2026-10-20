@@ -677,3 +677,14 @@ def test_semgrep_rollup_keeps_impact_and_trigger_empty() -> None:
 def test_non_semgrep_analyzer_still_needs_more_than_the_global_threshold() -> None:
     assert len(rollup_repeated_findings(_make_repeated(2))) == 2
     assert len(rollup_repeated_findings(_make_repeated(ROLLUP_THRESHOLD + 1))) == 1
+
+
+def test_a_group_of_the_same_message_is_not_marked_as_rolled_up_by_rule() -> None:
+    group = [
+        Finding(severity="Low", confidence=90, finding="Missing doc comment", source="phpcs",
+                file="a.php", line=n, category="lint")
+        for n in range(1, 8)
+    ]
+    (rolled,) = rollup_repeated_findings(group)
+    assert "occurrences" in rolled.finding
+    assert rolled.rolled_up_by_rule is False
