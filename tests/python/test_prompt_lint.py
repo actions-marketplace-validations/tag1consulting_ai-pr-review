@@ -28,6 +28,8 @@ from pathlib import Path
 
 import pytest
 
+from ai_pr_review.findings.models import CATEGORIES
+
 PROMPTS_DIR = Path(__file__).resolve().parents[2] / "prompts"
 
 # Every prompt in this engine backs a tool-less HTTP call. None of these
@@ -114,3 +116,94 @@ def test_no_severity_derived_from_confidence(filename: str) -> None:
         "harm-based severity definition and letting a confidently-identified "
         "but harmless finding reach a level that blocks the merge (#798)"
     )
+
+
+# The prompts that carry their own copy of the `category` list. code-reviewer.md
+# and silent-failure-hunter.md rely on _trailer-findings.md alone.
+_CATEGORY_LIST_PROMPTS = (
+    "_trailer-findings.md",
+    "adversarial-general.md",
+    "architecture-reviewer.md",
+    "blind-hunter.md",
+    "edge-case-hunter.md",
+    "security-reviewer.md",
+)
+
+
+@pytest.mark.parametrize("filename", _CATEGORY_LIST_PROMPTS)
+def test_category_list_names_every_category(filename: str) -> None:
+    """A category the model is not told about is never chosen. Adding one to
+    findings/models.py must reach every prompt that lists the categories (#1076)."""
+    content = (PROMPTS_DIR / filename).read_text()
+    missing = [c for c in CATEGORIES if f"`{c}`" not in content]
+    assert not missing, f"{filename} does not list the categories {missing}"
+
+
+def test_security_reviewer_routes_crypto_findings_to_crypto_category() -> None:
+    content = (PROMPTS_DIR / "security-reviewer.md").read_text()
+    section = content.split("### Cryptographic Issues", 1)[1].split("###", 1)[0]
+    assert "`crypto`" in section
+    # A hardcoded key is a secret. The secret scanners report `secret`, and the same
+    # category merges the agent finding with theirs and corroborates it.
+    assert "hardcoded key, IV or token secret: use `secret`" in section
+
+
+@pytest.mark.parametrize("filename", _CATEGORY_LIST_PROMPTS)
+def test_every_crypto_hint_keeps_hardcoded_keys_in_the_secret_category(filename: str) -> None:
+    """A prompt can carry its own copy of the `crypto` hint. Every copy must say that a
+    hardcoded key stays `secret`, or one agent contradicts the others and its finding
+    does not merge with the secret scanners' (#1076)."""
+    content = (PROMPTS_DIR / filename).read_text()
+    assert "insecure token or key handling" not in content
+    for line in (ln for ln in content.splitlines() if ln.startswith("Use `crypto`")):
+        assert "A hardcoded key or secret stays `secret`" in line, f"{filename}: {line}"
+
+
+@pytest.mark.parametrize("filename", _CATEGORY_LIST_PROMPTS)
+def test_embedded_schema_names_impact_and_trigger(filename: str) -> None:
+    """The example `json-findings` line is the schema the model copies (#1078)."""
+    lines = [
+        line
+        for line in (PROMPTS_DIR / filename).read_text().splitlines()
+        if line.startswith("[{") and '"remediation"' in line
+    ]
+    assert lines, f"{filename} has no json-findings example line"
+    for line in lines:
+        assert '"impact"' in line and '"trigger"' in line, f"{filename}: {line[:80]}"
+
+
+def test_trailer_asks_for_one_kind_of_defect_per_finding() -> None:
+    content = (PROMPTS_DIR / "_trailer-findings.md").read_text()
+    assert "Put one kind of defect in each finding" in content
+    assert "Do not move text from `finding` into `impact`" in content
+
+
+def test_code_reviewer_checks_cross_function_consistency() -> None:
+    """#1079: a value that one function writes and another reads must agree on
+    transport, name, prefix and format. The prompt names the cookie and header case."""
+    content = (PROMPTS_DIR / "code-reviewer.md").read_text()
+    section = content.split("**Cross-Function Consistency**", 1)[1].split("**Code Quality**", 1)[0]
+    for needle in ("transport", "prefix", "cookie", "`Authorization` header", "Bearer"):
+        assert needle in section, needle
+    assert "Do not guess" in section
+
+
+def test_edge_case_hunter_rates_destructive_shell_gaps_critical() -> None:
+    """#1080: the scope line excludes security implications, so the destructive
+    operation rule is written as an explicit exception there and again as a
+    Critical clause."""
+    content = (PROMPTS_DIR / "edge-case-hunter.md").read_text()
+    scope = content.split("## Scope Boundaries", 1)[1].split("## ", 1)[0]
+    assert "Exception, destructive operations" in scope
+    for needle in ("`chmod`", "`/*`", "`$DIR/*`"):
+        assert needle in scope, needle
+    severity = content.split("## Severity Classification", 1)[1].split("## ", 1)[0]
+    critical = next(line for line in severity.splitlines() if line.startswith("- **Critical**"))
+    for needle in ("`chmod`", "`/*`", "root"):
+        assert needle in critical, needle
+
+
+def test_shell_profile_flags_empty_variable_glob_on_destructive_commands() -> None:
+    content = (Path(PROMPTS_DIR).parent / "language-profiles" / "shell.md").read_text()
+    line = next(line for line in content.splitlines() if "empty value expands to `/*`" in line)
+    assert "`chmod`" in line and "`${VAR:?message}`" in line and "root" in line

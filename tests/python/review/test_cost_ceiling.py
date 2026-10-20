@@ -246,6 +246,89 @@ class TestLogCostEstimate:
         assert "ceiling=$2.0000" in caplog.text
 
 
+class TestCostSplit:
+    """#1055: the estimate splits cost into an input part and an output-cap part."""
+
+    def test_review_estimate_splits_input_and_output_cost(self) -> None:
+        estimate = estimate_review_cost(
+            agents=[_agent("a"), _agent("b")],
+            diff_text="a" * 1000,  # estimate_billed_tokens -> 611
+            shared_context_text="",
+            language_profile_text="",
+            standard_model="known-model",
+            premium_model="",
+            review_mode="quick",
+            effective_max_output_tokens=50,
+            pricing_data=_PRICING,
+        )
+        for agent in estimate.per_agent:
+            # 611 input tokens at 1 unit each, 50 output tokens at 2 units each.
+            assert agent.estimated_input_cost_units == 611
+            assert agent.estimated_output_cost_units == 100
+            assert (
+                agent.estimated_input_cost_units + agent.estimated_output_cost_units
+                == agent.estimated_cost_units
+            )
+        assert estimate.total_input_cost_units == 1222
+        assert estimate.total_output_cost_units == 200
+        assert (
+            estimate.total_input_cost_units + estimate.total_output_cost_units
+            == estimate.total_cost_units
+        )
+
+    def test_unpriced_agent_adds_nothing_to_the_split(self) -> None:
+        estimate = estimate_review_cost(
+            agents=[_agent("a")],
+            diff_text="a" * 1000,
+            shared_context_text="",
+            language_profile_text="",
+            standard_model="no-such-model",
+            premium_model="",
+            review_mode="quick",
+            effective_max_output_tokens=50,
+            pricing_data=_PRICING,
+        )
+        assert estimate.total_input_cost_units == 0
+        assert estimate.total_output_cost_units == 0
+        assert estimate.per_agent[0].estimated_input_cost_units == 0
+
+    def test_preflight_estimate_and_merge_carry_the_split(self) -> None:
+        preflight = estimate_preflight_agent_cost(
+            agent_name="pr-summarizer",
+            model="known-model",
+            diff_text="a" * 1000,
+            output_tokens=100,
+            pricing_data=_PRICING,
+        )
+        assert preflight.estimated_input_cost_units == 611
+        assert preflight.estimated_output_cost_units == 200
+        merged = merge_cost_estimates(preflight, preflight)
+        assert merged.total_input_cost_units == 1222
+        assert merged.total_output_cost_units == 400
+
+    def test_log_line_appends_the_split_after_the_existing_fields(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        estimate = estimate_review_cost(
+            agents=[_agent("code-reviewer")],
+            diff_text="a" * 1000,
+            shared_context_text="",
+            language_profile_text="",
+            standard_model="known-model",
+            premium_model="",
+            review_mode="quick",
+            effective_max_output_tokens=50,
+            pricing_data=_PRICING,
+        )
+        with caplog.at_level(logging.WARNING, logger="ai_pr_review.review.cost_ceiling"):
+            log_cost_estimate(estimate, ceiling_usd=0.0)
+        # 611 + 100 = 711 units, so $0.0711 total, $0.0611 input, $0.0100 output cap.
+        assert (
+            "COST_ESTIMATE total=$0.0711 ceiling=none agents=1 any_unknown_pricing=False "
+            "code-reviewer=$0.0711 input=$0.0611 output_cap=$0.0100"
+        ) in caplog.text
+
+
 class TestEstimatePreflightAgentCost:
     def test_uses_diff_text_only_as_input_proxy(self) -> None:
         estimate = estimate_preflight_agent_cost(

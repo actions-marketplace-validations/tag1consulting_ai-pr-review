@@ -158,6 +158,7 @@ class TestRunHadolintFindings:
             mock_run.return_value = MagicMock(returncode=0, stdout=payload, stderr="")
             findings = _run_hadolint(cf, Path("/dev/null"))
         assert len(findings) == 1
+        assert findings[0].style_only is True
         assert findings[0].severity == "Low"
 
     def test_returncode_one_treated_as_findings(self, tmp_path: Path) -> None:

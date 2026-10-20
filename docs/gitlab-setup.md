@@ -29,7 +29,7 @@ render_with_liquid: false
 
 ## Slash command alternatives
 
-GitLab CI has no `issue_comment` event trigger. The `/ai-pr-review` slash commands (rescan, review-full, skip, dismiss) work on GitHub PRs. They are not available on GitLab MRs.
+GitLab CI has no `issue_comment` event trigger. The `/ai-pr-review` slash commands (rescan, review-full, skip, dismiss, false-positive, wont-fix, fixed, feedback) work on GitHub PRs. They are not available on GitLab MRs.
 
 **Workarounds for common operations:**
 
@@ -69,7 +69,7 @@ In your GitLab project, go to **Settings → CI/CD → Variables** and add:
 | `GITLAB_TOKEN` | Yes | Optional | The project access token from step 1 |
 | `ANTHROPIC_API_KEY` | Yes | Optional | Your Anthropic API key (or swap for your provider) |
 | `AI_PROVIDER` | No | No | `anthropic` (default). Alternatives: `openai`, `google`, `bedrock-proxy` |
-| `AI_REVIEW_MODE` | No | No | Empty (default): defer to `.github/ai-pr-review/policy.yml` route matching if present, else `quick`. Set to `full` to override. |
+| `AI_REVIEW_MODE` | No | No | Empty (default): defer to `.ai-pr-review/policy.yml` route matching if present, else `quick`. Set to `full` to override. |
 
 ### 3. Copy the starter pipeline
 
@@ -83,10 +83,11 @@ The starter pipeline translates the native GitLab CI variables to the canonical 
 |---|---|
 | `VCS_PROVIDER` | Must be set to `gitlab` |
 | `PR_NUMBER` | `$CI_MERGE_REQUEST_IID` |
+| `MR_IID` | `$CI_MERGE_REQUEST_IID` |
 | `BASE_REF` | `$CI_MERGE_REQUEST_TARGET_BRANCH_NAME` |
 | `HEAD_SHA` | `$CI_COMMIT_SHA` |
 | `GITLAB_PROJECT_ID` | `$CI_PROJECT_ID` |
-| `GITLAB_MR_DIFF_BASE_SHA` | `$CI_MERGE_REQUEST_DIFF_BASE_SHA` |
+| `GITLAB_DIFF_BASE_SHA` | `$CI_MERGE_REQUEST_DIFF_BASE_SHA` |
 | `GITLAB_TOKEN` | CI/CD variable (masked) |
 | `GITHUB_REPOSITORY` | `$CI_PROJECT_PATH` (used as fallback project identifier) |
 | `AI_PROVIDER` | CI/CD variable (default `anthropic`) |
@@ -94,7 +95,7 @@ The starter pipeline translates the native GitLab CI variables to the canonical 
 | `ANTHROPIC_API_KEY` (or equivalent) | CI/CD variable (masked) |
 | `GITLAB_BOT_USERNAME` | (optional) CI/CD variable. If unset, the review detects it with `GET /user` |
 
-> **Note:** `GITLAB_MR_DIFF_BASE_SHA` is required for inline discussion threads. Without it, the review posts all findings in the summary comment body, not as inline discussions.
+> **Note:** The review needs `GITLAB_DIFF_BASE_SHA` or `CI_MERGE_REQUEST_DIFF_BASE_SHA`. If neither is set, the review stops with a configuration error.
 
 > **Forcing a full re-review:** The `ai-review-rescan` label mechanism works only in GitHub Actions. For GitLab, set `FORCE_FULL_DIFF=true` as a CI/CD variable for one run. Or delete the summary comment on the MR to reset the SHA watermark.
 
@@ -146,7 +147,7 @@ The inline discussion position is not valid. The line can be missing from the MR
 
 ### `WARNING: No diff base SHA available`
 
-`GITLAB_MR_DIFF_BASE_SHA` / `CI_MERGE_REQUEST_DIFF_BASE_SHA` is not set. This happens when the pipeline is not a merge request pipeline. Make sure your `rules:` block includes `$CI_PIPELINE_SOURCE == "merge_request_event"`. Without the base SHA, the review skips inline discussions and puts all findings in the summary comment.
+`GITLAB_DIFF_BASE_SHA` / `CI_MERGE_REQUEST_DIFF_BASE_SHA` is not set. This happens when the pipeline is not a merge request pipeline. Make sure your `rules:` block includes `$CI_PIPELINE_SOURCE == "merge_request_event"`. Without the base SHA, the review stops with a configuration error.
 
 ### `ERROR: git diff against 'origin/<ref>...<sha>' failed`
 

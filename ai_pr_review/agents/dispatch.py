@@ -87,6 +87,7 @@ class FailedAgent:
     reason: str
     exit_code: int
     elapsed_ms: int
+    model: str = ""
 
 
 @dataclass(frozen=True)
@@ -458,6 +459,7 @@ async def _run_single_agent(
     enrichment: _EnrichmentBlock | None = None,
 ) -> None:
     start = time.monotonic()
+    model_id = ""
     try:
         # pr-summarizer composes its own prompt + user message (manifest +
         # commit log + diff) via ai_pr_review.agents.summarizer.*. The generic
@@ -649,6 +651,7 @@ async def _run_single_agent(
                             ),
                             exit_code=fb_exit_code,
                             elapsed_ms=elapsed,
+                            model=model_id,
                         ))
                         return
                 else:
@@ -679,7 +682,8 @@ async def _run_single_agent(
     except BaseException as exc:
         # Catch BaseException (not Exception) so SystemExit from llm/client.py
         # — raised on auth failure (exit 1), retry exhaustion (exit 2), or
-        # content-filter block (exit 3) — is isolated to a single FailedAgent
+        # content-filter block (exit 3), or a provider "prompt too long"
+        # rejection (exit 4), is isolated to a single FailedAgent
         # instead of cancelling sibling tasks in the anyio task group.
         # _is_uncatchable() re-raises KeyboardInterrupt (Ctrl-C) and the
         # async backend's own cancellation exception (#810 review finding
@@ -695,6 +699,7 @@ async def _run_single_agent(
             reason=_format_exception_chain(exc),
             exit_code=exit_code,
             elapsed_ms=elapsed,
+            model=model_id,
         ))
 
 

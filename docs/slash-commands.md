@@ -7,7 +7,7 @@ render_with_liquid: false
 
 # Slash commands
 
-> **This page describes the GitHub real-time model.** The commands on this page use the GitHub Actions `issue_comment` and `pull_request_review_comment` event triggers. Bitbucket Pipelines and GitLab CI have no native equivalent. A command therefore takes effect immediately after you post it only on GitHub. For GitLab workarounds (manual pipeline triggers, CI variables), see [GitLab setup: slash command alternatives](gitlab-setup#slash-command-alternatives). Bitbucket has a real, working subset of these commands. The subset has these limits: only `dismiss`, `false-positive`, `wont-fix`, and `fixed` work, only as top-level comments, with no inline-reply form. The next review run applies them, not the comment itself. See [Bitbucket setup: Dismissing findings](bitbucket-setup#dismissing-findings).
+> **This page describes the GitHub real-time model.** The commands on this page use the GitHub Actions `issue_comment` and `pull_request_review_comment` event triggers. Bitbucket Pipelines and GitLab CI have no native equivalent. A command therefore takes effect immediately after you post it only on GitHub. For GitLab workarounds (manual pipeline triggers, CI variables), see [GitLab setup: slash command alternatives](gitlab-setup#slash-command-alternatives). Bitbucket has a real, working subset of these commands. The subset has these limits: only `dismiss`, `false-positive`, `wont-fix`, `fixed`, and `feedback` work, only as top-level comments, with no inline-reply form. The next review run applies them, not the comment itself. See [Bitbucket setup: Dismissing findings](bitbucket-setup#dismissing-findings).
 
 AI PR Review supports commands that you post as PR comments. The workflow listens on two events: `issue_comment` (top-level PR comments) and `pull_request_review_comment` (replies on inline review threads).
 
@@ -182,6 +182,8 @@ Body-level findings have no backing review thread, so nothing needs resolution. 
 ### `/ai-pr-review feedback <text>`
 
 Stores free-form feedback in the learning loop. The feedback does not belong to a specific finding verdict. Use it, for example, to note that a certain category of finding is too noisy for this repository.
+
+**On Bitbucket**, the review run applies the command at the next run (see [Bitbucket setup](bitbucket-setup#dismissing-findings)). The text is required. A bare command gets a usage reply and saves nothing. An `F<n>` before the text is optional. When you give one, the entry records the source and file of that finding. The command uses the same authorization as `false-positive` and `wont-fix`: the owners file first, then the repository permission lookup. It saves the text only when `AI_FEEDBACK_LOOP=true` and `AI_BITBUCKET_VERDICTS=true`. The text passes the same sanitization as on GitHub.
 
 ### `/ai-pr-review explain [F<n>]`
 

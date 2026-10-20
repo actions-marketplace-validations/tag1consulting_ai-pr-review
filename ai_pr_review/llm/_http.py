@@ -32,12 +32,45 @@ class LLMError(Exception):
     """Permanent LLM error (bad API key, invalid request, unknown provider)."""
 
 
+class LLMContextLengthError(LLMError):
+    """The provider rejected the prompt as longer than the model context window.
+
+    A permanent error (a retry sends the same prompt), kept as an `LLMError`
+    subclass so a caller that does not know about it still sees a permanent
+    failure. `llm/client.py` maps it to exit code 4.
+    """
+
+
 class LLMTransientError(Exception):
     """Transient LLM error — all retries exhausted on 429/5xx/timeout."""
 
 
 class LLMContentError(Exception):
     """Response blocked by provider safety/recitation filter."""
+
+
+# Provider 400 texts that mean "the prompt is longer than the context window".
+# Matched in lower case against the response body. Only Anthropic is covered:
+# the text "prompt is too long" was observed in a real run (issue #1056, for
+# example "prompt is too long: 4128365 tokens > 1000000 maximum"). The OpenAI,
+# Google and Bedrock texts are not matched, because the provider docs do not
+# state the exact 400 message. A 400 with any other text keeps the permanent
+# `LLMError` behavior. Add a text here only after you see it in a real response.
+_CONTEXT_LENGTH_MARKERS: tuple[str, ...] = ("prompt is too long",)
+
+# The provider labels (`provider_label` of `retry_post`) whose 400 text is
+# verified. The match runs only for these. Another provider, or an
+# openai-compatible endpoint, can return a 400 that happens to contain the
+# phrase, and that must stay a plain failure.
+_CONTEXT_LENGTH_PROVIDERS: frozenset[str] = frozenset({"Anthropic"})
+
+
+def is_context_length_rejection(status_code: int, body: str) -> bool:
+    """True when a non-2xx response is a verified "prompt too long" 400."""
+    if status_code != 400:
+        return False
+    lowered = body.lower()
+    return any(marker in lowered for marker in _CONTEXT_LENGTH_MARKERS)
 
 
 async def retry_post(
@@ -53,7 +86,8 @@ async def retry_post(
     """POST with exponential back-off retry on transient errors.
 
     Returns the successful Response. Raises LLMTransientError if all retries
-    are exhausted, LLMError on permanent failures.
+    are exhausted, LLMContextLengthError on a verified "prompt too long" 400, and
+    LLMError on other permanent failures.
     """
     attempt = 0
 
@@ -110,7 +144,13 @@ async def retry_post(
                     "could not read error response body: %s; raw bytes: %r",
                     log_exc, response.content[:200],
                 )
-            raise LLMError(
+            error_cls = (
+                LLMContextLengthError
+                if provider_label in _CONTEXT_LENGTH_PROVIDERS
+                and is_context_length_rejection(response.status_code, response.text)
+                else LLMError
+            )
+            raise error_cls(
                 f"{provider_label} returned HTTP {response.status_code}: {response.text[:500]}"
             )
 

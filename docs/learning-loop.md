@@ -87,7 +87,7 @@ When `AI_FEEDBACK_LOOP=true`, the engine injects the `<repo-feedback>` block at 
 Before ranking, the engine applies a relevance floor. It excludes an entry that has a non-empty `file` that matches no changed path in the PR. An entry with an empty `file` always passes the floor.
 
 The engine then ranks the remaining entries by relevance before injection:
-- **+2 points** if `entry.file` appears in the changed files of the PR
+- **+2 points** if `entry.file` and a changed path of the PR contain each other
 - **+1 point** if `entry.rule_id` is non-empty
 
 The block has a token budget (`AI_FEEDBACK_MAX_TOKENS`, default 2048 tokens).
@@ -149,5 +149,5 @@ The engine injects the `<repo-feedback>` block into the agent system prompts wit
 | Provider | Learning loop |
 |----------|---------------|
 | GitHub | Full support |
-| Bitbucket | Full support (issue #906). Only `false-positive` and `wont-fix`. A separate issue (#933) tracks `feedback` command handling |
+| Bitbucket | Full support (issue #906). `false-positive`, `wont-fix` and `feedback` (issue #933). `feedback` needs text and takes an optional `F<n>`. It uses the same authorization as the verdicts |
 | GitLab | Stub (no-op) |

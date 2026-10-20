@@ -55,6 +55,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from ai_pr_review.findings.merge import _SEVERITY_ORDER, PROXIMITY_LINES, categories_compatible
+from ai_pr_review.findings.models import STANDALONE_SOURCES, is_standalone
 from ai_pr_review.vcs._finding_ids import (
     _ID_RE,
     fingerprint,
@@ -605,8 +606,13 @@ def _fuzzy_dismissed_match(
     finding: Finding,
     verdicts: Mapping[str, str],
     all_threads: Sequence[PriorThread],
+    *,
+    same_source: bool = False,
 ) -> str | None:
     """Return a dismissed fingerprint fuzzy-matching `finding`'s location, or `None`.
+
+    With `same_source`, a dismissed fingerprint also needs the same source tag
+    as `finding`.
 
     Applies the same `(file, ±PROXIMITY_LINES, compatible category)` key the
     original design's decision #5 specifies for *every* row of the decision
@@ -633,6 +639,13 @@ def _fuzzy_dismissed_match(
             continue
         if abs(d_line - finding.line) > PROXIMITY_LINES:
             continue
+        if same_source and split_fingerprint(fp)[:1] != [finding.source]:
+            continue
+        # A suppression-check finding and a finding of any other kind never
+        # stand for each other, so a dismissal of one cannot hide the other
+        # (#1086). This is the rule that `_fuzzy_open_match` applies.
+        if _fingerprint_is_standalone(fp) != is_standalone(finding):
+            continue
         thread = _find_thread_by_fingerprint(all_threads, fp)
         d_category = thread.category if thread else None
         d_severity = thread.severity if thread else None
@@ -646,11 +659,27 @@ def _fuzzy_dismissed_match(
     return None
 
 
+def _fingerprint_is_standalone(fp: str | None) -> bool:
+    """Does `fp` name a suppression-check finding, which the merge never clusters?"""
+    if not fp:
+        return False
+    parts = split_fingerprint(fp)
+    return len(parts) == 4 and parts[0] in STANDALONE_SOURCES
+
+
+def _thread_is_standalone(t: PriorThread) -> bool:
+    return _fingerprint_is_standalone(t.fingerprint)
+
+
 def _fuzzy_open_match(
-    finding: Finding, open_threads: Sequence[PriorThread]
+    finding: Finding, open_threads: Sequence[PriorThread], fp: str | None = None
 ) -> PriorThread | None:
     if not finding.file or finding.line is None:
         return None
+    # The merge keeps a suppression-check finding apart from every other
+    # finding, so a thread of that kind matches only a finding of that kind.
+    # Otherwise two findings on one line claim one thread on every re-run.
+    standalone = is_standalone(finding)
     candidates = [
         t
         for t in open_threads
@@ -658,11 +687,22 @@ def _fuzzy_open_match(
         and t.line is not None
         and abs(t.line - finding.line) <= PROXIMITY_LINES
         and categories_compatible(t.category, finding.category)
+        and _thread_is_standalone(t) == standalone
     ]
     if not candidates:
         return None
-    # Prefer the closest line match; ties broken by the oldest comment.
-    candidates.sort(key=lambda t: (abs((t.line or 0) - (finding.line or 0)), t.comment_id))
+    # Prefer the thread whose current fingerprint is this finding's own, then a
+    # thread that kept it as a prior fingerprint, then the closest line match.
+    # Ties are broken by the oldest comment.
+    candidates.sort(
+        key=lambda t: (
+            0 if fp is not None and t.fingerprint == fp
+            else 1 if fp is not None and fp in t.prior_fingerprints
+            else 2,
+            abs((t.line or 0) - (finding.line or 0)),
+            t.comment_id,
+        )
+    )
     return candidates[0]
 
 
@@ -694,14 +734,25 @@ def classify(
 
     if verdicts.get(fp) == "dismissed":
         return Classified(finding, "suppressed", None)
-    if _fuzzy_dismissed_match(finding, verdicts, all_threads) is not None:
+    # A rolled-up representative stands for lines far from its own. A rule-id
+    # group joins hits with different messages, so a dismissal near its line
+    # says nothing about the others and only an exact fingerprint verdict above
+    # can suppress it. A group of one message may use the fuzzy match, but only
+    # against a dismissal from its own source, so a dismissed finding of
+    # another source nearby cannot hide the whole group (#1086).
+    if finding.rollup_kind != "rule" and (
+        _fuzzy_dismissed_match(
+            finding, verdicts, all_threads, same_source=finding.rollup_kind == "message"
+        )
+        is not None
+    ):
         return Classified(finding, "suppressed", None)
 
     if verdicts.get(fp) == "fixed":
         thread = _find_thread_by_fingerprint(all_threads, fp)
         return Classified(finding, "recurred", thread)
 
-    thread = _fuzzy_open_match(finding, open_threads)
+    thread = _fuzzy_open_match(finding, open_threads, fp)
     if thread is not None:
         if thread.is_outdated:
             return Classified(finding, "new", None)

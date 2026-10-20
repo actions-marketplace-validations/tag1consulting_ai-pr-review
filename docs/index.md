@@ -14,8 +14,8 @@ hero_tagline: "AI-powered pull request review using multiple LLM agents. Posts a
     <p>Up to 9 specialized AI agents analyze your code from different perspectives: architecture, security, edge cases, and more.</p>
   </div>
   <div class="feature">
-    <h3><span class="feature-icon">&#9670;</span> 17 Static Analyzers</h3>
-    <p>Shellcheck, semgrep, trufflehog, ruff, golangci-lint, hadolint, checkov, phpcs, phpstan, kube-linter, and tflint ship as binaries in the container image. ESLint, cve-check, dep-exists, and three documentation analyzers (docs-api-check, docs-ref-check, and docs-drift-check) also run. All 17 run as native Python.</p>
+    <h3><span class="feature-icon">&#9670;</span> 18 Static Analyzers</h3>
+    <p>Shellcheck, semgrep, trufflehog, ruff, golangci-lint, hadolint, checkov, phpcs, phpstan, kube-linter, and tflint ship as binaries in the container image. ESLint runs only when you install it. cve-check, dep-exists, suppression-check (comments that turn off a security rule), and three documentation analyzers (docs-api-check, docs-ref-check, and docs-drift-check) also run. All 18 run as native Python.</p>
   </div>
   <div class="feature">
     <h3><span class="feature-icon">&#9670;</span> Works Everywhere</h3>
@@ -68,6 +68,20 @@ jobs:
 
 Reviews start on the next PR.
 
+## What's new in v2.24.0
+
+**A provider "prompt too long" rejection skips the review.** Before, the provider rejected the prompt, every agent failed, and the comment said "2 failed agents". Now the review stops and says which agent does not fit. Use `exclude-patterns` for generated files.
+
+**Behavior change: the severity icons are different shapes.** Critical is ⛔, High is 🚨, Medium is 🔶, and Low is 💬. 🚨 meant Critical before. An old comment keeps its old icon until the next review rewrites it.
+
+**Bitbucket: the `feedback` command.** `/ai-pr-review feedback <text>` saves a note to the learning loop, with the same authorization as the verdict commands.
+
+**Behavior change: a style finding no longer merges into a nearby security finding.** A missing docblock used to absorb a security finding on a nearby line and show it as "corroborated". Now style and documentation findings stay separate, phpcs style sniffs are Low, and fewer findings show as corroborated.
+
+**A new analyzer, `suppression-check`.** It flags a comment that turns off a security rule, such as `# noqa: S301` or `# nosec`. Add it to an `analyzers` allowlist if you use one.
+
+See [Version History → v2.24.0](version-history/v2.24.0) for details.
+
 ## What's new in v2.23.2
 
 **Behavior change: Bitbucket verdict owners are IDs only.** An `@nickname` on a `*` line of `.bitbucket/CODEOWNERS` no longer grants, because a nickname is not unique. List the `account_id` or the `{uuid}` instead. The review logs a warning that names each ignored nickname.
@@ -83,14 +97,6 @@ See [Version History → v2.23.2](version-history/v2.23.2) for details.
 **Bitbucket verdict commands work for a bot account with write access.** The review reads the people who may use `/ai-pr-review` commands from `.bitbucket/CODEOWNERS` (a `*` line). Before, the admin-only permission lookup failed for every commenter. See [Bitbucket setup](bitbucket-setup#dismissing-findings).
 
 See [Version History → v2.23.1](version-history/v2.23.1) for details.
-
-## What's new in v2.23.0
-
-**The review skips when the diff does not fit the model context window.** Before, a very large diff went to the provider, which rejected it, and the comment said "2 failed agents". Now the review stops before any LLM call and says which agent does not fit. Use `exclude-patterns` for generated files. Set `context-window-margin: '0'` to turn the check off.
-
-**Behavior change: reported cost is higher.** The token table and the usage line now count the pr-summarizer and issue-linker, which were left out before. `token-usage-warn-usd` can fire on a run that did not fire it before.
-
-See [Version History → v2.23.0](version-history/v2.23.0) for details.
 
 ## Learn more
 

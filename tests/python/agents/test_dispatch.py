@@ -1453,3 +1453,32 @@ def test_effective_prompt_missing_base_raises(tmp_path: Path) -> None:
     missing = script_dir / "prompts" / "nonexistent.md"
     with pytest.raises(FileNotFoundError, match="base prompt not found"):
         effective_prompt("code-reviewer", missing, script_dir, enable_suggestions=False)
+
+
+@pytest.mark.anyio
+async def test_run_tier_records_prompt_too_long_exit_code_and_model(tmp_path: Path) -> None:
+    """#1056: exit code 4 (provider rejected the prompt as too long) is copied
+    into FailedAgent with the model id, and does not trigger the content-filter
+    fallback, which is only for exit code 3."""
+    base = _make_context(tmp_path)
+    ctx = DispatchContext(
+        script_dir=base.script_dir,
+        mode="full",
+        diff_path=base.diff_path,
+        provider="anthropic",
+        standard_model="claude-standard",
+        premium_model="claude-premium",
+    )
+    seen_models: list[str] = []
+
+    async def mock_llm(request: Any) -> LLMResponse:
+        seen_models.append(request.model_id)
+        raise SystemExit(4)
+
+    successes, failures = await run_tier(
+        agents=[get_agent("security-reviewer")], llm_call=mock_llm, context=ctx, semaphore_size=1,
+    )
+    assert successes == []
+    assert [f.exit_code for f in failures] == [4]
+    assert failures[0].model == "claude-premium"
+    assert seen_models == ["claude-premium"]  # one call, no standard-model retry

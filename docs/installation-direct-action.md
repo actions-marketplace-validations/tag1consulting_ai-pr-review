@@ -104,7 +104,7 @@ jobs:
 
 The snippet above uses the `@v4` tag for readability. To pin third-party actions to commit SHAs (recommended), copy [`examples/workflows/pr-review.yml`](https://github.com/tag1consulting/ai-pr-review/blob/main/examples/workflows/pr-review.yml). Renovate keeps that file pinned and up to date.
 
-To pin a specific version, replace `@main` with a tag or commit SHA (for example `@v2.23.2` or `@cb9d7ee`).
+To pin a specific version, replace `@main` with a tag or commit SHA (for example `@v2.24.0` or `@cb9d7ee`).
 
 ## 2. Configure secrets and variables
 
@@ -147,6 +147,6 @@ The root composite action installs `shellcheck` automatically if the runner does
 | phpstan | PHP | `composer global require phpstan/phpstan` |
 | kube-linter | Kubernetes manifests | Download from [GitHub releases](https://github.com/stackrox/kube-linter/releases) |
 | tflint | Terraform | Download from [GitHub releases](https://github.com/terraform-linters/tflint/releases) |
-| eslint | JS/TS | Uses the project's own `node_modules/.bin/eslint` or `npx`. It does nothing if no config is present |
+| eslint | JS/TS | Needs an `eslint` binary on `PATH`. It does nothing if no config is present |
 
 > For pinned, SHA-verified installs, use the container action. It ships the analyzer binaries (except eslint) at fixed versions, and you do not need to set up the workflow.

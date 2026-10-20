@@ -144,7 +144,7 @@ jobs:
         with:
           # AI_REVIEW_IMAGE_TAG: container image tag (default: latest)
           # Set to 'dev' to dogfood pre-release builds, or pin to a release
-          # tag (e.g. '1.6.0') for reproducibility.
+          # tag (e.g. '2.24.0') for reproducibility.
           image-tag: ${{ vars.AI_REVIEW_IMAGE_TAG || 'latest' }}
           # --- Provider ---
           # Set AI_REVIEW_API_KEY (or ANTHROPIC_API_KEY) as a repository secret.
@@ -165,7 +165,7 @@ jobs:
           # Explicit signals only: the ai-review-full label always wins, then
           # the AI_REVIEW_MODE_DEFAULT repo variable (same var the rescan
           # slash command uses), then '', deferring to
-          # .github/ai-pr-review/policy.yml route matching by changed-file
+          # .ai-pr-review/policy.yml route matching by changed-file
           # path, base branch, or head branch (see docs/policy.md), and
           # finally the engine's own hardcoded 'quick' default if no policy
           # file exists. A branch-name convention like "full mode for
@@ -192,6 +192,9 @@ jobs:
           # gates (e.g. blocking Renovate auto-merge until the bot approves) (default: true).
           # Set AI_REVIEW_FAIL_ON_FINDINGS=false to make the review job non-blocking.
           fail-on-findings: ${{ vars.AI_REVIEW_FAIL_ON_FINDINGS || 'true' }}
+          # AI_REVIEW_APPROVAL_CEILING: strongest review event the bot may post
+          # (approve, request-changes, or comment). Default: approve.
+          approval-ceiling: ${{ vars.AI_REVIEW_APPROVAL_CEILING || 'approve' }}
           # AI_REVIEW_TOKEN_USAGE_DISPLAY: token-usage content in the posted review
           # comment (default: compact, a one-line cost/token/agent summary). Set to
           # 'full' to restore the pre-#758 in-comment <details> table, or 'off' to
@@ -336,6 +339,9 @@ jobs:
       # job's gate is on. Set AI_REVIEW_SLASH_FAIL_ON_FINDINGS=true to gate
       # rescan/review-full too.
       fail-on-findings: ${{ vars.AI_REVIEW_SLASH_FAIL_ON_FINDINGS || 'false' }}
+      # AI_REVIEW_APPROVAL_CEILING: same variable as the review job, so a
+      # rescan or a dismiss cannot post a stronger event than the ceiling allows.
+      approval-ceiling: ${{ vars.AI_REVIEW_APPROVAL_CEILING || 'approve' }}
       feedback-loop: ${{ vars.AI_REVIEW_FEEDBACK_LOOP || 'false' }}
       token-usage-display: ${{ vars.AI_REVIEW_TOKEN_USAGE_DISPLAY || 'compact' }}
       suppress-walkthrough: ${{ vars.AI_REVIEW_SUPPRESS_WALKTHROUGH || 'false' }}

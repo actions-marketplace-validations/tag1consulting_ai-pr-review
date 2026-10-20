@@ -31,7 +31,29 @@ def _f(**kw: Any) -> Finding:
 class TestLabel:
     def test_corroborated_wins(self) -> None:
         assert finding_label(_f(corroborated=True, judge_verdict="downrank")) == "corroborated by analyzer"
-        assert finding_label(_f(sources=["semgrep", "code-reviewer"])) == "corroborated by analyzer"
+        assert (
+            finding_label(_f(sources=["semgrep", "code-reviewer"], corroborated=True))
+            == "corroborated by analyzer"
+        )
+
+    def test_sources_alone_do_not_corroborate(self) -> None:
+        # The merge sets `corroborated` after it checks the categories of the
+        # members (#1074). An analyzer and an agent near each other with no
+        # shared category must not get the label from their sources alone.
+        label = finding_label(_f(sources=["semgrep", "code-reviewer"], corroborated=False))
+        assert label != "corroborated by analyzer"
+        # And it must not say that only one agent saw it: an analyzer reported it too.
+        assert label == "analyzer and agent, not confirmed"
+        assert "single agent" not in label
+
+    def test_mixed_sources_keep_the_label_whatever_the_judge_said(self) -> None:
+        for verdict in (None, "keep", "downrank"):
+            f = _f(sources=["semgrep", "code-reviewer"], judge_verdict=verdict)
+            assert finding_label(f) == "analyzer and agent, not confirmed"
+
+    def test_corroborated_still_wins_over_mixed_sources(self) -> None:
+        f = _f(sources=["semgrep", "code-reviewer"], corroborated=True)
+        assert finding_label(f) == "corroborated by analyzer"
 
     def test_analyzer_only(self) -> None:
         assert finding_label(_f(source="semgrep", sources=["semgrep"])) == "analyzer finding"

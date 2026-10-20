@@ -62,6 +62,7 @@ _ANNOTATION_TYPE: Final[dict[str, str]] = {
     "authz": "VULNERABILITY",
     "injection": "VULNERABILITY",
     "secret": "VULNERABILITY",
+    "crypto": "VULNERABILITY",
     "dependency-cve": "VULNERABILITY",
     "edge-case": "BUG",
     "test-gap": "BUG",

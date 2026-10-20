@@ -82,4 +82,5 @@ def _hadolint_finding(item: dict[str, Any]) -> Finding:
         finding=f"{code}: {item.get('message', '')}",
         remediation=f"See https://github.com/hadolint/hadolint/wiki/{code}",
         category="lint",
+        style_only=level == "style",
     )

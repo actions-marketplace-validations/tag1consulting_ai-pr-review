@@ -7,6 +7,7 @@ converts its JSON output to Finding instances.
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 
 # subprocess is never called directly in this module (run_cli_json_analyzer
@@ -58,6 +59,29 @@ def _ruff_items(data: Any) -> list[dict[str, Any]] | None:
     return [item for item in data if isinstance(item, dict)]
 
 
+# ruff rule families that only report style. The family is the leading letters of the
+# code. Families that find real defects (F, B, S, PL, NPY, ...) are not listed. E and W
+# mix style and defects, so they are matched by number below.
+_STYLE_FAMILIES = frozenset({"I", "N", "D", "Q", "UP", "COM", "ISC"})
+
+
+def _is_style_code(code: str) -> bool:
+    """Is the ruff rule *code* about style only (formatting, naming, docstrings, imports)?"""
+    match = re.fullmatch(r"([A-Z]+)(\d+)", code)
+    if match is None:
+        return False
+    family, number = match.groups()
+    if family in _STYLE_FAMILIES:
+        return True
+    if family == "E":
+        return number[0] in "123" or number == "501"  # indentation, whitespace, blank lines, line length
+    if family == "W":
+        return number in ("191", "291", "292", "293")  # tabs and trailing whitespace
+    if family == "C":
+        return number.startswith("4")  # comprehensions
+    return code == "RUF100"  # an unused noqa comment
+
+
 def _ruff_finding(item: dict[str, Any]) -> Finding:
     code = item.get("code") or ""
     prefix = code[:1]
@@ -82,4 +106,5 @@ def _ruff_finding(item: dict[str, Any]) -> Finding:
         finding=f"{code}: {item.get('message', '')}",
         remediation=remediation,
         category="lint",
+        style_only=_is_style_code(code),
     )
