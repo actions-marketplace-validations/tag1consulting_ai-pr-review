@@ -641,6 +641,11 @@ def _fuzzy_dismissed_match(
             continue
         if same_source and split_fingerprint(fp)[:1] != [finding.source]:
             continue
+        # A suppression-check finding and a finding of any other kind never
+        # stand for each other, so a dismissal of one cannot hide the other
+        # (#1086). This is the rule that `_fuzzy_open_match` applies.
+        if _fingerprint_is_standalone(fp) != is_standalone(finding):
+            continue
         thread = _find_thread_by_fingerprint(all_threads, fp)
         d_category = thread.category if thread else None
         d_severity = thread.severity if thread else None
@@ -654,12 +659,16 @@ def _fuzzy_dismissed_match(
     return None
 
 
-def _thread_is_standalone(t: PriorThread) -> bool:
-    """Does `t` carry a suppression-check finding, which the merge never clusters?"""
-    if not t.fingerprint:
+def _fingerprint_is_standalone(fp: str | None) -> bool:
+    """Does `fp` name a suppression-check finding, which the merge never clusters?"""
+    if not fp:
         return False
-    parts = split_fingerprint(t.fingerprint)
+    parts = split_fingerprint(fp)
     return len(parts) == 4 and parts[0] in STANDALONE_SOURCES
+
+
+def _thread_is_standalone(t: PriorThread) -> bool:
+    return _fingerprint_is_standalone(t.fingerprint)
 
 
 def _fuzzy_open_match(
