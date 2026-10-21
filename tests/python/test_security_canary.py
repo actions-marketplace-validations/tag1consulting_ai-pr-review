@@ -13,11 +13,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 CANARY_WORKSPACE = Path(__file__).parent.parent / "security" / "canary-workspace"
+REPO_ROOT = Path(__file__).parent.parent.parent
 
 SENTINEL_NAMES = [
     "makefile-executed",
@@ -391,3 +395,90 @@ class TestPhpcsRulesetIsData:
         assert not sentinel_dir.exists() or not list(sentinel_dir.iterdir())
         assert all(f.file == "changed.php" for f in findings), [f.file for f in findings]
         assert not any("OUTSIDE-SECRET-MARKER" in f.finding for f in findings)
+
+
+def _write_hostile_workspace(workspace: Path) -> None:
+    """Write files that shadow the engine entrypoint and its imports.
+
+    Each file records that it ran by writing a marker into HOSTILE_MARKER_DIR, then
+    exits, so a run that imports one of them never reaches the real engine.
+    """
+    body = (
+        "import os, pathlib\n"
+        "pathlib.Path(os.environ['HOSTILE_MARKER_DIR'], {name!r}).write_text('ran')\n"
+        "raise SystemExit(0)\n"
+    )
+    package = workspace / "ai_pr_review"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "__main__.py").write_text(body.format(name="ai_pr_review-main"), encoding="utf-8")
+    (workspace / "yaml.py").write_text(body.format(name="yaml"), encoding="utf-8")
+    (workspace / "httpx.py").write_text(body.format(name="httpx"), encoding="utf-8")
+    (workspace / "click").mkdir()
+    (workspace / "click" / "__init__.py").write_text(body.format(name="click"), encoding="utf-8")
+
+
+def _run_entrypoint(workspace: Path, marker_dir: Path, *, safe_path: bool) -> subprocess.CompletedProcess[str]:
+    """Start the real `python -m ai_pr_review` with the workspace as the working directory."""
+    env = {k: v for k, v in os.environ.items() if k not in {"PYTHONSAFEPATH", "PYTHONPATH"}}
+    env["HOSTILE_MARKER_DIR"] = str(marker_dir)
+    # The installed package must stay importable. PYTHONPATH entries are not affected by
+    # PYTHONSAFEPATH, and the hostile workspace comes first on sys.path only without it.
+    env["PYTHONPATH"] = str(REPO_ROOT)
+    if safe_path:
+        env["PYTHONSAFEPATH"] = "1"
+    return subprocess.run(
+        [sys.executable, "-m", "ai_pr_review", "--help"],
+        cwd=workspace, env=env, capture_output=True, text=True, timeout=60, check=False,
+    )
+
+
+@pytest.mark.security
+class TestEntrypointIgnoresWorkspaceModules:
+    """The image starts in the PR's tree, so `python -m` must not import modules from it."""
+
+    def test_hostile_workspace_does_not_run_with_safe_path(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "workspace"
+        marker_dir = tmp_path / "markers"
+        marker_dir.mkdir()
+        _write_hostile_workspace(workspace)
+
+        # Control: without the setting the hostile entrypoint runs. If this stops
+        # failing to protect, the main assertion below proves nothing.
+        control = _run_entrypoint(workspace, marker_dir, safe_path=False)
+        assert (marker_dir / "ai_pr_review-main").exists(), (
+            "control failed: the hostile ai_pr_review/__main__.py did not run, so this test "
+            f"proves nothing (rc={control.returncode}, stderr={control.stderr[:300]!r})"
+        )
+        (marker_dir / "ai_pr_review-main").unlink()
+
+        result = _run_entrypoint(workspace, marker_dir, safe_path=True)
+        ran = sorted(p.name for p in marker_dir.iterdir())
+        assert not ran, (
+            f"SECURITY REGRESSION: workspace modules ran at start-up: {ran}. "
+            "See SECURITY.md and CONTRIBUTING.md for the reporting process."
+        )
+        assert result.returncode == 0, result.stderr[:500]
+        assert "Usage:" in result.stdout, "the real engine should have printed its help text"
+
+    def test_dockerfile_sets_safe_path_before_entrypoint(self) -> None:
+        text = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+        env_at = text.find("\nENV PYTHONSAFEPATH=1\n")
+        entry_at = text.find("\nENTRYPOINT [")
+        assert env_at != -1, "Dockerfile must set ENV PYTHONSAFEPATH=1"
+        assert env_at < entry_at, "ENV PYTHONSAFEPATH=1 must come before the ENTRYPOINT"
+
+    def test_container_action_passes_safe_path_to_docker_run(self) -> None:
+        text = (REPO_ROOT / "container-action" / "action.yml").read_text(encoding="utf-8")
+        start = text.find("docker run --rm \\")
+        end = text.find('"$IMAGE"', start)
+        assert start != -1 and end != -1, "could not find the docker run block"
+        assert "-e PYTHONSAFEPATH=1" in text[start:end]
+
+    def test_root_action_sets_safe_path_on_the_run_step(self) -> None:
+        text = (REPO_ROOT / "action.yml").read_text(encoding="utf-8")
+        run_at = text.find("run: python3 -m ai_pr_review review")
+        assert run_at != -1, "could not find the engine run step"
+        step_start = text.rfind("- name: Run AI review", 0, run_at)
+        assert step_start != -1
+        assert 'PYTHONSAFEPATH: "1"' in text[step_start:run_at]
