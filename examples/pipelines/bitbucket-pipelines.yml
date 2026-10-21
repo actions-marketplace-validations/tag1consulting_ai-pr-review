@@ -150,4 +150,7 @@ pipelines:
             - export GITHUB_REPOSITORY="${BITBUCKET_WORKSPACE}/${BITBUCKET_REPO_SLUG}"
             # BITBUCKET_EMAIL + BITBUCKET_API_TOKEN come from repo variables.
             # ANTHROPIC_API_KEY (or your provider's key) also from repo variables.
+            # Keep the checked-out pull request tree off the Python import path.
+            # Newer images set this already. Keep it here in case you pin an older image tag.
+            - export PYTHONSAFEPATH=1
             - python3 -m ai_pr_review review
