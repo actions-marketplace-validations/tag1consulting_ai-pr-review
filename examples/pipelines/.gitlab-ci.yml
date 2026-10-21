@@ -81,4 +81,7 @@ ai-review:
     # - export AI_ENABLE_SUGGESTIONS=true          # Default; set to 'false' to disable
     # - export AI_MAX_INLINE=25                    # Max inline discussions per run
     # - export AI_CONFIDENCE_THRESHOLD=75          # Min confidence for findings
+    # Keep the checked-out merge request tree off the Python import path. Newer
+    # images set this already. Keep it here in case you pin an older image tag.
+    - export PYTHONSAFEPATH=1
     - python3 -m ai_pr_review review
