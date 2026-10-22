@@ -141,6 +141,9 @@ class GitLabProvider:
     _resolved_bot_username: str | None = field(
         default=None, init=False, repr=False
     )
+    # True once the marker lookups have warned about an unresolved bot
+    # identity this run, so the warning prints once and not on every lookup.
+    _warned_marker_identity: bool = field(default=False, init=False, repr=False)
     # Cross-run dedup keep-alive set (#710). Reset at the top of every
     # post_findings call, read by the same instance's subsequent
     # resolve_stale() call within one orchestrate.py run -- mirrors
@@ -184,14 +187,68 @@ class GitLabProvider:
         return f"{self._discussion_notes_url(discussion_id)}/{note_id}"
 
     # ------------------------------------------------------------------
+    # Marker author check
+    # ------------------------------------------------------------------
+    def _marker_author(self) -> str | None:
+        """Return the username whose notes may carry a trusted marker.
+
+        Returns None when the bot identity is not known. Callers must then
+        accept no marker at all (fail closed). A note marker decides what the
+        review treats as already reviewed (the SHA watermark) and which note
+        the review rewrites. Any MR commenter can type a marker, so an
+        unauthenticated marker could hide commits from review.
+
+        The user-visible effect of an unresolved identity is a full review
+        instead of an incremental one, and a new summary or skip note in
+        place of an in-place update. It also means the usage block and the
+        body-level findings have no summary note to join, so they are
+        skipped with a warning. Set GITLAB_BOT_USERNAME to avoid the
+        GET /user lookup and to cover a token that cannot call it.
+        """
+        username = self._get_bot_username()
+        if username is None or username == _BOT_IDENTITY_AUTH_FAILED:
+            if not self._warned_marker_identity:
+                self._warned_marker_identity = True
+                logger.warning(
+                    "gitlab: could not resolve the bot username, so no summary "
+                    "or skip marker is trusted this run. The review runs in "
+                    "full instead of incrementally. Set GITLAB_BOT_USERNAME "
+                    "or use a token that can call GET /user."
+                )
+            return None
+        return username
+
+    @staticmethod
+    def _is_bot_authored(item: dict[str, Any], bot_username: str) -> bool:
+        """True only when the note author username equals the bot username.
+
+        Fails closed: a null or missing author, or a missing username, is
+        rejected. The comparison ignores case, as the GitHub provider does.
+        """
+        author = item.get("author")
+        username = author.get("username") if isinstance(author, dict) else None
+        return (
+            isinstance(username, str)
+            and username.casefold() == bot_username.casefold()
+        )
+
+    # ------------------------------------------------------------------
     # Pagination helpers
     # ------------------------------------------------------------------
     def _list_summary_notes(self) -> list[dict[str, Any]]:
-        """Return all MR notes whose body contains SUMMARY_MARKER_PREFIX.
+        """Return this bot's own MR notes that contain SUMMARY_MARKER_PREFIX.
 
         Iterates pages until a partial page is returned. Order: most recent
         first (sort=desc, order_by=updated_at).
+
+        Security-critical: a note counts only when its author is the bot.
+        Without that, any commenter could post a forged summary marker and
+        move the SHA watermark. Fails closed when the bot identity is
+        unknown (see `_marker_author`).
         """
+        bot_username = self._marker_author()
+        if bot_username is None:
+            return []
         results: list[dict[str, Any]] = []
         page = 1
         while True:
@@ -222,7 +279,9 @@ class GitLabProvider:
                 return results
             for item in page_data:
                 body = item.get("body") or ""
-                if SUMMARY_MARKER_PREFIX in body:
+                if SUMMARY_MARKER_PREFIX in body and self._is_bot_authored(
+                    item, bot_username
+                ):
                     results.append(item)
             if len(page_data) < 100:
                 break
@@ -407,7 +466,13 @@ class GitLabProvider:
     # _list_skip_notes / post_skip_comment
     # ------------------------------------------------------------------
     def _list_skip_notes(self) -> list[dict[str, Any]]:
-        """Return all MR notes whose body contains SKIP_MARKER."""
+        """Return this bot's own MR notes that contain SKIP_MARKER.
+
+        Same author check and fail-closed rule as `_list_summary_notes`.
+        """
+        bot_username = self._marker_author()
+        if bot_username is None:
+            return []
         results: list[dict[str, Any]] = []
         page = 1
         while True:
@@ -437,7 +502,9 @@ class GitLabProvider:
                 return results
             for item in page_data:
                 body = item.get("body") or ""
-                if has_skip_marker(body):
+                if has_skip_marker(body) and self._is_bot_authored(
+                    item, bot_username
+                ):
                     results.append(item)
             if len(page_data) < 100:
                 break

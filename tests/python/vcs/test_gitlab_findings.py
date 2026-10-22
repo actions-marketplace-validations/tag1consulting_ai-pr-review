@@ -359,7 +359,7 @@ def test_post_findings_appends_token_table_to_summary_note() -> None:
 
     def handler(req: httpx.Request) -> httpx.Response:
         if req.method == "GET" and "/notes" in str(req.url):
-            return httpx.Response(200, json=[{"id": 55, "body": _EXISTING_NOTE_BODY}])
+            return httpx.Response(200, json=[{"id": 55, "author": {"username": "ai-bot"}, "body": _EXISTING_NOTE_BODY}])
         if req.method == "PUT" and "/notes/55" in str(req.url):
             put_bodies.append(json.loads(req.content))
             return httpx.Response(200, json={"id": 55})
@@ -393,7 +393,7 @@ def test_post_findings_token_table_strips_old_accordion() -> None:
 
     def handler(req: httpx.Request) -> httpx.Response:
         if req.method == "GET" and "/notes" in str(req.url):
-            return httpx.Response(200, json=[{"id": 55, "body": stored}])
+            return httpx.Response(200, json=[{"id": 55, "author": {"username": "ai-bot"}, "body": stored}])
         if req.method == "PUT" and "/notes/55" in str(req.url):
             put_bodies.append(json.loads(req.content))
             return httpx.Response(200, json={"id": 55})
@@ -441,7 +441,7 @@ def test_post_findings_token_table_preserves_collapsed_walkthrough() -> None:
 
     def handler(req: httpx.Request) -> httpx.Response:
         if req.method == "GET" and "/notes" in str(req.url):
-            return httpx.Response(200, json=[{"id": 55, "body": stored}])
+            return httpx.Response(200, json=[{"id": 55, "author": {"username": "ai-bot"}, "body": stored}])
         if req.method == "PUT" and "/notes/55" in str(req.url):
             put_bodies.append(json.loads(req.content))
             return httpx.Response(200, json={"id": 55})
@@ -480,7 +480,7 @@ def test_post_findings_usage_block_replaces_legacy_prefix_less_accordion() -> No
 
     def handler(req: httpx.Request) -> httpx.Response:
         if req.method == "GET" and "/notes" in str(req.url):
-            return httpx.Response(200, json=[{"id": 55, "body": stored}])
+            return httpx.Response(200, json=[{"id": 55, "author": {"username": "ai-bot"}, "body": stored}])
         if req.method == "PUT" and "/notes/55" in str(req.url):
             put_bodies.append(json.loads(req.content))
             return httpx.Response(200, json={"id": 55})
@@ -512,7 +512,7 @@ def test_post_findings_usage_warning_appended_after_usage_block() -> None:
 
     def handler(req: httpx.Request) -> httpx.Response:
         if req.method == "GET" and "/notes" in str(req.url):
-            return httpx.Response(200, json=[{"id": 55, "body": _EXISTING_NOTE_BODY}])
+            return httpx.Response(200, json=[{"id": 55, "author": {"username": "ai-bot"}, "body": _EXISTING_NOTE_BODY}])
         if req.method == "PUT" and "/notes/55" in str(req.url):
             put_bodies.append(json.loads(req.content))
             return httpx.Response(200, json={"id": 55})
@@ -545,7 +545,7 @@ def test_post_findings_no_put_when_off_mode_produces_nothing() -> None:
 
     def handler(req: httpx.Request) -> httpx.Response:
         if req.method == "GET" and "/notes" in str(req.url):
-            return httpx.Response(200, json=[{"id": 55, "body": _EXISTING_NOTE_BODY}])
+            return httpx.Response(200, json=[{"id": 55, "author": {"username": "ai-bot"}, "body": _EXISTING_NOTE_BODY}])
         if req.method == "PUT":
             put_calls.append(str(req.url))
             return httpx.Response(200, json={"id": 55})
@@ -586,7 +586,7 @@ def test_post_findings_off_mode_clears_stale_usage_block_from_prior_run() -> Non
 
     def handler(req: httpx.Request) -> httpx.Response:
         if req.method == "GET" and "/notes" in str(req.url):
-            return httpx.Response(200, json=[{"id": 55, "body": stored}])
+            return httpx.Response(200, json=[{"id": 55, "author": {"username": "ai-bot"}, "body": stored}])
         if req.method == "PUT" and "/notes/55" in str(req.url):
             put_bodies.append(json.loads(req.content))
             return httpx.Response(200, json={"id": 55})
@@ -637,7 +637,7 @@ def test_post_findings_token_table_http_error_is_failsoft() -> None:
 
     def handler(req: httpx.Request) -> httpx.Response:
         if req.method == "GET" and "/notes" in str(req.url):
-            return httpx.Response(200, json=[{"id": 55, "body": _EXISTING_NOTE_BODY}])
+            return httpx.Response(200, json=[{"id": 55, "author": {"username": "ai-bot"}, "body": _EXISTING_NOTE_BODY}])
         if req.method == "PUT" and "/notes/55" in str(req.url):
             return httpx.Response(403, json={"message": "forbidden"})
         if req.method == "POST" and "/discussions" in str(req.url):
@@ -672,7 +672,7 @@ def test_post_findings_body_findings_rendered_in_summary_note() -> None:
 
     def handler(req: httpx.Request) -> httpx.Response:
         if req.method == "GET" and "/notes" in str(req.url):
-            return httpx.Response(200, json=[{"id": 55, "body": _EXISTING_NOTE_BODY}])
+            return httpx.Response(200, json=[{"id": 55, "author": {"username": "ai-bot"}, "body": _EXISTING_NOTE_BODY}])
         if req.method == "PUT" and "/notes/55" in str(req.url):
             put_bodies.append(json.loads(req.content))
             return httpx.Response(200, json={"id": 55})
@@ -716,7 +716,7 @@ def test_post_findings_body_findings_replaces_prior_run() -> None:
 
     def handler(req: httpx.Request) -> httpx.Response:
         if req.method == "GET" and "/notes" in str(req.url):
-            return httpx.Response(200, json=[{"id": 55, "body": stored}])
+            return httpx.Response(200, json=[{"id": 55, "author": {"username": "ai-bot"}, "body": stored}])
         if req.method == "PUT" and "/notes/55" in str(req.url):
             put_bodies.append(json.loads(req.content))
             return httpx.Response(200, json={"id": 55})
@@ -753,7 +753,7 @@ def test_post_findings_body_findings_cleared_when_none_this_run() -> None:
 
     def handler(req: httpx.Request) -> httpx.Response:
         if req.method == "GET" and "/notes" in str(req.url):
-            return httpx.Response(200, json=[{"id": 55, "body": stored}])
+            return httpx.Response(200, json=[{"id": 55, "author": {"username": "ai-bot"}, "body": stored}])
         if req.method == "PUT" and "/notes/55" in str(req.url):
             put_bodies.append(json.loads(req.content))
             return httpx.Response(200, json={"id": 55})
@@ -779,7 +779,7 @@ def test_post_findings_body_findings_precede_usage_block() -> None:
 
     def handler(req: httpx.Request) -> httpx.Response:
         if req.method == "GET" and "/notes" in str(req.url):
-            return httpx.Response(200, json=[{"id": 55, "body": _EXISTING_NOTE_BODY}])
+            return httpx.Response(200, json=[{"id": 55, "author": {"username": "ai-bot"}, "body": _EXISTING_NOTE_BODY}])
         if req.method == "PUT" and "/notes/55" in str(req.url):
             put_bodies.append(json.loads(req.content))
             return httpx.Response(200, json={"id": 55})
