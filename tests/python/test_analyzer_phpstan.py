@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -394,3 +395,65 @@ class TestBridgeIntegration:
             await run_analyzers(ChangedFiles(), "/dev/null")
 
         assert not called
+
+
+class TestWorkspaceIsolation:
+    def test_run_is_isolated_from_the_workspace(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("GITHUB_TOKEN", "secret")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "secret")
+        monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:3128")
+        (tmp_path / "a.php").write_text("<?php\n")
+        cf = _make_cf(["a.php"])
+        seen: dict[str, object] = {}
+
+        def fake_run(cmd: list[str], **kwargs: object) -> MagicMock:
+            seen["cmd"] = cmd
+            seen["kwargs"] = kwargs
+            run_cwd = Path(str(kwargs["cwd"]))
+            seen["entries"] = sorted(p.name for p in run_cwd.iterdir())
+            return MagicMock(returncode=0, stdout='{"files":{},"errors":[]}', stderr="")
+
+        with (
+            patch("ai_pr_review.analyzers.native.phpstan.shutil.which", return_value="/usr/bin/phpstan"),
+            patch("ai_pr_review.analyzers.native.phpstan.subprocess.run", side_effect=fake_run),
+        ):
+            _run_phpstan(cf, Path("/dev/null"))
+
+        kwargs = seen["kwargs"]
+        assert isinstance(kwargs, dict)
+        run_cwd = Path(str(kwargs["cwd"]))
+        assert not run_cwd.resolve().is_relative_to(tmp_path.resolve())
+        assert seen["entries"] == ["phpstan-trusted.neon"]
+        assert not run_cwd.exists()
+        env = kwargs["env"]
+        assert isinstance(env, dict)
+        assert env["HOME"] == str(run_cwd)
+        assert "GITHUB_TOKEN" not in env and "ANTHROPIC_API_KEY" not in env
+        assert env["HTTPS_PROXY"] == "http://proxy.example:3128"
+        cmd = seen["cmd"]
+        assert isinstance(cmd, list)
+        assert cmd[-1] == str(tmp_path / "a.php")
+
+
+@pytest.mark.skipif(shutil.which("phpstan") is None, reason="phpstan is not installed")
+class TestRealPhpstanHostileTree:
+    def test_workspace_autoload_and_config_do_not_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        marks = tmp_path / "marks"
+        marks.mkdir()
+        ws = tmp_path / "ws"
+        (ws / "vendor").mkdir(parents=True)
+        (ws / "a.php").write_text("<?php\nfunction f(int $x) { return undefined_fn($x); }\n")
+        (ws / "vendor" / "autoload.php").write_text(
+            f"<?php file_put_contents('{marks}/autoload', 'ran');\n"
+        )
+        (ws / "boot.php").write_text(f"<?php file_put_contents('{marks}/boot', 'ran');\n")
+        (ws / "phpstan.neon").write_text("parameters:\n    bootstrapFiles:\n        - boot.php\n")
+        monkeypatch.chdir(ws)
+        findings = _run_phpstan(_make_cf(["a.php"]), Path("/dev/null"))
+        assert list(marks.iterdir()) == []
+        assert findings, "phpstan did not report the undefined function"
