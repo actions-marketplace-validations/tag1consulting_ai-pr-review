@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
+from dataclasses import replace
 
 import httpx
 
@@ -800,3 +802,35 @@ def test_post_findings_body_findings_precede_usage_block() -> None:
     findings_idx = new_body.index("### Findings not attached to specific lines")
     usage_idx = new_body.index("Token usage by agent")
     assert findings_idx < usage_idx
+
+
+def test_post_findings_unknown_identity_uses_own_summary_note() -> None:
+    """With no resolvable bot identity the listing is empty. The id that this
+    run's own post_summary returned must still receive the usage block."""
+    put_bodies: list[dict] = []
+    own = {"id": 77, "body": "<!-- ai-pr-review-summary sha=abc -->\nbody"}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        url = str(req.url)
+        if req.method == "GET" and url.endswith("/user"):
+            return httpx.Response(401, json={})
+        if req.method == "GET" and url.endswith("/notes/77"):
+            return httpx.Response(200, json=own)
+        if req.method == "GET" and "/notes" in url:
+            return httpx.Response(200, json=[own])
+        if req.method == "PUT" and "/notes/77" in url:
+            put_bodies.append(json.loads(req.content))
+            return httpx.Response(200, json={"id": 77})
+        return httpx.Response(404)
+
+    prov = _make_provider(handler)
+    prov.config = replace(prov.config, bot_username=None)
+    prov.post_findings(
+        [],
+        DiffContext(diff_text=_DIFF, head_sha=_HEAD),
+        event="COMMENT",
+        usage_block="<details>table</details>",
+        summary_comment_id=77,
+    )
+    assert put_bodies, "the run's own summary note must receive the usage block"
+    assert "<details>table</details>" in put_bodies[-1]["body"]

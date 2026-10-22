@@ -573,7 +573,7 @@ class GitLabProvider:
         agent_prompt: str = "",
         max_inline: int = 25,
         enable_suggestions: bool = True,
-        summary_comment_id: int | None = None,  # Bitbucket-only (#930); unused here
+        summary_comment_id: int | None = None,  # (#930) fallback when the bot identity is unknown
     ) -> FindingsResult:
         """Post inline discussions for eligible findings.
 
@@ -725,6 +725,24 @@ class GitLabProvider:
                 "gitlab: token usage: could not list summary notes: %s", exc, exc_info=True,
             )
             existing_notes = []
+        if not existing_notes and summary_comment_id is not None:
+            # The author-checked listing returns [] when the bot identity is
+            # unknown. `summary_comment_id` is the note this same run's own
+            # `post_summary` just created with these credentials, so a direct
+            # GET on it needs no author check and cannot be forged.
+            try:
+                note_resp = self.client.request("GET", self._note_url(summary_comment_id))
+                if note_resp.status_code < 400:
+                    note = note_resp.json()
+                    if isinstance(note, dict) and SUMMARY_MARKER_PREFIX in (
+                        note.get("body") or ""
+                    ):
+                        existing_notes = [note]
+            except Exception as exc:
+                logger.warning(
+                    "gitlab: token usage: could not fetch summary note %s: %s",
+                    summary_comment_id, exc, exc_info=True,
+                )
         if existing_notes:
             keep = existing_notes[0]
             keep_id_raw = keep.get("id")
