@@ -201,6 +201,10 @@ class TestTrustedConfigContent:
         monkeypatch.setenv("CKV_CHECK", "CKV_X")
         monkeypatch.setenv("BC_API_KEY", "value")
         monkeypatch.setenv("PRISMA_API_URL", "value")
+        monkeypatch.setenv("CHECKOV_MAX_IAC_FILE_SIZE", "1")
+        monkeypatch.setenv("EXTERNAL_MODULES_DIR", "/x")
+        monkeypatch.setenv("GITHUB_TOKEN", "secret")
+        monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:3128")
         tf = tmp_path / "main.tf"
         tf.write_text("resource \"x\" \"y\" {}\n")
         cf = _make_cf(["main.tf"], terraform=["main.tf"])
@@ -210,6 +214,9 @@ class TestTrustedConfigContent:
             seen["cmd"] = cmd
             seen["kwargs"] = kwargs
             seen["config"] = Path(cmd[cmd.index("--config-file") + 1]).read_text()
+            run_cwd = Path(str(kwargs["cwd"]))
+            seen["cwd_entries"] = list(run_cwd.iterdir())
+            seen["cwd_exists"] = run_cwd.is_dir()
             return MagicMock(returncode=0, stdout="", stderr="")
 
         with (
@@ -219,13 +226,20 @@ class TestTrustedConfigContent:
             _run_checkov(cf, Path("/dev/null"))
 
         assert seen["config"] == _TRUSTED_CONFIG
+        assert seen["cwd_exists"] is True
+        assert seen["cwd_entries"] == []
         kwargs = seen["kwargs"]
         assert isinstance(kwargs, dict)
-        assert kwargs["cwd"] != str(tmp_path)
+        assert not Path(str(kwargs["cwd"])).resolve().is_relative_to(tmp_path.resolve())
+        assert not Path(str(kwargs["cwd"])).exists()
         env = kwargs["env"]
         assert isinstance(env, dict)
         assert env["HOME"] == kwargs["cwd"]
-        assert not any(k.startswith(("CKV_", "BC_", "PRISMA_")) for k in env)
+        assert set(env) <= {"HOME", "PATH", "LANG", "TMPDIR", "TZ", "HTTPS_PROXY",
+                            "HTTP_PROXY", "NO_PROXY", "SSL_CERT_FILE", "SSL_CERT_DIR",
+                            "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "http_proxy",
+                            "https_proxy", "no_proxy"} | {k for k in env if k.startswith("LC_")}
+        assert env["HTTPS_PROXY"] == "http://proxy.example:3128"
         cmd = seen["cmd"]
         assert isinstance(cmd, list)
         assert cmd[cmd.index("--file") + 1] == str(tmp_path / "main.tf")
@@ -616,3 +630,20 @@ class TestBridgeIntegration:
             await run_analyzers(ChangedFiles(), "/dev/null")
 
         assert not called
+
+
+class TestRepoRelativePath:
+    def test_inside_workspace(self) -> None:
+        from ai_pr_review.analyzers.native.checkov import _repo_relative_path
+
+        assert _repo_relative_path({"file_abs_path": "/ws/sub/main.tf"}, "/ws") == "sub/main.tf"
+
+    def test_dotdot_prefixed_name_stays_inside(self) -> None:
+        from ai_pr_review.analyzers.native.checkov import _repo_relative_path
+
+        assert _repo_relative_path({"file_abs_path": "/ws/..x.tf"}, "/ws") == "..x.tf"
+
+    def test_outside_workspace_is_dropped(self) -> None:
+        from ai_pr_review.analyzers.native.checkov import _repo_relative_path
+
+        assert _repo_relative_path({"file_abs_path": "/other/main.tf", "repo_file_path": "/main.tf"}, "/ws") == ""

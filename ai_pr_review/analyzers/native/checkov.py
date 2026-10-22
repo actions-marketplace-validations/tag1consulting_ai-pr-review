@@ -7,7 +7,6 @@ object or array), and converts failed_checks to Finding instances.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import os
@@ -45,10 +44,30 @@ _AZURE_JSON_KEY_RE = re.compile(
 # run exit 2 with no scan. `quiet: true` is a valid mapping and repeats a
 # flag that the command line already passes. It must not name any option that
 # loads code or data from the workspace.
-# Environment variable prefixes that checkov reads as options. They are not
-# passed on, so the host environment cannot change what checkov scans.
-_DROPPED_ENV_PREFIXES = ("CKV_", "BC_", "PRISMA_")
 _TRUSTED_CONFIG = "# Trusted config for ai-pr-review; see #739 and #1102.\nquiet: true\n"
+
+# Checkov gets an allowlist environment. It parses untrusted files, so it must
+# not see the job credentials, and it reads many option variables (CKV_*,
+# CHECKOV_*, BC_*, PRISMA_*, EXTERNAL_MODULES_DIR and others) that must not
+# change what it scans. Only these names pass: the search path, the locale,
+# a temp directory and the proxy and CA settings for outbound calls.
+_ALLOWED_ENV_NAMES = frozenset({
+    "PATH", "LANG", "TMPDIR", "TZ",
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+    "http_proxy", "https_proxy", "no_proxy",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
+})
+
+
+def _checkov_env(home: str) -> dict[str, str]:
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k in _ALLOWED_ENV_NAMES or k.startswith("LC_")
+    }
+    env["HOME"] = home
+    return env
+
 
 # Checkov high-severity check_id prefixes
 _HIGH_PREFIX_RE = re.compile(r"^(CKV2_|CKV_SECRET_)")
@@ -95,13 +114,16 @@ def _repo_relative_path(item: dict[str, object], workspace: str) -> str:
 
     The run starts outside the workspace (#1102), so checkov's own
     `repo_file_path` no longer holds a workspace-relative path. Use the
-    absolute path when it lies inside the workspace, else the old field.
+    absolute path when it lies inside the workspace, and return "" (the caller
+    drops the result) when it lies outside. Use the old field only when the
+    result carries no absolute path.
     """
     abs_path = item.get("file_abs_path")
     if isinstance(abs_path, str) and abs_path:
         rel = os.path.relpath(abs_path, workspace)
-        if not rel.startswith(".."):
+        if rel != os.pardir and not rel.startswith(os.pardir + os.sep):
             return rel
+        return ""
     return str(item.get("repo_file_path") or "").lstrip("/")
 
 
@@ -137,13 +159,12 @@ def _run_checkov(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
     # directory, and the scanned files go in by absolute path. The trusted
     # config only keeps the config-file option well formed.
     try:
-        scratch_cm = tempfile.TemporaryDirectory(prefix="checkov-trusted-")
-        scratch = scratch_cm.__enter__()
+        scratch_cm = tempfile.TemporaryDirectory(prefix="checkov-trusted-", ignore_cleanup_errors=True)
     except OSError as exc:
         logger.warning("[ai-pr-review] WARNING: could not create trusted checkov config: %s; skipping.", exc)
         return []
 
-    try:
+    with scratch_cm as scratch:
         trusted_config_path = os.path.join(scratch, "trusted-config.yaml")
         try:
             Path(trusted_config_path).write_text(_TRUSTED_CONFIG)
@@ -156,12 +177,7 @@ def _run_checkov(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
         except OSError as exc:
             logger.warning("[ai-pr-review] WARNING: could not create checkov work directory: %s; skipping.", exc)
             return []
-        env = {
-            k: v
-            for k, v in os.environ.items()
-            if not k.startswith(_DROPPED_ENV_PREFIXES)
-        }
-        env["HOME"] = run_dir
+        env = _checkov_env(run_dir)
         try:
             result = subprocess.run(
                 ["checkov", *file_args, "--config-file", trusted_config_path,
@@ -178,9 +194,6 @@ def _run_checkov(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
         except OSError as exc:
             logger.warning("[ai-pr-review] WARNING: checkov failed to start: %s", exc)
             return []
-    finally:
-        with contextlib.suppress(OSError):
-            scratch_cm.__exit__(None, None, None)
 
     if result.returncode >= 2:
         logger.warning(
@@ -224,6 +237,12 @@ def _run_checkov(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
             check_id = item.get("check_id") or ""
             check_name = item.get("check_id_name") or item.get("resource") or "policy violation"
             repo_file = _repo_relative_path(item, workspace)
+            if not repo_file:
+                logger.warning(
+                    "[ai-pr-review] WARNING: checkov result %s has no path inside the workspace; dropped.",
+                    check_id,
+                )
+                continue
             line_range = item.get("file_line_range") or []
             line = line_range[0] if line_range else 1
             guideline = item.get("guideline") or ""
