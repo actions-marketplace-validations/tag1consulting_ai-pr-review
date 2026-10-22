@@ -40,6 +40,16 @@ _AZURE_JSON_KEY_RE = re.compile(
     r'"\$schema"\s*:\s*"[^"]*schema\.management\.azure\.com', re.MULTILINE
 )
 
+# Content of the trusted checkov config (#739, #1102). Checkov rejects a
+# config file that is not a YAML mapping, so a comment-only file made every
+# run exit 2 with no scan. `quiet: true` is a valid mapping and repeats a
+# flag that the command line already passes. It must not name any option that
+# loads code or data from the workspace.
+# Environment variable prefixes that checkov reads as options. They are not
+# passed on, so the host environment cannot change what checkov scans.
+_DROPPED_ENV_PREFIXES = ("CKV_", "BC_", "PRISMA_")
+_TRUSTED_CONFIG = "# Trusted config for ai-pr-review; see #739 and #1102.\nquiet: true\n"
+
 # Checkov high-severity check_id prefixes
 _HIGH_PREFIX_RE = re.compile(r"^(CKV2_|CKV_SECRET_)")
 
@@ -80,6 +90,21 @@ def _is_iac_file(path: str) -> bool:
     return False
 
 
+def _repo_relative_path(item: dict[str, object], workspace: str) -> str:
+    """Return the finding path relative to the workspace.
+
+    The run starts outside the workspace (#1102), so checkov's own
+    `repo_file_path` no longer holds a workspace-relative path. Use the
+    absolute path when it lies inside the workspace, else the old field.
+    """
+    abs_path = item.get("file_abs_path")
+    if isinstance(abs_path, str) and abs_path:
+        rel = os.path.relpath(abs_path, workspace)
+        if not rel.startswith(".."):
+            return rel
+    return str(item.get("repo_file_path") or "").lstrip("/")
+
+
 def _run_checkov(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
     """Run checkov on changed IaC files and return Finding instances."""
     candidate_files = changed_files.terraform + changed_files.iac + changed_files.dockerfile
@@ -96,28 +121,47 @@ def _run_checkov(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
         logger.warning("[ai-pr-review] WARNING: checkov not found; skipping.")
         return []
 
+    workspace = os.getcwd()
     file_args: list[str] = []
     for f in target_files:
-        file_args += ["--file", f]
+        file_args += ["--file", os.path.abspath(f)]
 
-    # Never let checkov auto-discover .checkov.yaml/.checkov.yml from the
+    # Never let checkov read .checkov.yaml/.checkov.yml or a baseline from the
     # analyzed workspace: the workspace may be untrusted fork-PR content
     # checked out under pull_request_target (#739), and that config can set
     # `external-checks-dir` to import arbitrary Python check modules from the
-    # repo. An explicit --config-file always takes priority over checkov's
-    # own auto-discovery, so pointing it at a fresh, empty file guarantees no
-    # workspace config is ever honored, regardless of trust context.
+    # repo. An explicit --config-file does NOT stop this. Checkov 3.3.30
+    # merges the explicit file with the default files it finds in the current
+    # directory and in the home directory (checked in #1102). So the run
+    # starts in an empty scratch directory, with HOME set to the same empty
+    # directory, and the scanned files go in by absolute path. The trusted
+    # config only keeps the config-file option well formed.
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yaml", prefix="checkov-trusted-", delete=False
-        ) as trusted_config:
-            trusted_config.write("# Deliberately empty; see #739.\n")
-            trusted_config_path = trusted_config.name
+        scratch_cm = tempfile.TemporaryDirectory(prefix="checkov-trusted-")
+        scratch = scratch_cm.__enter__()
     except OSError as exc:
         logger.warning("[ai-pr-review] WARNING: could not create trusted checkov config: %s; skipping.", exc)
         return []
 
     try:
+        trusted_config_path = os.path.join(scratch, "trusted-config.yaml")
+        try:
+            Path(trusted_config_path).write_text(_TRUSTED_CONFIG)
+        except OSError as exc:
+            logger.warning("[ai-pr-review] WARNING: could not create trusted checkov config: %s; skipping.", exc)
+            return []
+        run_dir = os.path.join(scratch, "cwd")
+        try:
+            os.mkdir(run_dir)
+        except OSError as exc:
+            logger.warning("[ai-pr-review] WARNING: could not create checkov work directory: %s; skipping.", exc)
+            return []
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith(_DROPPED_ENV_PREFIXES)
+        }
+        env["HOME"] = run_dir
         try:
             result = subprocess.run(
                 ["checkov", *file_args, "--config-file", trusted_config_path,
@@ -125,6 +169,8 @@ def _run_checkov(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
                 capture_output=True,
                 text=True,
                 timeout=_TIMEOUT_SECS,
+                cwd=run_dir,
+                env=env,
             )
         except subprocess.TimeoutExpired as exc:
             logger.warning("[ai-pr-review] WARNING: checkov timed out after %ss; skipping.", exc.timeout)
@@ -134,7 +180,7 @@ def _run_checkov(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
             return []
     finally:
         with contextlib.suppress(OSError):
-            os.unlink(trusted_config_path)
+            scratch_cm.__exit__(None, None, None)
 
     if result.returncode >= 2:
         logger.warning(
@@ -177,7 +223,7 @@ def _run_checkov(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
                 continue
             check_id = item.get("check_id") or ""
             check_name = item.get("check_id_name") or item.get("resource") or "policy violation"
-            repo_file = (item.get("repo_file_path") or "").lstrip("/")
+            repo_file = _repo_relative_path(item, workspace)
             line_range = item.get("file_line_range") or []
             line = line_range[0] if line_range else 1
             guideline = item.get("guideline") or ""
