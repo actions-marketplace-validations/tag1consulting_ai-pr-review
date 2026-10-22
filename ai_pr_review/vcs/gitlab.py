@@ -320,7 +320,13 @@ class GitLabProvider:
                 f"GET /user: HTTP {resp.status_code}: {resp.text[:200]}"
             )
             return None
-        data = resp.json() or {}
+        try:
+            data = resp.json() or {}
+        except ValueError:
+            self._errors.append("GET /user: response was not JSON")
+            return None
+        if not isinstance(data, dict):
+            return None
         username = data.get("username") or None
         if isinstance(username, str):
             self._resolved_bot_username = username
@@ -344,7 +350,9 @@ class GitLabProvider:
             return []
 
         bot_username = self._get_bot_username()
-        if bot_username == _BOT_IDENTITY_AUTH_FAILED:
+        if bot_username is None or bot_username == _BOT_IDENTITY_AUTH_FAILED:
+            # Unknown identity: a forged inline marker must not become a prior
+            # thread, so every finding classifies as new this cycle.
             return []
 
         try:
@@ -1002,13 +1010,13 @@ class GitLabProvider:
             # recorded in self._errors. Abort rather than silently degrading
             # the author-match check.
             return StaleResult(errors=tuple(self._errors))
-        # bot_username may be None (network/parse failure) — that's acceptable
-        # for marker-only gating, but we warn so operators can spot a bad PAT.
         if bot_username is None:
+            # Unknown identity (network or parse failure): resolve nothing
+            # rather than trusting an inline marker that any commenter can type.
             self._errors.append(
-                "resolve_stale: bot username unresolved; falling back to "
-                "marker-only gating"
+                "resolve_stale: bot username unresolved; no thread resolved"
             )
+            return StaleResult(errors=tuple(self._errors))
 
         discussions = self._fetch_discussions()
         resolved = 0
