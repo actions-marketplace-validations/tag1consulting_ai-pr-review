@@ -50,9 +50,15 @@ _ALLOWED_ENV_NAMES = frozenset({
     "PHPRC", "PHP_INI_SCAN_DIR", "LD_LIBRARY_PATH",
 })
 # PHP version managers (asdf, mise, phpenv, phpbrew) find the installed php
-# through their own variables or through paths under the real HOME. They are
-# runner settings, not workspace content, so they pass.
-_VERSION_MANAGER_PREFIXES = ("ASDF_", "MISE_", "PHPENV_", "PHPBREW_")
+# through their own variables or through paths under the real HOME. Only named
+# path variables pass, never a prefix, because a prefix would also pass tokens
+# such as MISE_GITHUB_TOKEN.
+_VERSION_MANAGER_ENV_NAMES = frozenset({
+    "ASDF_DIR", "ASDF_DATA_DIR", "ASDF_CONFIG_FILE",
+    "MISE_DATA_DIR", "MISE_CONFIG_DIR", "MISE_CACHE_DIR",
+    "PHPENV_ROOT", "PHPENV_VERSION",
+    "PHPBREW_ROOT", "PHPBREW_HOME", "PHPBREW_PATH", "PHPBREW_PHP",
+})
 # Data directory each manager falls back to under the real HOME. Pinned when
 # HOME is replaced, so a shim still finds its installed versions.
 _VERSION_MANAGER_HOME_DEFAULTS = (
@@ -66,7 +72,7 @@ def _phpstan_env(home: str) -> dict[str, str]:
     env = {
         k: v
         for k, v in os.environ.items()
-        if k in _ALLOWED_ENV_NAMES or k.startswith("LC_") or k.startswith(_VERSION_MANAGER_PREFIXES)
+        if k in _ALLOWED_ENV_NAMES or k in _VERSION_MANAGER_ENV_NAMES or k.startswith("LC_")
     }
     real_home = os.environ.get("HOME")
     if real_home:
@@ -78,16 +84,19 @@ def _phpstan_env(home: str) -> dict[str, str]:
     return env
 
 
-# With no project classes loaded, phpstan reports every symbol outside the
-# changed files as not found. Those are artifacts of the isolation, so they are
-# dropped. A message check covers phpstan versions with no identifier field.
-_UNRESOLVED_MESSAGE_RE = re.compile(r"not found\.|unknown class|unknown (?:parent )?class", re.IGNORECASE)
+# With no project classes loaded, phpstan reports every class, function, or
+# constant outside the changed files as not found. Those are artifacts of the
+# isolation, so they are dropped. Other `.notFound` identifiers (method,
+# property, array offset) are real bugs on types phpstan knows, so they stay.
+# The message check runs only when phpstan gives no identifier (old versions).
+_UNRESOLVED_IDENTIFIERS = frozenset({"class.notFound", "function.notFound", "constant.notFound"})
+_UNRESOLVED_MESSAGE_RE = re.compile(r"^(?:Instantiated class|Class|Function|Constant) \S+ not found\.|unknown class")
 
 
 def _is_unresolved_symbol(msg: dict[str, object]) -> bool:
     identifier = msg.get("identifier")
-    if isinstance(identifier, str) and identifier.endswith(".notFound"):
-        return True
+    if isinstance(identifier, str):
+        return identifier in _UNRESOLVED_IDENTIFIERS
     message = msg.get("message")
     return isinstance(message, str) and bool(_UNRESOLVED_MESSAGE_RE.search(message))
 

@@ -361,6 +361,8 @@ class TestRunPhpstanFindings:
             {"message": "Function helper_fn not found.", "line": 3, "identifier": "function.notFound"},
             {"message": "Call to method f() on an unknown class App\\Other.", "line": 3},
             {"message": "Method A::g() should return int but returns string.", "line": 5, "identifier": "return.type"},
+            {"message": "Call to an undefined method A::h().", "line": 6, "identifier": "method.notFound"},
+            {"message": "Offset 'x' does not exist on array. Value not found.", "line": 7, "identifier": "offsetAccess.notFound"},
         ]}}, "errors": []})
         with (
             patch("ai_pr_review.analyzers.native.phpstan.shutil.which", return_value="/usr/bin/phpstan"),
@@ -368,7 +370,7 @@ class TestRunPhpstanFindings:
         ):
             mock_run.return_value = MagicMock(returncode=0, stdout=out, stderr="")
             findings = _run_phpstan(cf, Path("/dev/null"))
-        assert [x.line for x in findings] == [5]
+        assert [x.line for x in findings] == [5, 6, 7]
 
     def test_php_runtime_and_version_manager_env_pass(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -378,7 +380,8 @@ class TestRunPhpstanFindings:
         monkeypatch.setenv("HOME", str(real_home))
         monkeypatch.setenv("PHPRC", "/etc/php")
         monkeypatch.setenv("ASDF_DIR", "/opt/asdf")
-        monkeypatch.setenv("MISE_SHIMS", "1")
+        monkeypatch.setenv("MISE_DATA_DIR", "/opt/mise")
+        monkeypatch.setenv("MISE_GITHUB_TOKEN", "x")
         monkeypatch.delenv("ASDF_DATA_DIR", raising=False)
         monkeypatch.setenv("SECRET_TOKEN", "x")
         f = tmp_path / "MyService.php"
@@ -393,7 +396,8 @@ class TestRunPhpstanFindings:
         env = mock_run.call_args.kwargs["env"]
         assert env["PHPRC"] == "/etc/php"
         assert env["ASDF_DIR"] == "/opt/asdf"
-        assert env["MISE_SHIMS"] == "1"
+        assert env["MISE_DATA_DIR"] == "/opt/mise"
+        assert "MISE_GITHUB_TOKEN" not in env
         assert env["ASDF_DATA_DIR"] == str(real_home / ".asdf")
         assert env["HOME"] != str(real_home)
         assert "SECRET_TOKEN" not in env
