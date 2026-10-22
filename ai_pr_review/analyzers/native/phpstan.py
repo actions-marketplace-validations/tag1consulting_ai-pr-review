@@ -85,12 +85,15 @@ def _phpstan_env(home: str) -> dict[str, str]:
 
 
 # With no project classes loaded, phpstan reports every class, function, or
-# constant outside the changed files as not found. Those are artifacts of the
+# constant outside the changed files (including parents, interfaces, traits, and attributes) as not found. Those are artifacts of the
 # isolation, so they are dropped. Other `.notFound` identifiers (method,
 # property, array offset) are real bugs on types phpstan knows, so they stay.
 # The message check runs only when phpstan gives no identifier (old versions).
-_UNRESOLVED_IDENTIFIERS = frozenset({"class.notFound", "function.notFound", "constant.notFound"})
-_UNRESOLVED_MESSAGE_RE = re.compile(r"^(?:Instantiated class|Class|Function|Constant) \S+ not found\.|unknown class")
+_UNRESOLVED_IDENTIFIERS = frozenset({
+    "class.notFound", "function.notFound", "constant.notFound",
+    "interface.notFound", "trait.notFound", "attribute.notFound",
+})
+_UNRESOLVED_MESSAGE_RE = re.compile(r"^(?:Instantiated class|Class|Function|Constant) \S+ not found\.|unknown (?:class|interface|trait)|Attribute class \S+ does not exist\.")
 
 
 def _is_unresolved_symbol(msg: dict[str, object]) -> bool:
