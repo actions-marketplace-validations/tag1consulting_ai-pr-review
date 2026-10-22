@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -245,7 +246,10 @@ class TestTrustedConfigContent:
         assert cmd[cmd.index("--file") + 1] == str(tmp_path / "main.tf")
 
 
-@pytest.mark.skipif(shutil.which("checkov") is None, reason="checkov is not installed")
+@pytest.mark.skipif(
+    shutil.which("checkov") is None and not os.environ.get("AI_REQUIRE_CHECKOV"),
+    reason="checkov is not installed",
+)
 class TestRealCheckov:
     """Run the real checkov binary. These tests need no network, but checkov
     prints a warning when it cannot reach its guideline service."""
