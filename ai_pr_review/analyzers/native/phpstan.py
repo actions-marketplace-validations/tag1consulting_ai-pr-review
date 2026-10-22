@@ -46,17 +46,50 @@ _ALLOWED_ENV_NAMES = frozenset({
     "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
     "http_proxy", "https_proxy", "no_proxy",
     "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
+    # PHP runtime settings, so a runner-provided php still starts.
+    "PHPRC", "PHP_INI_SCAN_DIR", "LD_LIBRARY_PATH",
 })
+# PHP version managers (asdf, mise, phpenv, phpbrew) find the installed php
+# through their own variables or through paths under the real HOME. They are
+# runner settings, not workspace content, so they pass.
+_VERSION_MANAGER_PREFIXES = ("ASDF_", "MISE_", "PHPENV_", "PHPBREW_")
+# Data directory each manager falls back to under the real HOME. Pinned when
+# HOME is replaced, so a shim still finds its installed versions.
+_VERSION_MANAGER_HOME_DEFAULTS = (
+    ("ASDF_DATA_DIR", ".asdf"),
+    ("PHPENV_ROOT", ".phpenv"),
+    ("MISE_DATA_DIR", ".local/share/mise"),
+)
 
 
 def _phpstan_env(home: str) -> dict[str, str]:
     env = {
         k: v
         for k, v in os.environ.items()
-        if k in _ALLOWED_ENV_NAMES or k.startswith("LC_")
+        if k in _ALLOWED_ENV_NAMES or k.startswith("LC_") or k.startswith(_VERSION_MANAGER_PREFIXES)
     }
+    real_home = os.environ.get("HOME")
+    if real_home:
+        for name, rel in _VERSION_MANAGER_HOME_DEFAULTS:
+            candidate = os.path.join(real_home, rel)
+            if name not in env and os.path.isdir(candidate):
+                env[name] = candidate
     env["HOME"] = home
     return env
+
+
+# With no project classes loaded, phpstan reports every symbol outside the
+# changed files as not found. Those are artifacts of the isolation, so they are
+# dropped. A message check covers phpstan versions with no identifier field.
+_UNRESOLVED_MESSAGE_RE = re.compile(r"not found\.|unknown class|unknown (?:parent )?class", re.IGNORECASE)
+
+
+def _is_unresolved_symbol(msg: dict[str, object]) -> bool:
+    identifier = msg.get("identifier")
+    if isinstance(identifier, str) and identifier.endswith(".notFound"):
+        return True
+    message = msg.get("message")
+    return isinstance(message, str) and bool(_UNRESOLVED_MESSAGE_RE.search(message))
 
 
 def _severity_for_level(level: str) -> Literal["High", "Medium", "Low"]:
@@ -103,7 +136,7 @@ def _run_phpstan(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
     # this job. The run therefore starts in an empty scratch directory with HOME
     # set to it, the trusted config sits inside it, and the files go in by
     # absolute path. The cost is that the project's own classes are not
-    # resolved, so a run may report fewer findings. Verified against a hostile
+    # resolved, so "not found" messages are dropped from the output. Verified against a hostile
     # `vendor/autoload.php`: from the workspace it ran, from an empty directory
     # it did not.
     try:
@@ -198,7 +231,7 @@ def _run_phpstan(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
             if not isinstance(msg, dict):
                 continue
             message = msg.get("message")
-            if not message:
+            if not message or _is_unresolved_symbol(msg):
                 continue
             line = msg.get("line") or 1
 

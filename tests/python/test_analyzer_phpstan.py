@@ -352,6 +352,52 @@ class TestRunPhpstanFindings:
         )
         assert not Path(configured_path).exists()
 
+    def test_unresolved_symbol_messages_dropped(self, tmp_path: Path) -> None:
+        f = tmp_path / "MyService.php"
+        f.write_text("<?php\n")
+        cf = _make_cf([str(f)])
+        out = json.dumps({"files": {str(f): {"errors": 4, "messages": [
+            {"message": "Instantiated class App\\Other not found.", "line": 3, "identifier": "class.notFound"},
+            {"message": "Function helper_fn not found.", "line": 3, "identifier": "function.notFound"},
+            {"message": "Call to method f() on an unknown class App\\Other.", "line": 3},
+            {"message": "Method A::g() should return int but returns string.", "line": 5, "identifier": "return.type"},
+        ]}}, "errors": []})
+        with (
+            patch("ai_pr_review.analyzers.native.phpstan.shutil.which", return_value="/usr/bin/phpstan"),
+            patch("ai_pr_review.analyzers.native.phpstan.subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout=out, stderr="")
+            findings = _run_phpstan(cf, Path("/dev/null"))
+        assert [x.line for x in findings] == [5]
+
+    def test_php_runtime_and_version_manager_env_pass(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        real_home = tmp_path / "home"
+        (real_home / ".asdf").mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(real_home))
+        monkeypatch.setenv("PHPRC", "/etc/php")
+        monkeypatch.setenv("ASDF_DIR", "/opt/asdf")
+        monkeypatch.setenv("MISE_SHIMS", "1")
+        monkeypatch.delenv("ASDF_DATA_DIR", raising=False)
+        monkeypatch.setenv("SECRET_TOKEN", "x")
+        f = tmp_path / "MyService.php"
+        f.write_text("<?php\n")
+        cf = _make_cf([str(f)])
+        with (
+            patch("ai_pr_review.analyzers.native.phpstan.shutil.which", return_value="/usr/bin/phpstan"),
+            patch("ai_pr_review.analyzers.native.phpstan.subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout='{"files":{},"errors":[]}', stderr="")
+            _run_phpstan(cf, Path("/dev/null"))
+        env = mock_run.call_args.kwargs["env"]
+        assert env["PHPRC"] == "/etc/php"
+        assert env["ASDF_DIR"] == "/opt/asdf"
+        assert env["MISE_SHIMS"] == "1"
+        assert env["ASDF_DATA_DIR"] == str(real_home / ".asdf")
+        assert env["HOME"] != str(real_home)
+        assert "SECRET_TOKEN" not in env
+
     def test_remediation_references_phpstan(self, tmp_path: Path) -> None:
         findings = self._run_with_fixture("phpstan-error.json", tmp_path)
         assert "phpstan.org" in findings[0].remediation
@@ -447,7 +493,7 @@ class TestRealPhpstanHostileTree:
         marks.mkdir()
         ws = tmp_path / "ws"
         (ws / "vendor").mkdir(parents=True)
-        (ws / "a.php").write_text("<?php\nfunction f(int $x) { return undefined_fn($x); }\n")
+        (ws / "a.php").write_text("<?php\nfunction f(): int { return 'text'; }\n")
         (ws / "vendor" / "autoload.php").write_text(
             f"<?php file_put_contents('{marks}/autoload', 'ran');\n"
         )
@@ -456,4 +502,4 @@ class TestRealPhpstanHostileTree:
         monkeypatch.chdir(ws)
         findings = _run_phpstan(_make_cf(["a.php"]), Path("/dev/null"))
         assert list(marks.iterdir()) == []
-        assert findings, "phpstan did not report the undefined function"
+        assert findings, "phpstan did not report the return type error"
