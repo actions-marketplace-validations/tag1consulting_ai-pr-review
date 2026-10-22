@@ -7,11 +7,13 @@ object or array), and converts failed_checks to Finding instances.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
 import re
 import shutil
+import site
 import subprocess
 import tempfile
 from pathlib import Path
@@ -65,6 +67,10 @@ def _checkov_env(home: str) -> dict[str, str]:
         for k, v in os.environ.items()
         if k in _ALLOWED_ENV_NAMES or k.startswith("LC_")
     }
+    # A pip user install keeps checkov importable only through the real
+    # HOME. Pass the user base so it still works with the empty HOME.
+    with contextlib.suppress(Exception):  # a missing user base must not stop the run
+        env["PYTHONUSERBASE"] = site.getuserbase()
     env["HOME"] = home
     return env
 
@@ -203,6 +209,11 @@ def _run_checkov(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
         return []
 
     if not result.stdout.strip():
+        if result.returncode != 0:
+            logger.warning(
+                "[ai-pr-review] WARNING: checkov exited %d with no output; possible installation error. stderr: %s",
+                result.returncode, result.stderr[:200],
+            )
         return []
 
     try:

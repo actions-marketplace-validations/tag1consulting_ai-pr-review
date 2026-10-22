@@ -5,13 +5,19 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import site
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
 
-from ai_pr_review.analyzers.native.checkov import _TRUSTED_CONFIG, _is_iac_file, _run_checkov
+from ai_pr_review.analyzers.native.checkov import (
+    _TRUSTED_CONFIG,
+    _checkov_env,
+    _is_iac_file,
+    _run_checkov,
+)
 from ai_pr_review.manifest import ChangedFiles
 
 _FIXTURE_DIR = Path(__file__).parent.parent / "fixtures" / "checkov"
@@ -236,7 +242,7 @@ class TestTrustedConfigContent:
         env = kwargs["env"]
         assert isinstance(env, dict)
         assert env["HOME"] == kwargs["cwd"]
-        assert set(env) <= {"HOME", "PATH", "LANG", "TMPDIR", "TZ", "HTTPS_PROXY",
+        assert set(env) <= {"HOME", "PYTHONUSERBASE", "PATH", "LANG", "TMPDIR", "TZ", "HTTPS_PROXY",
                             "HTTP_PROXY", "NO_PROXY", "SSL_CERT_FILE", "SSL_CERT_DIR",
                             "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "http_proxy",
                             "https_proxy", "no_proxy"} | {k for k in env if k.startswith("LC_")}
@@ -247,7 +253,7 @@ class TestTrustedConfigContent:
 
 
 @pytest.mark.skipif(
-    shutil.which("checkov") is None and not os.environ.get("AI_REQUIRE_CHECKOV"),
+    shutil.which("checkov") is None and not os.environ.get("CHECKOV_REQUIRED_IN_TESTS"),
     reason="checkov is not installed",
 )
 class TestRealCheckov:
@@ -533,6 +539,26 @@ class TestRunCheckovFindings:
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             findings = _run_checkov(cf, Path("/dev/null"))
         assert findings == []
+
+    def test_exit_1_with_empty_stdout_logs_warning(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+        tf = tmp_path / "main.tf"
+        tf.write_text("resource \"x\" \"y\" {}\n")
+        cf = _make_cf([str(tf)], terraform=[str(tf)])
+        with (
+            patch("ai_pr_review.analyzers.native.checkov.shutil.which", return_value="/usr/bin/checkov"),
+            patch("ai_pr_review.analyzers.native.checkov.subprocess.run") as mock_run,
+            caplog.at_level("WARNING"),
+        ):
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="ModuleNotFoundError")
+            findings = _run_checkov(cf, Path("/dev/null"))
+        assert findings == []
+        assert "exited 1 with no output" in caplog.text
+
+    def test_user_base_is_passed_so_a_user_install_stays_importable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("PYTHONUSERBASE", raising=False)
+        env = _checkov_env("/scratch")
+        assert env["HOME"] == "/scratch"
+        assert env["PYTHONUSERBASE"] == site.getuserbase()
 
     def test_exitcode_2_returns_empty_with_warning(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
         tf = tmp_path / "main.tf"
