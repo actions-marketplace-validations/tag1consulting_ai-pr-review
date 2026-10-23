@@ -6,7 +6,6 @@ invokes phpstan, and converts its JSON output to Finding instances.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import os
@@ -37,6 +36,72 @@ _DEFAULT_LEVEL = "3"
 # non-container (direct-action) deployments, where this simply evaluates False.
 _BAKED_COMPOSER_AUTOLOAD = Path("/opt/composer/vendor/autoload.php")
 _BAKED_PHPSTAN_DRUPAL = Path("/opt/composer/vendor/mglaman/phpstan-drupal")
+
+
+# phpstan gets an allowlist environment. It runs PHP from untrusted files, so
+# the job credentials must not reach it. Only the search path, the locale, a
+# temp directory and the proxy and CA settings pass.
+_ALLOWED_ENV_NAMES = frozenset({
+    "PATH", "LANG", "TMPDIR", "TZ",
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+    "http_proxy", "https_proxy", "no_proxy",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
+    # PHP runtime settings, so a runner-provided php still starts.
+    "PHPRC", "PHP_INI_SCAN_DIR", "LD_LIBRARY_PATH",
+})
+# PHP version managers (asdf, mise, phpenv, phpbrew) find the installed php
+# through their own variables or through paths under the real HOME. Only named
+# path variables pass, never a prefix, because a prefix would also pass tokens
+# such as MISE_GITHUB_TOKEN.
+_VERSION_MANAGER_ENV_NAMES = frozenset({
+    "ASDF_DIR", "ASDF_DATA_DIR", "ASDF_CONFIG_FILE",
+    "MISE_DATA_DIR", "MISE_CONFIG_DIR", "MISE_CACHE_DIR",
+    "PHPENV_ROOT", "PHPENV_VERSION",
+    "PHPBREW_ROOT", "PHPBREW_HOME", "PHPBREW_PATH", "PHPBREW_PHP",
+})
+# Data directory each manager falls back to under the real HOME. Pinned when
+# HOME is replaced, so a shim still finds its installed versions.
+_VERSION_MANAGER_HOME_DEFAULTS = (
+    ("ASDF_DATA_DIR", ".asdf"),
+    ("PHPENV_ROOT", ".phpenv"),
+    ("MISE_DATA_DIR", ".local/share/mise"),
+)
+
+
+def _phpstan_env(home: str) -> dict[str, str]:
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k in _ALLOWED_ENV_NAMES or k in _VERSION_MANAGER_ENV_NAMES or k.startswith("LC_")
+    }
+    real_home = os.environ.get("HOME")
+    if real_home:
+        for name, rel in _VERSION_MANAGER_HOME_DEFAULTS:
+            candidate = os.path.join(real_home, rel)
+            if name not in env and os.path.isdir(candidate):
+                env[name] = candidate
+    env["HOME"] = home
+    return env
+
+
+# With no project classes loaded, phpstan reports every class, function, or
+# constant outside the changed files (including parents, interfaces, traits, and attributes) as not found. Those are artifacts of the
+# isolation, so they are dropped. Other `.notFound` identifiers (method,
+# property, array offset) are real bugs on types phpstan knows, so they stay.
+# The message check runs only when phpstan gives no identifier (old versions).
+_UNRESOLVED_IDENTIFIERS = frozenset({
+    "class.notFound", "function.notFound", "constant.notFound",
+    "interface.notFound", "trait.notFound", "attribute.notFound",
+})
+_UNRESOLVED_MESSAGE_RE = re.compile(r"^(?:Instantiated class|Class|Function|Constant) \S+ not found\.|unknown (?:class|interface|trait)|Attribute class \S+ does not exist\.")
+
+
+def _is_unresolved_symbol(msg: dict[str, object]) -> bool:
+    identifier = msg.get("identifier")
+    if isinstance(identifier, str):
+        return identifier in _UNRESOLVED_IDENTIFIERS
+    message = msg.get("message")
+    return isinstance(message, str) and bool(_UNRESOLVED_MESSAGE_RE.search(message))
 
 
 def _severity_for_level(level: str) -> Literal["High", "Medium", "Low"]:
@@ -75,39 +140,44 @@ def _run_phpstan(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
         )
         level = _DEFAULT_LEVEL
 
-    # Never let phpstan auto-discover phpstan.neon/phpstan.neon.dist from the
-    # analyzed workspace: the workspace may be untrusted fork-PR content
-    # checked out under pull_request_target (#739), and a config file's
-    # `bootstrapFiles`/`includes` entries are arbitrary PHP executed by this
-    # subprocess. `--configuration` always takes priority over PHPStan's own
-    # auto-discovery, so pointing it at an empty, freshly-created file
-    # guarantees no workspace config is ever honored, regardless of trust
-    # context. This intentionally drops the previous "consumer phpstan.neon
-    # drives everything" behavior; PHPSTAN_LEVEL now always applies.
+    # Never let phpstan read anything from the analyzed workspace: the workspace
+    # may be untrusted fork-PR content checked out under pull_request_target
+    # (#739). `--configuration` stops phpstan.neon auto-discovery, but phpstan
+    # also runs `vendor/autoload.php` from its current directory (and reads the
+    # `extra.phpstan` block of `composer.json` there), so a stranger's PHP ran in
+    # this job. The run therefore starts in an empty scratch directory with HOME
+    # set to it, the trusted config sits inside it, and the files go in by
+    # absolute path. The cost is that the project's own classes are not
+    # resolved, so "not found" messages are dropped from the output. Verified against a hostile
+    # `vendor/autoload.php`: from the workspace it ran, from an empty directory
+    # it did not.
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".neon", prefix="phpstan-trusted-", delete=False
-        ) as trusted_config:
-            trusted_config.write("# Deliberately empty; see #739.\n")
-            trusted_config_path = trusted_config.name
+        scratch_cm = tempfile.TemporaryDirectory(prefix="phpstan-cwd-", ignore_cleanup_errors=True)
     except OSError as exc:
         logger.warning("[ai-pr-review] WARNING: could not create trusted phpstan config: %s; skipping.", exc)
         return []
 
-    args = [
-        "phpstan", "analyse", "--error-format=json", "--no-progress", "--memory-limit=512M",
-        f"--configuration={trusted_config_path}", f"--level={level}",
-    ]
-    if _BAKED_PHPSTAN_DRUPAL.is_dir() and _BAKED_COMPOSER_AUTOLOAD.is_file():
-        args.append(f"--autoload-file={_BAKED_COMPOSER_AUTOLOAD}")
+    with scratch_cm as scratch:
+        trusted_config_path = os.path.join(scratch, "phpstan-trusted.neon")
+        try:
+            Path(trusted_config_path).write_text("# Deliberately empty; see #739.\n")
+        except OSError as exc:
+            logger.warning("[ai-pr-review] WARNING: could not create trusted phpstan config: %s; skipping.", exc)
+            return []
 
-    # `--` stops option parsing so an attacker-controlled changed-file path
-    # beginning with a dash (e.g. `--autoload-file=evil.php`) is treated as a
-    # path, not a flag. Matches the sibling analyzers (shellcheck, ruff, etc.).
-    args.append("--")
-    args += target_files
+        args = [
+            "phpstan", "analyse", "--error-format=json", "--no-progress", "--memory-limit=512M",
+            f"--configuration={trusted_config_path}", f"--level={level}",
+        ]
+        if _BAKED_PHPSTAN_DRUPAL.is_dir() and _BAKED_COMPOSER_AUTOLOAD.is_file():
+            args.append(f"--autoload-file={_BAKED_COMPOSER_AUTOLOAD}")
 
-    try:
+        # `--` stops option parsing so an attacker-controlled changed-file path
+        # beginning with a dash (e.g. `--autoload-file=evil.php`) is treated as a
+        # path, not a flag. Absolute paths also start with `/`, never with `-`.
+        args.append("--")
+        args += [os.path.abspath(f) for f in target_files]
+
         try:
             # List-form args, no shell=True: no shell to inject into. `level`
             # (the one env-derived value reaching args) is regex-validated to
@@ -118,6 +188,8 @@ def _run_phpstan(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
                 capture_output=True,
                 text=True,
                 timeout=_TIMEOUT_SECS,
+                cwd=scratch,
+                env=_phpstan_env(scratch),
             )
         except subprocess.TimeoutExpired as exc:
             logger.warning("[ai-pr-review] WARNING: phpstan timed out after %ss; skipping.", exc.timeout)
@@ -125,9 +197,6 @@ def _run_phpstan(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
         except OSError as exc:
             logger.warning("[ai-pr-review] WARNING: phpstan failed to start: %s", exc)
             return []
-    finally:
-        with contextlib.suppress(OSError):
-            os.unlink(trusted_config_path)
 
     if result.returncode >= 2:
         logger.warning(
@@ -174,7 +243,7 @@ def _run_phpstan(changed_files: ChangedFiles, diff_file: Path) -> list[Finding]:
             if not isinstance(msg, dict):
                 continue
             message = msg.get("message")
-            if not message:
+            if not message or _is_unresolved_symbol(msg):
                 continue
             line = msg.get("line") or 1
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -351,6 +352,60 @@ class TestRunPhpstanFindings:
         )
         assert not Path(configured_path).exists()
 
+    def test_unresolved_symbol_messages_dropped(self, tmp_path: Path) -> None:
+        f = tmp_path / "MyService.php"
+        f.write_text("<?php\n")
+        cf = _make_cf([str(f)])
+        out = json.dumps({"files": {str(f): {"errors": 4, "messages": [
+            {"message": "Instantiated class App\\Other not found.", "line": 3, "identifier": "class.notFound"},
+            {"message": "Function helper_fn not found.", "line": 3, "identifier": "function.notFound"},
+            {"message": "Call to method f() on an unknown class App\\Other.", "line": 3},
+            {"message": "Class A implements unknown interface B.", "line": 3, "identifier": "interface.notFound"},
+            {"message": "Class A uses unknown trait T.", "line": 3, "identifier": "trait.notFound"},
+            {"message": "Attribute class X does not exist.", "line": 3, "identifier": "attribute.notFound"},
+            {"message": "Class A uses unknown trait T.", "line": 3},
+            {"message": "Method A::g() should return int but returns string.", "line": 5, "identifier": "return.type"},
+            {"message": "Call to an undefined method A::h().", "line": 6, "identifier": "method.notFound"},
+            {"message": "Offset 'x' does not exist on array. Value not found.", "line": 7, "identifier": "offsetAccess.notFound"},
+        ]}}, "errors": []})
+        with (
+            patch("ai_pr_review.analyzers.native.phpstan.shutil.which", return_value="/usr/bin/phpstan"),
+            patch("ai_pr_review.analyzers.native.phpstan.subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout=out, stderr="")
+            findings = _run_phpstan(cf, Path("/dev/null"))
+        assert [x.line for x in findings] == [5, 6, 7]
+
+    def test_php_runtime_and_version_manager_env_pass(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        real_home = tmp_path / "home"
+        (real_home / ".asdf").mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(real_home))
+        monkeypatch.setenv("PHPRC", "/etc/php")
+        monkeypatch.setenv("ASDF_DIR", "/opt/asdf")
+        monkeypatch.setenv("MISE_DATA_DIR", "/opt/mise")
+        monkeypatch.setenv("MISE_GITHUB_TOKEN", "x")
+        monkeypatch.delenv("ASDF_DATA_DIR", raising=False)
+        monkeypatch.setenv("SECRET_TOKEN", "x")
+        f = tmp_path / "MyService.php"
+        f.write_text("<?php\n")
+        cf = _make_cf([str(f)])
+        with (
+            patch("ai_pr_review.analyzers.native.phpstan.shutil.which", return_value="/usr/bin/phpstan"),
+            patch("ai_pr_review.analyzers.native.phpstan.subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout='{"files":{},"errors":[]}', stderr="")
+            _run_phpstan(cf, Path("/dev/null"))
+        env = mock_run.call_args.kwargs["env"]
+        assert env["PHPRC"] == "/etc/php"
+        assert env["ASDF_DIR"] == "/opt/asdf"
+        assert env["MISE_DATA_DIR"] == "/opt/mise"
+        assert "MISE_GITHUB_TOKEN" not in env
+        assert env["ASDF_DATA_DIR"] == str(real_home / ".asdf")
+        assert env["HOME"] != str(real_home)
+        assert "SECRET_TOKEN" not in env
+
     def test_remediation_references_phpstan(self, tmp_path: Path) -> None:
         findings = self._run_with_fixture("phpstan-error.json", tmp_path)
         assert "phpstan.org" in findings[0].remediation
@@ -394,3 +449,65 @@ class TestBridgeIntegration:
             await run_analyzers(ChangedFiles(), "/dev/null")
 
         assert not called
+
+
+class TestWorkspaceIsolation:
+    def test_run_is_isolated_from_the_workspace(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("GITHUB_TOKEN", "secret")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "secret")
+        monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:3128")
+        (tmp_path / "a.php").write_text("<?php\n")
+        cf = _make_cf(["a.php"])
+        seen: dict[str, object] = {}
+
+        def fake_run(cmd: list[str], **kwargs: object) -> MagicMock:
+            seen["cmd"] = cmd
+            seen["kwargs"] = kwargs
+            run_cwd = Path(str(kwargs["cwd"]))
+            seen["entries"] = sorted(p.name for p in run_cwd.iterdir())
+            return MagicMock(returncode=0, stdout='{"files":{},"errors":[]}', stderr="")
+
+        with (
+            patch("ai_pr_review.analyzers.native.phpstan.shutil.which", return_value="/usr/bin/phpstan"),
+            patch("ai_pr_review.analyzers.native.phpstan.subprocess.run", side_effect=fake_run),
+        ):
+            _run_phpstan(cf, Path("/dev/null"))
+
+        kwargs = seen["kwargs"]
+        assert isinstance(kwargs, dict)
+        run_cwd = Path(str(kwargs["cwd"]))
+        assert not run_cwd.resolve().is_relative_to(tmp_path.resolve())
+        assert seen["entries"] == ["phpstan-trusted.neon"]
+        assert not run_cwd.exists()
+        env = kwargs["env"]
+        assert isinstance(env, dict)
+        assert env["HOME"] == str(run_cwd)
+        assert "GITHUB_TOKEN" not in env and "ANTHROPIC_API_KEY" not in env
+        assert env["HTTPS_PROXY"] == "http://proxy.example:3128"
+        cmd = seen["cmd"]
+        assert isinstance(cmd, list)
+        assert cmd[-1] == str(tmp_path / "a.php")
+
+
+@pytest.mark.skipif(shutil.which("phpstan") is None, reason="phpstan is not installed")
+class TestRealPhpstanHostileTree:
+    def test_workspace_autoload_and_config_do_not_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        marks = tmp_path / "marks"
+        marks.mkdir()
+        ws = tmp_path / "ws"
+        (ws / "vendor").mkdir(parents=True)
+        (ws / "a.php").write_text("<?php\nfunction f(): int { return 'text'; }\n")
+        (ws / "vendor" / "autoload.php").write_text(
+            f"<?php file_put_contents('{marks}/autoload', 'ran');\n"
+        )
+        (ws / "boot.php").write_text(f"<?php file_put_contents('{marks}/boot', 'ran');\n")
+        (ws / "phpstan.neon").write_text("parameters:\n    bootstrapFiles:\n        - boot.php\n")
+        monkeypatch.chdir(ws)
+        findings = _run_phpstan(_make_cf(["a.php"]), Path("/dev/null"))
+        assert list(marks.iterdir()) == []
+        assert findings, "phpstan did not report the return type error"
